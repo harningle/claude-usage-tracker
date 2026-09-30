@@ -1,0 +1,17 @@
+# Build output normally goes to %LOCALAPPDATA%\ClaudeUsageTracker.Build\<checkout-id>
+# (see Directory.Build.props). These entries catch anything that escapes that setting.
+# .gitignore does not stop Dropbox syncing; see AGENTS.md.
+[Bb]in/
+[Oo]bj/
+artifacts/
+TestResults/
+*_wpftmp.csproj
+
+# IDE state
+.vs/
+.idea/
+*.user
+*.suo
+
+# Claude Code
+.claude

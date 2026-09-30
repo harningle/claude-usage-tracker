@@ -1,0 +1,19 @@
+<Project>
+  <!--
+    The checkout lives in Dropbox, so every restore/build/test/publish output goes to a per-checkout
+    root outside the sync tree and outside the app's data root (%LOCALAPPDATA%\ClaudeUsageTracker).
+    ArtifactsPath must be set here, before the SDK reads it; a .targets file is too late.
+    The checkout ID is a stable hash of the lower-cased repository path.
+  -->
+  <PropertyGroup>
+    <CheckoutId>$([MSBuild]::StableStringHash($(MSBuildThisFileDirectory.ToLowerInvariant()), 'Sha256').Substring(0, 16))</CheckoutId>
+    <ArtifactsPath>$(LOCALAPPDATA)\ClaudeUsageTracker.Build\$(CheckoutId)</ArtifactsPath>
+    <!-- Microsoft.Testing.Platform otherwise resolves TestResults against the working directory, i.e. the checkout. -->
+    <TestingPlatformCommandLineArguments>$(TestingPlatformCommandLineArguments) --results-directory "$(ArtifactsPath)\TestResults\$(MSBuildProjectName)"</TestingPlatformCommandLineArguments>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

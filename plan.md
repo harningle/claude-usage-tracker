@@ -11,7 +11,7 @@ Use upstream commit [`588775e4540757443691fa1bcb33457315e05f86`](https://github.
 - Preserve upstream translations, licence notices and attribution. Omit telemetry and promotional prompts in both personal and public builds; document these intentional differences.
 - Personal delivery includes a self-contained build, local registration needed by notifications/startup, manual upgrade and integration cleanup. Installer, signing and automatic updates belong to the later public-release milestone; they are not abandoned or claimed complete.
 - No import of macOS Keychain or macOS app data. Existing native Windows CLI accounts can be linked through setup.
-- The repository has planning documents but no application. .NET SDK **10.0.401** and native Claude Code **2.1.285** are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools is present, but the MSVC x64/x86 component query returned no matches; NativeAOT prerequisites are not yet verified.
+- The repository has the Milestone 0 scaffold and ported pure logic, but no application behaviour yet. .NET SDK **10.0.401** and native Claude Code **2.1.285** are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools is present, but the MSVC x64/x86 component query returned no matches; NativeAOT prerequisites are not yet verified.
 
 ### Evidence limits
 
@@ -25,7 +25,7 @@ Without a Mac, visual references are SwiftUI source and upstream media, principa
 
 ### Projects and test seams
 
-Use **Core / App / Helper plus one Windows-targeted xUnit test project**. Core contains platform-independent usage models, calculations, parsers, statusline formatting and shared contracts. App contains WPF, providers, persistence and Windows integration. Helper references only Core and remains small enough for NativeAOT.
+Use **Core / App / Helper plus one Windows-targeted xUnit test project**. Core contains platform-independent usage models, calculations, parsers, statusline formatting and shared contracts. App contains WPF, providers, persistence and Windows integration. Helper references only Core and remains small enough for NativeAOT. Core and Helper target `net10.0`, so Core stays usable by the NativeAOT Helper. App and the test project target `net10.0-windows10.0.19041.0`: the Windows App SDK needs a versioned Windows target, and a test project can reference App only if its Windows target is at least as high.
 
 Use lightweight MVVM. Keep interfaces for usage providers and credential storage. Use `HttpMessageHandler` and `TimeProvider` as HTTP/time test seams, temporary directories for file tests and concrete CLI/storage services until a demonstrated test need justifies another interface. Add a narrow browser-request adapter only if the authentication spike requires two transports; do not put WebView2 dependencies in Core or Helper.
 
@@ -147,7 +147,7 @@ For retained HTTP, start the listener before installing owned hooks and remove o
 
 Include the network log view, but record allowlisted metadata only: operation name, method, sanitised route, status, timing, transport and error category. Never persist raw request/response bodies, prompts, headers, cookies, tokens or hook secret paths. Add fixture-based redaction tests and a clear-log action; export contains only the same safe fields.
 
-Keep build outputs outside Dropbox. Configure the .NET artifacts output root under `%LOCALAPPDATA%\ClaudeUsageTracker\build\<checkout-id>` for restore/build/test/publish, with project/configuration separation. Document the same setting for CLI and IDE builds. `.gitignore` alone does not stop Dropbox syncing `bin`/`obj`; verify no generated directories are created in the repository. [Artifacts output layout](https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output)
+Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDATA%\ClaudeUsageTracker`, so removing user data never deletes build output and cleaning builds never happens beside secrets. `Directory.Build.props` sets `ArtifactsPath` to `%LOCALAPPDATA%\ClaudeUsageTracker.Build\<checkout-id>` for restore/build/test/publish, with project/configuration separation; it must be set there, not in a `.targets` file, because the SDK reads it early. `<checkout-id>` is the first 16 hex characters of MSBuild's SHA-256 `StableStringHash` of the lower-cased repository path. The same setting applies to CLI and IDE builds. Microsoft.Testing.Platform resolves its default `TestResults` folder against the working directory, so the props file also passes an absolute `--results-directory` under the artifacts root. Visual Studio's `.vs` folder cannot be relocated: git-ignore it and mark it ignored by Dropbox with `Set-Content -Path .vs -Stream com.dropbox.ignored -Value 1`. `.gitignore` alone does not stop Dropbox syncing; verify that restore/build/test create no generated folders in the repository. [Artifacts output layout](https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output)
 
 ## 3. Implementation sequence and acceptance gates
 
@@ -158,7 +158,7 @@ Keep build outputs outside Dropbox. Configure the .NET artifacts output root und
 - Classify macOS window/Keychain tests as requiring Windows equivalents, promotional-reminder tests as deliberately excluded and HTTP-only tests as conditional on transport. Do not claim all 16 suites were mechanically ported; link each original case to a translated test, a later Windows acceptance test or a reasoned exclusion. Port pure pace/calculation cases now; schedule new ownership/rotation/race tests with Milestone 3 and transport/integration tests with Milestone 5 rather than implementing those systems during scaffolding.
 - Record the installed Claude Code version and public source/documentation references without inspecting or printing private credentials. The first live credential read belongs in the user's app sign-in flow.
 
-**Acceptance:** the skeleton builds, applicable deterministic baseline tests pass, remaining platform cases are traceable, and restore/build/test produce no Dropbox-managed `bin`/`obj` outputs.
+**Acceptance:** the skeleton builds, applicable deterministic baseline tests pass, remaining platform cases are traceable, and restore/build/test create no generated folders (`bin`, `obj`, `TestResults` or IDE state) in the Dropbox checkout.
 
 ### Milestone 1 - Resolve platform and authentication risks
 

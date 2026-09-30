@@ -26,15 +26,17 @@ Build a faithful Windows port of the upstream app, preserving its useful behavio
 
 ## Build and repository hygiene
 
-The repository currently has planning documents, not a buildable solution. There are no validated application build/test commands yet. Prerequisites and scaffold choices are recorded in the plan; verify the environment with:
+The solution is `ClaudeUsageTracker.slnx`: `src/ClaudeUsageTracker.Core` (`net10.0`), `src/ClaudeUsageTracker.App` (WPF, `net10.0-windows10.0.19041.0`), `src/ClaudeUsageTracker.Helper` (`net10.0`, NativeAOT) and `tests/ClaudeUsageTracker.Tests` (xUnit v3 on Microsoft.Testing.Platform, `net10.0-windows10.0.19041.0`). `global.json` pins SDK 10.0.401 (patch roll-forward) and selects the Microsoft.Testing.Platform runner. Validated from the repository root on 2026-09-30:
 
 ```powershell
-dotnet --list-sdks
+dotnet restore ClaudeUsageTracker.slnx
+dotnet build ClaudeUsageTracker.slnx
+dotnet test --solution ClaudeUsageTracker.slnx
 ```
 
-When scaffolding lands, replace this paragraph with the actual validated restore/build/test/publish commands and solution paths. Pin the SDK and keep NativeAOT toolchain requirements explicit. Do not advertise planned commands as passing checks.
+Publishing is not validated. NativeAOT publishing of the helper needs the MSVC x64 toolchain and Windows SDK, which Milestone 1 verifies. Do not advertise publish commands as passing checks until then.
 
-This checkout is in Dropbox. Keep all restore/build/test/publish artifacts outside the sync tree using the plan's external artifacts layout, including IDE builds. `.gitignore` does not exclude files from Dropbox sync. Do not create repository-local Python environments.
+This checkout is in Dropbox. `Directory.Build.props` sends all restore/build/test/publish output, including IDE builds and test results, to `%LOCALAPPDATA%\ClaudeUsageTracker.Build\<checkout-id>`, outside both the sync tree and the app's data root. Keep it that way. `.gitignore` does not exclude files from Dropbox sync, so check that no `bin`, `obj`, `TestResults` or similar folder appears in the checkout. `.vs\` is marked ignored by Dropbox; if it is recreated, mark it again with `Set-Content -Path .vs -Stream com.dropbox.ignored -Value 1`. Do not create repository-local Python environments.
 
 ## Working conventions
 
