@@ -9,14 +9,14 @@ Evidence types, kept separate throughout:
 - **Live account**: exercised against a real account through the app.
 - **Source/image**: compared only against upstream source or media.
 
-Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based.
+Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based. Milestone 1 experiment results, including one live-account observation, are in [milestone-1.md](milestone-1.md); they come from spike harnesses, not app features.
 
 ## Environment and references
 
 Recorded on 2026-09-30.
 
 - Upstream licence: MIT, "Copyright (c) 2025 Claude Usage Tracker Contributors", preserved in [LICENSE](../LICENSE).
-- Claude Code 2.1.285, native install at `%USERPROFILE%\.local\bin\claude.exe`, from `claude --version`. No credential or configuration files were read.
+- Claude Code 2.1.285, native install at `%USERPROFILE%\.local\bin\claude.exe`, from `claude --version`. No credential or configuration files were read. By Milestone 1 (2026-09-30) it had auto-updated to 2.1.286, the version all Milestone 1 measurements use.
 - .NET SDK 10.0.401, pinned in [global.json](../global.json) with patch roll-forward. Tests use xUnit v3 4.0.1 on Microsoft.Testing.Platform.
 - Public references: [Claude Code statusline](https://code.claude.com/docs/en/statusline), [Claude Code hooks](https://code.claude.com/docs/en/hooks), [.NET artifacts output layout](https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output), [Microsoft.Testing.Platform configuration](https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-config). Further references are in plan.md.
 
@@ -36,13 +36,13 @@ Recorded on 2026-09-30.
 | Activity HUD events, tool mapping, session reducer | 0 | Core logic ported; no transport or window | Automated | Difference 5; transport gate in Milestone 1, stricter ordering in Milestone 5 |
 | Launcher slugs | 0 | Naming ported | Automated | Difference 9; executable aliases in Milestone 5 |
 | Supported languages | 0 | List ported | Automated | Explicit `zh-cn` to `zh-Hans` mapping; resources in Milestone 6; flag emoji rendering on Windows unverified |
-| Tray, popover, settings window, setup wizard | 2 | Not started | None | Plan section 2 |
-| CLI linking and read-only OAuth usage | 1 gate, then 2 | Not started | None | Plan section 2 |
-| Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Not started | None | Plan section 2 |
+| Tray, popover, settings window, setup wizard | 1 spike, then 2 | Spike: path-derived tray GUIDs, overflow and taskbar clicks, icon rectangles, Explorer-restart re-add and a move (new identity; placement reset) verified; no app UI | Automated harness; manual | Plan section 2; unsigned GUID reuse re-binds rather than fails on Windows 11 26200 |
+| CLI linking and read-only OAuth usage | 1 gate, then 2 | Gate passed: `/api/oauth/usage` returned usage for one Pro account (2026-09-30); linking not started | Live account (spike probe) | Difference 11 |
+| Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Gate decided: claude.ai uses same-origin WebView2 fetch (replay challenged, browser 200); Console uses `HttpClient` at `platform.claude.com` (replay 200). 30-minute renewal soak and two-account isolation passed | Live account (manual, spike harness) | Plan section 2 |
 | Profiles, secure storage, credential ownership | 2 and 3 | Not started | None | DPAPI files replace Keychain |
 | History persistence, charts, CSV/JSON export, network log | 3 | Not started | None | Redacted log only |
-| Notifications, automation, safe CLI switching | 1 spike, then 4 | Not started | None | Plan section 2 |
-| Launchers, statusline, hooks and HUD | 1 gate, then 5 | Not started | None | Secret-free statusline; transport by measurement |
+| Notifications, automation, safe CLI switching | 1 spike, then 4 | Spike: unpackaged self-contained registration and posting (one extracted runtime DLL), cold activation and running-instance clicks verified | Automated harness; manual | Plan section 2; after a move, notifications posted from the old path do nothing when clicked, and their registration stays until cleaned |
+| Launchers, statusline, hooks and HUD | 1 gate, then 5 | NativeAOT helper timing passed; hook transport decided: HTTP for all eight events as upstream; the SessionStart entry is inert on CLI 2.1.286, as it is for upstream | Automated harness (real CLI, fake Messages API); live account (40 Haiku tool calls, stopped listener) | Secret-free statusline; transport by measurement |
 | Localisation, accessibility, packaging | 6 and 7 | Not started | None | Plan section 3 |
 
 ## Deliberate differences so far
@@ -57,6 +57,7 @@ Recorded on 2026-09-30.
 8. **Bare origin URLs.** A base URL whose only path is `/` builds without the trailing slash, because `System.Uri` cannot distinguish the two.
 9. **Launcher ownership from a manifest.** Slug collisions are checked against an owner map, which the Milestone 5 install manifest will provide, instead of a marker line in a shell script.
 10. **Unreadable Codex credentials are never replaced.** Codex `auth.json` serialisation creates a new document only when there is no existing content. Existing content that is malformed or not a JSON object throws, rather than being silently replaced by a new document as upstream does.
+11. **CLI profiles poll the read-only usage endpoint.** Upstream's active CLI profile posts a one-token Haiku request to `/v1/messages` on every refresh and reads rate-limit headers (up to 2,880 generating requests a day at 30 seconds); its background profiles use `GET /api/oauth/usage`, which upstream's comment calls disabled. The port uses `/api/oauth/usage` for all CLI profiles and never falls back to `/v1/messages`. Verified 2026-09-30 with Claude Code 2.1.286 and a Pro account: 7 of 7 requests returned 200 with the claude.ai usage shape, no throttling seen at a 30-second cadence (spike probe; implementation in Milestone 2). Other account types are unverified.
 
 ## Upstream test inventory
 
@@ -65,7 +66,7 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 - **Ported**: translated; the Windows test is named. Method names drop the `test` prefix and use British spelling.
 - **Ported, changed**: translated with a deliberate difference listed above.
 - **Scheduled Mn**: needs Windows functionality first; its Windows acceptance test lands with milestone n.
-- **Conditional**: applies only if the Milestone 1 gate selects the HTTP hook transport. If named pipes win, these are marked inapplicable and replaced by pipe ACL, framing, deadline, offline, burst and ordering tests.
+- **Conditional**: applies only if the Milestone 1 gate selects the HTTP hook transport. If named pipes win, these are marked inapplicable and replaced by pipe ACL, framing, deadline, offline, burst and ordering tests. The Milestone 1 gate selected HTTP ([milestone-1.md](milestone-1.md) section 6), so these are due in Milestone 5.
 - **Excluded**: not applicable, with the reason.
 
 | Upstream file | Cases | Ported | Scheduled | Conditional | Excluded |

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Milestone 1 spike (plan.md section 2, "CLI usage: no hidden generation"): checks whether the
+    read-only /api/oauth/usage endpoint answers with the existing Claude Code login. Not production code.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+</Project>

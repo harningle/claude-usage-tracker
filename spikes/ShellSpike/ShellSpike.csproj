@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Milestone 1 spike (plan.md section 2, "Windows tray, notifications and visual design"): unsigned
+    path-derived tray identity, notification registration and cold activation with a self-contained,
+    unpackaged Windows App SDK and no Singleton package. A console subsystem keeps the log visible.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.3.12" />
+    <!-- Only for the MSIX below; its build assets are not imported. Version paired by the 2.5.1 metapackage. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" ExcludeAssets="all" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <!--
+    Self-contained Windows App SDK 2.5.1 output lacks Microsoft.WindowsAppRuntime.Insights.Resource.dll
+    (it exists only inside the runtime MSIX), and AppNotificationManager.Register() then throws
+    "Unable to load resource dll". Extract that one file next to the executable.
+  -->
+  <PropertyGroup>
+    <InsightsMsix>$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\win10-x64\Microsoft.WindowsAppRuntime.2.msix</InsightsMsix>
+  </PropertyGroup>
+  <Target Name="ExtractInsightsResourceAfterBuild" AfterTargets="Build">
+    <Unzip SourceFiles="$(InsightsMsix)" DestinationFolder="$(OutDir)" Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll" />
+  </Target>
+  <Target Name="ExtractInsightsResourceAfterPublish" AfterTargets="Publish">
+    <Unzip SourceFiles="$(InsightsMsix)" DestinationFolder="$(PublishDir)" Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll" />
+  </Target>
+
+</Project>
