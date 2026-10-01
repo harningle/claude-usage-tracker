@@ -20,8 +20,8 @@ Recorded 2026-09-30/2026-10-01 on the development machine.
 | --- | --- | --- |
 | NativeAOT prerequisites | **Passed** | Automated: production helper and helper spike publish with NativeAOT |
 | Statusline helper latency | **Passed** directly and through Git Bash and cmd; PowerShell 5.1 runner misses 100 ms because of its own startup | Automated timing |
-| Read-only `/api/oauth/usage` with CLI credentials | **Passed** for one Pro account | Live account, 7 requests |
-| Browser transport (claude.ai) | **Decided by the plan's rule: same-origin WebView2 fetch.** Signed in, the browser route returned 200 for organisations and usage on every attempt, including after an app restart. Every `HttpClient` replay variant was challenged by Cloudflare. A 30-minute polling soak returned 200 on 122 of 122 browser requests across two `__cf_bm` renewals. Two profiles signed in to different accounts were isolated | Live account; manual |
+| Read-only `/api/oauth/usage` with CLI credentials | **Passed** for a Pro and a Team account | Live accounts, 7 + 5 requests |
+| Browser transport (claude.ai) | **Decided by the plan's rule: same-origin WebView2 fetch.** Signed in, the browser route returned 200 for organisations and usage on every attempt, including after an app restart. Every `HttpClient` replay variant was challenged by Cloudflare. A 30-minute polling soak returned 200 on 122 of 122 browser requests across two `__cf_bm` renewals. Two profiles signed in to different accounts were isolated, and a work (Team) account gave the same browser/replay split as the personal (Pro) one | Live accounts; manual |
 | Console authentication | **HttpClient works** against `platform.claude.com/api`: 200 with `sessionKey` alone and no Cloudflare challenge | Live account; manual |
 | WebView2 cost | Measured: one and three profiles, signed out; one profile signed in; full page and parked | Automated harness; live account |
 | Tray identity after move | **Verified**: overflow and taskbar clicks, Explorer restart, and a move (new identity; placement preference reset) | Automated probes; manual |
@@ -61,7 +61,14 @@ Live account, 2026-09-30 22:14-22:17 UTC, Claude Code 2.1.286, `subscriptionType
 - 7 of 7 requests returned **200 `application/json`** (one single request, then six at a 30-second cadence), 211-337 ms. No `Retry-After`, rate-limit or Cloudflare headers.
 - The body has the claude.ai usage shape: `five_hour` and `seven_day` with numeric `utilization` and string `resets_at`; null legacy per-model windows (`seven_day_opus`, `seven_day_sonnet`, `seven_day_omelette` and others); `extra_usage`; `limits[]` entries with `kind`, `group`, `percent`, `severity`, `resets_at`, `scope`, `is_active`; `spend`; `seven_day_breakdown`; and several code-named windows. Utilisation moved during the sample, so the data is live.
 
-Conclusion: the plan's read-only route works for this account type today, so Milestone 2 can begin with it. Not yet established: other account types (Max, Team, Enterprise), behaviour at a rate limit, and longer-term throttling of 30-second polling.
+Second account type (live account, 2026-09-30 23:59 - 2026-10-01 00:01 UTC): your work account, the default Claude Code login since 00:40 local time on 2026-10-01, with `subscriptionType` team and `rateLimitTier` default_claude_max_5x. All 5 requests at a 30-second cadence returned **200 `application/json`**, 219-412 ms, with no throttling headers. The shape differs from the Pro response, so the parser must treat every window and field as optional:
+
+- `limits[]` had 3 entries, not 2.
+- `extra_usage.utilization` was null (extra usage not enabled), and `spend.limit` was null.
+- There was no `seven_day_breakdown`.
+- The code-named window `nimbus_quill` was present in the first two responses and **absent from the next three** (the body shrank from 2073 to 1954 bytes), so windows can appear and disappear between polls.
+
+Conclusion: the plan's read-only route works for Pro and Team accounts today, so Milestone 2 can begin with it. Not yet established: Max and Enterprise accounts, behaviour at a rate limit, and longer-term throttling of 30-second polling.
 
 ## 3. Browser authentication (WebView2)
 
@@ -115,7 +122,13 @@ You signed in to claude.ai and the Console in an isolated profile, `main`, and r
   - The `/api/account` account IDs (200 for both) were **different**.
   - The two accounts shared **no** organisations (2 and 1 respectively).
 
-  The profiles are therefore isolated, each acting as its own account. For the work account, the browser route fetched organisations and account data. Its usage endpoint and the replay comparison were not run, because "Compare claude.ai" was not clicked in that profile. Both profiles were then cleared: browser processes exited, and the user-data folders were deleted.
+  The profiles are therefore isolated, each acting as its own account. Both profiles were then cleared: browser processes exited, and the user-data folders were deleted.
+- **Work (Team) account comparison (02:02-02:03):** in a fresh `work` profile you signed in to your work account with Google, then ran "Compare claude.ai" twice.
+  - Browser fetch returned organisations 200 (1 organisation) and usage 200, with the same 26-key shape and numeric `five_hour.utilization` as the personal account.
+  - Every replay variant (2 comparisons × 3 variants × 2 requests) was challenged by Cloudflare.
+  - An earlier "Compare Console" without a Console session gave the same claude.ai split. Its Console replays returned 403 JSON authentication errors, because there was no Console session.
+
+  The profile was then cleared. The claude.ai transport decision therefore holds for both a Pro and a Team account.
 
 ## 4. Tray identity
 
@@ -213,7 +226,7 @@ Before any usage was spent, a dry run of the identical procedure checked the eff
 | No hooks | 9.4 / 12.6 | 1312 | 21 | success, 20 sequential Read calls |
 | HTTP, listener stopped | 15.9 / 27.3 | 1232 | 21 | success, 20 sequential Read calls; 43 hook posts, each `ECONNREFUSED` in ≤4 ms (p95 3.9 ms); SessionStart skipped by the CLI |
 
-Overhead of a stopped listener with a real model and OAuth session: **+6.5 ms p50, +14.7 ms p95** per tool call. With 20 samples per condition the p95 is noisy, but it is two orders of magnitude inside the 100 ms budget. The CLI reported an API-equivalent cost of $0.062 and $0.065, which counts against the Pro usage allowance.
+Overhead of a stopped listener with a real model and OAuth session: **+6.5 ms p50, +14.7 ms p95** per tool call. With 20 samples per condition the p95 is noisy, but it is two orders of magnitude inside the 100 ms budget. The CLI reported an API-equivalent cost of $0.062 and $0.065. Correction: the run used the default Claude Code login, which by then was your **work (Team) account**. That login replaced the personal Pro login at 00:40, before the run, so the usage counted against the work account's allowance, not Pro as first recorded. Only the 00:14 usage probe in section 2 used the Pro login.
 
 **Gate application.** The plan retains HTTP if it stays under 100 ms p95 overhead in the running, stopped and restart cases, to avoid per-event processes. It does in all three with the fake endpoint, and in the stopped case with a real model. The transport is therefore **HTTP**, which makes the conditional HTTP parser and server tests in parity.md applicable.
 
@@ -243,11 +256,35 @@ The settings file was atomically replaced between tool calls: endpoint A→B at 
 
 User settings, which is where production hooks will be installed, reload after roughly one second. Reload appears debounced, so edits in quick succession postpone it. After an install, removal or repair, events in the following second or so may still use the old configuration. Edits to a `--settings` file are not picked up by a running session.
 
-## 7. Pending manual steps
+## 7. Known gaps and follow-ups
 
-The sign-in, restart, Console, notification and tray checks were done on 2026-10-01 (sections 3-5). Remaining:
+The planned sign-in, restart, renewal, isolation, Console, notification and tray checks were done on 2026-10-01 (sections 3-5). None of the gaps below blocks Milestone 2. Each names the milestone where it should be closed; the plan's milestone sections point back here.
 
-All planned manual checks are recorded. One optional gap remains: the work account's usage endpoint and replay comparison ("Compare claude.ai" in a profile signed in to it). That account may be a Team or Enterprise account whose usage response differs; Milestone 3's multi-profile work can cover it instead.
+### Gaps in what Milestone 1 set out to measure
+
+| # | Gap | Why it matters | Status | Revisit in |
+| --- | --- | --- | --- | --- |
+| G1 | Work account: claude.ai usage endpoint and replay comparison | A Team or Enterprise account's usage response or Cloudflare treatment may differ from Pro | **Closed 2026-10-01**: same browser/replay split and usage shape as Pro (section 3) | — |
+| G2 | Read-only `/api/oauth/usage` verified only for Pro and Team logins | Max and Enterprise responses may differ or be refused | Team verified 2026-10-01 (section 2); Max and Enterprise need access to such accounts | M2, as accounts allow |
+| G3 | Read-only usage at a rate limit (429, `Retry-After`) and under sustained 30-second polling: only 7 requests over 3 minutes | Polling, back-off and the 30-second default depend on it | Open | M2 (polling and back-off), then a multi-hour soak |
+| G4 | WebView2 cost with three profiles polling at once. Measured so far: three idle (signed out), two idle (signed in), one polling | Needed before any lightweight-performance claim with several browser profiles | Open | M3 (simultaneous monitoring) |
+| G5 | Real-model hook runs covered only the stopped listener; running and restart cases used the fake endpoint | Accepted with the HTTP decision; the gate must be re-measured when the CLI changes | Accepted | M5, and whenever the minimum CLI version changes |
+| G6 | Notification hook delivery: the event never fires in `-p` mode, so it is unverified for either transport | One of the eight events the HUD uses | Open | M5 (interactive CLI) |
+| G7 | Hook delivery and reload were measured only in `-p` sessions | Interactive sessions may schedule hooks or watch settings differently | Open | M5 (interactive CLI) |
+
+### Deferred by design
+
+| # | Item | Revisit in |
+| --- | --- | --- |
+| D1 | Tray: mixed-DPI monitors, keyboard selection (`NIN_KEYSELECT`) and anchoring the popover from the measured icon/flyout rectangles | M2 |
+| D2 | Notifications on a clean machine without the Singleton package (this PC has it installed) | M6 |
+| D3 | Statusline: how Claude Code actually spawns the command shell, rapid replacement/cancellation and end-to-end timing with the production helper (only the spike helper was timed) | M5 |
+| D4 | Self-contained output size (the notification spike was 470 files, 186 MB) | M6 packaging |
+| D5 | The extracted `Microsoft.WindowsAppRuntime.Insights.Resource.dll` workaround: build it into the app and re-check on each Windows App SDK update | M4, then M6 |
+| D6 | Stale notification registrations and `NotifyIconSettings` entries after a move: cleanup of the app's own stale entries | M4 (notifications), M6 (manual upgrade and cleanup) |
+| D7 | Upstream's `console.anthropic.com/api` base with an explicitly sent `platform.claude.com` key: untested, and moot while the port uses `platform.claude.com` | Only if `platform.claude.com` stops working |
+
+### Running the isolation check again
 
 "Check isolation" re-observes each profile at that moment, on claude.ai only. For each pair it reports:
 

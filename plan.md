@@ -47,7 +47,7 @@ Decision rule:
 The WebView2 route has a measurable cost: separate user-data folders create independent browser process groups. Create contexts lazily, retain contexts needed for enabled background profiles and dispose disabled/removed profiles. Measure one and three profiles, both idle and polling, including startup latency; publish those measurements before accepting a lightweight-performance claim. [WebView2 process model](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/process-model)
 
 Milestone 1 result (live account, 2026-10-01; details in [the Milestone 1 log](docs/milestone-1.md#3-browser-authentication-webview2)):
-- **claude.ai uses same-origin WebView2 fetch**, by the decision rule above. Signed in, browser fetch returned organisations and usage every time, including after an app restart. Every `HttpClient` replay was challenged: a valid `sessionKey` with the browser's clearance cookies, and either the WebView2 or upstream's user agent.
+- **claude.ai uses same-origin WebView2 fetch**, by the decision rule above. Signed in with a personal (Pro) and a work (Team) account, browser fetch returned organisations and usage every time, including after an app restart. Every `HttpClient` replay was challenged: a valid `sessionKey` with the browser's clearance cookies, and either the WebView2 or upstream's user agent.
 - **The Console uses `HttpClient`** with a per-profile cookie container against `platform.claude.com/api`, where its `sessionKey` is scoped. Replay there was not challenged.
 - Keep an idle profile on a lightweight same-origin document such as `claude.ai/robots.txt`. That costs about 175-215 MB private per profile, against about 475-635 MB on the full claude.ai page.
 - Background profiles' WebView2 hosts must stay realised (hidden, not detached), or initialisation stalls.
@@ -196,6 +196,7 @@ Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDAT
 - Use the secure persistence needed by this flow directly, with no plaintext temporary shortcut. Defer the full ownership/takeover state machine and its failure matrix to Milestone 3; until then, mirror CLI-owned credentials and display the waiting-for-refresh state when appropriate.
 - Display session/weekly/model/extra usage, reset times, pace, service status and honest disconnected/stale/error states.
 - Implement polling, manual refresh, cancellation, backoff and a per-profile refresh coordinator; keep 30 seconds as the read-only default, honouring server retry guidance. Late results never update a different profile or credential generation.
+- Close the Milestone 1 follow-ups assigned here: G2 (read-only usage for other account types, as accounts allow), G3 (rate limit and sustained polling of the read-only route) and D1 (mixed DPI, keyboard selection, popover anchoring); see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** one real Claude account completes setup, refreshes to the UI and survives restart. Routine polling generates no model requests. Tests cover error/challenge states; screenshots use clearly labelled fixtures, not fabricated production account data.
 
@@ -207,6 +208,7 @@ Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDAT
 - Test DPAPI atomic replacement with large synthetic bundles and injected failures, ownership/handoff with fake refresh responses, concurrent mutations, parent PID reuse/unreadable process state, file conflicts and pending write-back. Then verify idle refresh and handoff live; record deferred CLI-owned Codex takeover separately. A live CLI blocking takeover displays the waiting message and picks up refreshed credentials on the next poll.
 - Port monthly/daily/per-key/model costs, usage/billing history, interactive charts and CSV/JSON exports.
 - Add the redacted network log view and its clear/export actions.
+- Close the Milestone 1 follow-ups assigned here: G4 (three browser profiles polling at once); see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** two accounts and mixed providers remain isolated through switching, refresh failure and restart. Verify live routes separately from fixtures, export values match expectations, and no secrets appear in settings/history/cache/log files.
 
@@ -216,6 +218,7 @@ Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDAT
 - Add launch at login, hotkeys, wake/network refresh, Explorer restart and remote-desktop handling.
 - Port opt-in auto-start and profile auto-switching with the explicit no-background-generation polling policy.
 - Reuse the process/store guard for shared CLI switching and the read/merge/write/verify flow. Transfer ownership only after verified handoff/removal from all relevant registered stores. Automatic switches that would change a busy/unknown CLI account are deferred and surfaced instead of racing running sessions.
+- Close the Milestone 1 follow-ups assigned here: D5 (build in the Windows App SDK DLL workaround) and D6 (cleanup of stale notification registrations after a move); see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** notification/reset events fire once, no refreshes overlap per profile, stale state cannot trigger automation, and active CLI sessions/configuration are not silently modified.
 
@@ -226,6 +229,7 @@ Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDAT
 - Install the fixed per-user helper and manifest; wire hooks/statusline to it and implement rename-aside upgrades for it and launcher copies, startup path checks, repair and deferred cleanup. Test with a launcher alive throughout the upgrade and statusline/hooks invoking the helper concurrently; keep old/new protocol versions compatible.
 - Install the eight hooks using the transport selected in Milestone 1 and complete the floating HUD. For async direct-exec hooks, implement bounded pipe forwarding and ordering/loss handling; for HTTP, implement eligible persistent ports and start/clean-exit hook lifecycle. Test live reload and setup/repair/removal across config directories without touching foreign hooks.
 - Feed session activity to the switching guard without treating the HUD as an exhaustive process monitor.
+- Close the Milestone 1 follow-ups assigned here: G5 (re-measure the hook gate on CLI changes), G6 (Notification delivery), G7 (hooks in interactive sessions) and D3 (statusline shell, cancellation and production-helper timing); see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** PowerShell, Command Prompt and Git Bash preserve arguments, exit codes and Ctrl+C, including metacharacters and paths with spaces; the shell prompt does not return over a live child. The statusline remains secret-free and responsive. Hook overhead meets the real-CLI budget even when the tracker is down; async process cost and best-effort ordering or HTTP lifecycle/port constraints are measured and documented. No hook emits decisions or context.
 
@@ -235,6 +239,7 @@ Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDAT
 - Publish a Windows x64 app with self-contained .NET and Windows App SDK dependencies plus the NativeAOT helper; document WebView2 prerequisites. Local notifications require registration, not the separate push-notification Singleton package.
 - Test without a developer SDK, including app-ID registration, fresh sign-in, restart, multiple profiles, cleanup and manual replacement upgrades. Move/delete the portable app folder and clean the original Debug output: installed integrations must still resolve, and missing-helper simulation must produce a visible repair action. Exercise interrupted promotion, rename denial and later cleanup of retained running images.
 - Document data/secret locations, DPAPI portability limits, deletion and safe removal of startup/notifications/hooks/launchers. Update AGENTS.md with actual validated build commands.
+- Close the Milestone 1 follow-ups assigned here: D2 (clean machine without the Singleton package), D4 (output size), D5 and D6; see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** daily personal use works across the included features; unresolved auth/visual/live-account checks remain explicitly marked. Installer and automatic-update controls are absent at this stage. No public-release or full-parity claim follows from build success alone.
 
