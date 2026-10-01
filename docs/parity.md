@@ -9,7 +9,7 @@ Evidence types, kept separate throughout:
 - **Live account**: exercised against a real account through the app.
 - **Source/image**: compared only against upstream source or media.
 
-Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based. Milestone 1 experiment results, including one live-account observation, are in [milestone-1.md](milestone-1.md); they come from spike harnesses, not app features. Milestone 2's app features are verified by automated tests and by manual checks with synthetic fixture data ([milestone-2.md](milestone-2.md)); their live-account acceptance is still pending.
+Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based. Milestone 1 experiment results, including one live-account observation, are in [milestone-1.md](milestone-1.md); they come from spike harnesses, not app features. Milestone 2's app features are verified by automated tests, by manual checks with synthetic fixture data and by the user's live checks on 2026-10-01 ([milestone-2.md](milestone-2.md)); the overnight soak and the waiting-state check are still pending.
 
 ## Environment and references
 
@@ -37,8 +37,8 @@ Recorded on 2026-09-30.
 | Launcher slugs | 0 | Naming ported | Automated | Difference 9; executable aliases in Milestone 5 |
 | Supported languages | 0 | List ported | Automated | Explicit `zh-cn` to `zh-Hans` mapping; resources in Milestone 6; flag emoji rendering on Windows unverified |
 | UI text | 2 | Upstream English `Localizable.strings` embedded unchanged and looked up by key; port-only text in `Windows.strings`; other languages in Milestone 6 | Automated (every key used exists) | Differences 21 and 22 |
-| Tray, popover, settings window, setup wizard | 1 spike, then 2 | Implemented for the Claude Code route: single instance, tray icons and menu, popover, sidebar settings (CLI Account, Appearance, General, Popover, About), wizard with test and review. Live use, hardware rendering, mixed DPI and keyboard selection not yet checked by hand | Automated; manual with fixture data | Differences 14-20 and 23; plan section 2 |
-| CLI linking and read-only OAuth usage | 1 gate, then 2 | Implemented: file linking with account checks, encrypted mirror of the CLI-owned login, read-only polling with backoff and `Retry-After`. Live acceptance and the multi-hour soak (G3) pending | Automated; manual with fixture data; live gate from Milestone 1 | Differences 11-13, 16 and 24 |
+| Tray, popover, settings window, setup wizard | 1 spike, then 2 | Implemented for the Claude Code route: single instance, tray icons and menu, popover, sidebar settings (CLI Account, Appearance, General, Popover, About), wizard with test and review. Checked live by the user on 2026-10-01, including hardware rendering, dark mode, mixed DPI, keyboard selection, Explorer restart, full screen and virtual desktops | Automated; manual with fixture data; live account (manual) | Differences 14-20 and 23; plan section 2 |
+| CLI linking and read-only OAuth usage | 1 gate, then 2 | Implemented: file linking with account checks, encrypted mirror of the CLI-owned login, read-only polling with backoff and `Retry-After`. Live setup, polling, restart and an account change checked on 2026-10-01; the overnight soak (G3) and the waiting state are pending | Automated; manual with fixture data; live account (manual) | Differences 11-13, 16 and 24 |
 | Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Gate decided: claude.ai uses same-origin WebView2 fetch (replay challenged, browser 200); Console uses `HttpClient` at `platform.claude.com` (replay 200). 30-minute renewal soak and two-account isolation passed | Live account (manual, spike harness) | Plan section 2 |
 | Profiles, secure storage, credential ownership | 2 and 3 | Milestone 2: versioned settings, per-profile usage cache and DPAPI secret files; one profile at a time. Profile lifecycle and ownership in Milestone 3 | Automated | DPAPI files replace Keychain; difference 17 |
 | History persistence, charts, CSV/JSON export, network log | 3 | Not started | None | Redacted log only |
@@ -228,9 +228,9 @@ Ported to `ResetTimeExtensionsTests`, using fixed time zones (difference 4).
 
 | Upstream case | Disposition | Windows milestone |
 | --- | --- | --- |
-| `testEnableDisplayJoinsAllSpacesAndFullScreenSpaces` | Scheduled M2 and M5 | Windows equivalent: the popover and HUD stay available over full-screen apps and across virtual desktops (manual acceptance; the popover is topmost, the check is pending, [milestone-2.md](milestone-2.md#live-checks-still-to-do)) |
-| `testEnableDisplayClearsMoveToActiveSpace` | Scheduled M2 and M5 | As above |
-| `testEnableDisplayPreservesUnrelatedCollectionBehavior` | Scheduled M2 and M5 | As above; window style changes preserve unrelated flags |
+| `testEnableDisplayJoinsAllSpacesAndFullScreenSpaces` | Scheduled M5 | Windows equivalent: the popover and HUD stay available over full-screen apps and across virtual desktops (manual acceptance). The popover part passed on 2026-10-01 ([milestone-2.md](milestone-2.md#live-and-manual-checks)); the HUD part follows in M5 |
+| `testEnableDisplayClearsMoveToActiveSpace` | Scheduled M5 | As above |
+| `testEnableDisplayPreservesUnrelatedCollectionBehavior` | Scheduled M5 | As above; window style changes preserve unrelated flags |
 
 ### NotchHUDCoreTests.swift
 

@@ -266,7 +266,7 @@ The planned sign-in, restart, renewal, isolation, Console, notification and tray
 | --- | --- | --- | --- | --- |
 | G1 | Work account: claude.ai usage endpoint and replay comparison | A Team or Enterprise account's usage response or Cloudflare treatment may differ from Pro | **Closed 2026-10-01**: same browser/replay split and usage shape as Pro (section 3) | — |
 | G2 | Read-only `/api/oauth/usage` verified only for Pro and Team logins | Max and Enterprise responses may differ or be refused | Team verified 2026-10-01 (section 2); Max and Enterprise need access to such accounts | M2, as accounts allow |
-| G3 | Read-only usage at a rate limit (429, `Retry-After`) and under sustained 30-second polling: only 7 requests over 3 minutes | Polling, back-off and the 30-second default depend on it | Open | M2 (polling and back-off), then a multi-hour soak |
+| G3 | Read-only usage at a rate limit (429, `Retry-After`) and under sustained 30-second polling: only 7 requests over 3 minutes | Polling, back-off and the 30-second default depend on it | Retry handling implemented and tested in M2; the overnight live soak is scheduled for the night of 2026-10-01 ([milestone-2.md](milestone-2.md#live-and-manual-checks)) | M2 |
 | G4 | WebView2 cost with three profiles polling at once. Measured so far: three idle (signed out), two idle (signed in), one polling | Needed before any lightweight-performance claim with several browser profiles | Open | M3 (simultaneous monitoring) |
 | G5 | Real-model hook runs covered only the stopped listener; running and restart cases used the fake endpoint | Accepted with the HTTP decision; the gate must be re-measured when the CLI changes | Accepted | M5, and whenever the minimum CLI version changes |
 | G6 | Notification hook delivery: the event never fires in `-p` mode, so it is unverified for either transport | One of the eight events the HUD uses | Open | M5 (interactive CLI) |
@@ -276,7 +276,7 @@ The planned sign-in, restart, renewal, isolation, Console, notification and tray
 
 | # | Item | Revisit in |
 | --- | --- | --- |
-| D1 | Tray: mixed-DPI monitors, keyboard selection (`NIN_KEYSELECT`) and anchoring the popover from the measured icon/flyout rectangles | M2 |
+| D1 | Tray: mixed-DPI monitors, keyboard selection (`NIN_KEYSELECT`) and anchoring the popover from the measured icon/flyout rectangles | **Closed 2026-10-01** in M2 (manual checks by the user, [milestone-2.md](milestone-2.md#live-and-manual-checks)) |
 | D2 | Notifications on a clean machine without the Singleton package (this PC has it installed) | M6 |
 | D3 | Statusline: how Claude Code actually spawns the command shell, rapid replacement/cancellation and end-to-end timing with the production helper (only the spike helper was timed) | M5 |
 | D4 | Self-contained output size (the notification spike was 470 files, 186 MB) | M6 packaging |

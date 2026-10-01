@@ -200,7 +200,7 @@ Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDAT
 
 **Acceptance:** one real Claude account completes setup, refreshes to the UI and survives restart. Routine polling generates no model requests. Tests cover error/challenge states; screenshots use clearly labelled fixtures, not fabricated production account data.
 
-Status (2026-10-01): implemented and covered by automated tests and fixture-mode checks; the live-account acceptance, the G3 soak, the D1 manual checks and confirmation of hardware rendering are pending. Extra usage for CLI profiles awaits a shape-only observation of the endpoint's `extra_usage` and `spend` objects. See [the Milestone 2 log](docs/milestone-2.md#live-checks-still-to-do).
+Status (2026-10-01): implemented; acceptance met with a real account, and the D1 checks, hardware rendering, dark mode, full screen and an account change passed by hand. The overnight G3 soak and the waiting-state check are scheduled for the night of 2026-10-01. The endpoint's `extra_usage` and `spend` shape is recorded; showing extra usage for CLI profiles still needs a check against claude.ai. See [the Milestone 2 log](docs/milestone-2.md#live-and-manual-checks).
 
 ### Milestone 3 - Browser setup, profiles, Codex, billing and history
 

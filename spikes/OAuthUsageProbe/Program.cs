@@ -2,6 +2,8 @@
 // Claude Code config directory. It never refreshes (refreshing would rotate the CLI's refresh
 // token), never writes the credential file, never calls /v1/messages and never prints tokens.
 // Output is allowlisted metadata: status, timing, header names and the JSON shape.
+// --shape true prints the whole body as field names and value types only (numbers as integer or
+// decimal, strings as a kind such as "timestamp"), never values; ID-like keys are masked.
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
@@ -14,6 +16,7 @@ var repeat = int.Parse(options.GetValueOrDefault("repeat", "1"), CultureInfo.Inv
 var interval = TimeSpan.FromSeconds(int.Parse(options.GetValueOrDefault("interval-seconds", "30"), CultureInfo.InvariantCulture));
 // Upstream's CLI OAuth user agent (ClaudeAPIService.buildAuthenticatedRequest).
 var userAgent = options.GetValueOrDefault("user-agent", "claude-code/2.1.5");
+var shapeOnly = options.GetValueOrDefault("shape", "false") == "true";
 
 var credentialPath = Path.Combine(configDirectory, ".credentials.json");
 string accessToken;
@@ -72,7 +75,14 @@ for (var i = 1; i <= repeat; i++)
         Console.WriteLine($"  retry-after: {retryAfter}");
     }
 
-    DescribeBody(body);
+    if (shapeOnly)
+    {
+        DescribeShape(body);
+    }
+    else
+    {
+        DescribeBody(body);
+    }
     if (i < repeat)
     {
         await Task.Delay(interval);
@@ -87,6 +97,74 @@ static string Text(JsonElement obj, string name) =>
     obj.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()! : "(absent)";
 
 // Shape only: key names, value kinds and utilisation numbers; error type/message for failures.
+// Names and types only: no value of any field is printed.
+static void DescribeShape(byte[] body)
+{
+    using var document = JsonDocument.Parse(body);
+    Walk(document.RootElement, "  ", "(root)");
+
+    static void Walk(JsonElement element, string indent, string name)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                Console.WriteLine($"{indent}{name}: object");
+                foreach (var property in element.EnumerateObject())
+                {
+                    Walk(property.Value, indent + "  ", MaskKey(property.Name));
+                }
+
+                break;
+            case JsonValueKind.Array:
+                Console.WriteLine($"{indent}{name}: array[{element.GetArrayLength()}]");
+                // Every distinct element shape once, so entries with different fields all appear.
+                var seen = new HashSet<string>();
+                var index = 0;
+                foreach (var item in element.EnumerateArray())
+                {
+                    var signature = Signature(item);
+                    if (seen.Add(signature))
+                    {
+                        Walk(item, indent + "  ", $"[{index}]");
+                    }
+
+                    index++;
+                }
+
+                break;
+            default:
+                Console.WriteLine($"{indent}{name}: {Kind(element)}");
+                break;
+        }
+    }
+
+    static string Signature(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => "{" + string.Join(",", element.EnumerateObject().Select(p => p.Name + ":" + Signature(p.Value))) + "}",
+        JsonValueKind.Array => "[" + string.Join(",", element.EnumerateArray().Select(Signature).Distinct()) + "]",
+        _ => Kind(element),
+    };
+
+    static string Kind(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Number => element.TryGetInt64(out _) ? "number (integer)" : "number (decimal)",
+        JsonValueKind.String => StringKind(element.GetString()!),
+        JsonValueKind.True or JsonValueKind.False => "boolean",
+        JsonValueKind.Null => "null",
+        _ => element.ValueKind.ToString(),
+    };
+
+    static string StringKind(string text) =>
+        text.Length == 0 ? "string (empty)"
+        : DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out _) && text.Contains('T') ? "string (timestamp)"
+        : text.Length == 3 && text.All(char.IsAsciiLetterUpper) ? "string (three capital letters)"
+        : Guid.TryParse(text, out _) ? "string (UUID)"
+        : "string";
+
+    static string MaskKey(string key) =>
+        Guid.TryParse(key, out _) || (key.Length >= 16 && key.All(char.IsAsciiHexDigit)) ? "<id-like key>" : key;
+}
+
 static void DescribeBody(byte[] body)
 {
     JsonDocument document;

@@ -8,17 +8,17 @@ Recorded 2026-10-01 on the development machine (Windows 11 26200, two 3840 × 21
 
 | Plan item | Status | Evidence |
 | --- | --- | --- |
-| Single-instance startup, tray lifecycle, popover, sidebar settings | Implemented | Automated (toggle, placement, tray identity, model tests); manual in fixture mode (screenshots below) |
-| Setup wizard: provider choice, CLI discovery/linking, connection test, review, save; edit/cancel/retry; non-destructive failures | Implemented for the Claude Code route. Browser sign-in, session keys, the Console and Codex are shown as not yet available | Automated (`SetupWizardViewModelTests`, `SetupServiceTests`); manual in fixture mode |
-| CLI file linking plus read-only OAuth route | Implemented | Automated (`CliLinkServiceTests`, `UsageClientTests`); **live check pending** |
-| Secure persistence, no plaintext shortcut; mirror CLI-owned credentials; waiting-for-refresh state | Implemented (DPAPI per-profile file holding only `claudeAiOauth`; never refreshes) | Automated (`SecretStoreTests`, `CliLinkServiceTests`, `PopoverModelTests`) |
-| Session/weekly/model usage, reset times, pace, service status, disconnected/stale/error states | Implemented; **extra usage is not shown** for CLI profiles (see open questions) | Automated (`ClaudeUsageResponseTests`, `PopoverModelTests`, `UsageDisplayTests`); manual in fixture mode |
+| Single-instance startup, tray lifecycle, popover, sidebar settings | Implemented | Automated (toggle, placement, tray identity, model tests); manual in fixture mode (screenshots below); **live, checked by the user on 2026-10-01** |
+| Setup wizard: provider choice, CLI discovery/linking, connection test, review, save; edit/cancel/retry; non-destructive failures | Implemented for the Claude Code route. Browser sign-in, session keys, the Console and Codex are shown as not yet available | Automated (`SetupWizardViewModelTests`, `SetupServiceTests`); manual in fixture mode; live setup with the default Claude Code login |
+| CLI file linking plus read-only OAuth route | Implemented | Automated (`CliLinkServiceTests`, `UsageClientTests`); live: setup, polling, restart and an account change checked by the user on 2026-10-01 |
+| Secure persistence, no plaintext shortcut; mirror CLI-owned credentials; waiting-for-refresh state | Implemented (DPAPI per-profile file holding only `claudeAiOauth`; never refreshes) | Automated (`SecretStoreTests`, `CliLinkServiceTests`, `PopoverModelTests`); the live waiting-state check is scheduled for the night of 2026-10-01 |
+| Session/weekly/model usage, reset times, pace, service status, disconnected/stale/error states | Implemented; **extra usage is not shown** for CLI profiles; the endpoint's shape is now recorded (see "Usage response shape") | Automated (`ClaudeUsageResponseTests`, `PopoverModelTests`, `UsageDisplayTests`); manual in fixture mode; live: matches Claude Code's `/usage` |
 | Polling, manual refresh, cancellation, backoff, per-profile coordinator, 30 s default, server retry guidance, late results dropped | Implemented | Automated (`RefreshCoordinatorTests`, `RefreshPolicyTests`), run five times without a flake |
 | G2: read-only usage for other account types | Pro and Team verified in Milestone 1; Max and Enterprise still need such accounts | — |
-| G3: rate limits and sustained 30-second polling | 429 and `Retry-After` handling implemented and tested with fixtures; **multi-hour live soak pending** | Automated |
-| D1: mixed DPI, keyboard selection, anchoring from icon rectangles | Implemented (physical-pixel placement per monitor, `NIN_KEYSELECT` with focus moved into the popover); **manual checks pending** | Automated (`PopoverPlacementTests`) |
+| G3: rate limits and sustained 30-second polling | 429 and 5xx `Retry-After` handling implemented and tested with fixtures; **overnight live soak scheduled for the night of 2026-10-01** | Automated |
+| D1: mixed DPI, keyboard selection, anchoring from icon rectangles | **Verified** (physical-pixel placement per monitor, `NIN_KEYSELECT` with focus moved into the popover) | Automated (`PopoverPlacementTests`); manual by the user on 2026-10-01 |
 
-**Acceptance is not yet met.** The milestone requires one real Claude account to complete setup, refresh to the UI and survive a restart. That is a live-account check for the user (see "Live checks still to do"). Everything below the status table that says "fixture" used synthetic data only.
+**Acceptance met on 2026-10-01.** The user completed setup with a real Claude account, saw the popover and tray match Claude Code's `/usage`, then quit and relaunched; usage reappeared at once and refreshed (checks 1-3 under "Live and manual checks"). Still to do: the overnight soak and the waiting state (check 9), scheduled for the night of 2026-10-01. Everything below that says "fixture" used synthetic data only.
 
 ## What was built
 
@@ -71,23 +71,78 @@ All data is synthetic: a `fixture@example.com` account, a token that is not a re
 
 ### Rendering note
 
-Screen captures (GDI screen copy and `PrintWindow` with full content) of hardware-rendered WPF windows came back blank on this machine. That included a stock `dotnet new wpf` app, both when started from the agent shell and when started through Explorer. Software-rendered windows captured normally, and the UI Automation tree of the blank windows was complete. The likeliest cause is the capture method missing content that the GPU presents outside the composed primary plane, but that is not established. **Whether the app paints correctly with hardware rendering on this display is unverified** and is the first thing to check by eye. If it does not paint, the app should switch to software rendering, which costs little for these small windows.
+Screen captures (GDI screen copy and `PrintWindow` with full content) of hardware-rendered WPF windows came back blank on this machine. That included a stock `dotnet new wpf` app, both when started from the agent shell and when started through Explorer. Software-rendered windows captured normally, and the UI Automation tree of the blank windows was complete. The likeliest cause is the capture method missing content that the GPU presents outside the composed primary plane, but that is not established. **Hardware rendering was confirmed by eye** on 2026-10-01: the user saw the wizard, popover and settings paint normally in light and dark mode. The blank captures are therefore a limitation of the capture method on this machine, and `--software-render` remains only for screen captures.
 
-## Live checks still to do
+## Live and manual checks
 
-These need the user, a real account or both:
+The user ran checks 1-8 on the evening of 2026-10-01, with the real default Claude Code login and following a step-by-step guide. All behaved as expected:
 
-1. **Acceptance:** run the app normally, complete the wizard with the default Claude Code login, confirm the popover and tray show the same usage as `claude` `/usage`, quit, relaunch, and confirm usage reappears (labelled stale until the first refresh) and refreshes. Check `diagnostics\requests.jsonl` for read-only `oauthUsage` requests only.
-2. **Rendering:** confirm the wizard, popover and settings paint normally without `--software-render`, in both light and dark mode.
-3. **Waiting state:** leave Claude Code unused until its token expires; the popover should say "Waiting for Claude Code to refresh its login", and running any `claude` command should restore live usage on the next poll.
-4. **Account change:** switching the default login to another account (the user has `claude-swap`) should show "Claude Code is now signed in to a different account." and stop polling until set up again.
-5. **G3 soak:** leave the app polling at 30 s for several hours and summarise `requests.jsonl` (statuses, any 429 and `Retry-After`).
-6. **D1:** set one monitor to a different scale and check popover placement from icons on each taskbar; select the icon from the keyboard (Win+B, arrows, Enter) and check focus lands in the popover; click the icon of an open popover and check it closes without reopening; restart Explorer and check the icons return.
-7. **Over full-screen apps and virtual desktops** (upstream `NSWindowFullScreenSpacesTests`): the topmost popover should appear above a borderless full-screen window and on the current desktop.
+1. **First launch and setup.** The windows painted normally with hardware rendering. The wizard detected the default login, ran the read-only test, showed the review and saved.
+2. **Popover and tray.**
+   - The tooltip read correctly, and the popover opened just above the icon.
+   - Its values matched Claude Code's `/usage`.
+   - Clicking the icon of an open popover closed it without reopening it; an outside click and Escape also closed it.
+   - The refresh button refreshed, and the context menu and settings pages worked.
+   - Turning on the Week metric and changing icon styles updated the tray at once.
+3. **Restart.** After Quit and a relaunch, the wizard did not reappear, usage showed at once and then refreshed.
+4. **Dark mode.** The popover and settings followed the switch, and the tray icons stayed readable.
+5. **Keyboard and Explorer.**
+   - Win+B, the arrow keys and Enter opened the popover; Tab moved between its buttons and Escape closed it.
+   - Shift+F10 opened the menu.
+   - After an Explorer restart the icon returned.
+6. **Mixed DPI (D1).** With the tray monitor at a different scale from the other, the popover sat above the icon, fully on screen and sharp. The settings window moved between the monitors cleanly.
+7. **Full screen and virtual desktops.** A second launch opened the popover above a full-screen browser, and on a new virtual desktop the popover opened there.
+8. **Account change.** Switching Claude Code's default login to the other account showed "Claude Code is now signed in to a different account." with dimmed icons and none of the other account's numbers. Switching back restored live usage within about 30 seconds.
+
+Still to do, scheduled for the night of 2026-10-01:
+
+9. **G3 soak and waiting state.** Leave the app polling overnight with Claude Code unused. After the token expires, the popover should say "Waiting for Claude Code to refresh its login" and send no usage requests, and live usage should return after Claude Code's next use. Then summarise `requests.jsonl`.
+
+## Usage response shape (live, 2026-10-01)
+
+To decide how extra usage could be shown, one read-only request was made with the user's approval through `OAuthUsageProbe --shape true`, which prints field names and value types only, never values. It used the default Claude Code login (subscription `pro`) at 17:02 UTC; the response was 200 `application/json`, 2193 bytes, 366 ms. The outline:
+
+```text
+five_hour, seven_day: object
+  utilization: number (decimal); resets_at: string (timestamp)
+  limit_dollars, used_dollars, remaining_dollars, locked_reason: null
+seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, seven_day_cowork, seven_day_omelette: null
+tangelo, iguana_necktie, omelette_promotional, nimbus_quill, cinder_cove, copper_kite, brass_thimble,
+  harbor_lantern, wattle_ember, amber_ladder, amber_cistern, juniper_tide, cedar_ember, amber_gauge: null
+extra_usage: object
+  is_enabled: boolean; monthly_limit: number (integer); used_credits: number (decimal)
+  utilization: number (decimal); currency: string (three capital letters); decimal_places: number (integer)
+  disabled_reason: string; user_disabled, spend_limit_reached, credits_ever_enabled: boolean
+  daily, weekly: null
+limits: array[2] of object
+  kind, group, severity: string; percent: number (integer); resets_at: string (timestamp)
+  scope: null; is_active: boolean
+spend: object
+  used, limit: object { amount_minor: number (integer); currency: string (three capital letters); exponent: number (integer) }
+  percent: number (integer); severity, disabled_reason, disclaimer: string
+  enabled, can_purchase_credits, can_toggle: boolean
+  cap: object { money: null; credits: object { amount_minor: number (integer); exponent: number (integer) } }
+  balance, auto_reload: null
+member_dashboard_available: boolean
+seven_day_breakdown: object
+  as_of, window_started_at: string (timestamp)
+  rows: array[4] of object { key, display_name: string; percent: number (integer) }
+```
+
+Compared with Milestone 1:
+
+- `five_hour` and `seven_day` now also carry dollar fields and `locked_reason`, all null here.
+- More code-named windows exist, and all were null.
+- The `limits[]` entries had a null `scope`.
+- `seven_day_breakdown` rows carry a key, a display name and a percentage.
+
+The parser ignores everything it does not use, as its tests require.
+
+For extra usage, `spend.used` and `spend.limit` are the precise source: each gives an integer amount in minor units with its own `exponent` and `currency`, so no cents-versus-dollars assumption is needed. `extra_usage` reports `used_credits` (decimal) and `monthly_limit` (integer) in units it does not state, beside `decimal_places`.
 
 ## Open questions
 
-- **Extra usage for CLI profiles.** Upstream shows Extra Usage only from claude.ai's overage endpoints (Milestone 3 browser route) and ignores the `extra_usage` and `spend` objects that `/api/oauth/usage` returns. Their field names are not recorded (Milestone 1 logged only `extra_usage.utilization`, which was null for the Team account). Showing extra usage on the CLI route needs a shape-only observation of those objects first (field names and value kinds, no values), or it can wait for the browser route.
+- **Extra usage for CLI profiles.** Upstream shows Extra Usage only from claude.ai's overage endpoints (the Milestone 3 browser route) and ignores this endpoint's `extra_usage` and `spend`. Their shape is now recorded (see "Usage response shape"), and `spend.used` / `spend.limit` give exact amounts. Field names and types alone do not prove which spending they describe, though. Showing an Extra Usage card from them needs one comparison by eye against claude.ai's usage page, ideally on an account with extra usage enabled.
 - **Tray identity per profile.** The plan derives each icon's GUID from the profile ID plus metric, so each profile gets its own Explorer placement preference. Upstream's single-profile items are keyed by metric only. This matters once profiles can be switched (Milestone 3).
 
 ## Reproducing
@@ -100,4 +155,6 @@ dotnet test --solution ClaudeUsageTracker.slnx
 # Fixture mode: <folder>\home\.claude\.credentials.json and <folder>\home\.claude.json hold synthetic data,
 # <folder>\responses\usage.json and status.json the canned answers (optional usage.status holds an HTTP status).
 dotnet run --project src/ClaudeUsageTracker.App -- --fixture <folder>
+# One read-only request with the default Claude Code login, printing field names and types only:
+dotnet run --project spikes/OAuthUsageProbe -c Release -- --repeat 1 --shape true
 ```
