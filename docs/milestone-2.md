@@ -12,7 +12,7 @@ Recorded 2026-10-01 on the development machine (Windows 11 26200, two 3840 × 21
 | Setup wizard: provider choice, CLI discovery/linking, connection test, review, save; edit/cancel/retry; non-destructive failures | Implemented for the Claude Code route. Browser sign-in, session keys, the Console and Codex are shown as not yet available | Automated (`SetupWizardViewModelTests`, `SetupServiceTests`); manual in fixture mode; live setup with the default Claude Code login |
 | CLI file linking plus read-only OAuth route | Implemented | Automated (`CliLinkServiceTests`, `UsageClientTests`); live: setup, polling, restart and an account change checked by the user on 2026-10-01 |
 | Secure persistence, no plaintext shortcut; mirror CLI-owned credentials; waiting-for-refresh state | Implemented (DPAPI per-profile file holding only `claudeAiOauth`; never refreshes) | Automated (`SecretStoreTests`, `CliLinkServiceTests`, `PopoverModelTests`); the live waiting-state check is scheduled for the night of 2026-10-01 |
-| Session/weekly/model usage, reset times, pace, service status, disconnected/stale/error states | Implemented, including the Extra Usage card from the endpoint's `spend` object (parity difference 27) | Automated (`ClaudeUsageResponseTests`, `PopoverModelTests`, `UsageDisplayTests`); manual in fixture mode; live: matches Claude Code's `/usage`. **The Extra Usage card has not yet been compared with claude.ai** |
+| Session/weekly/model usage, reset times, pace, service status, disconnected/stale/error states | Implemented, including the Extra Usage card from the endpoint's `spend` object (parity difference 27) | Automated (`ClaudeUsageResponseTests`, `PopoverModelTests`, `UsageDisplayTests`); manual in fixture mode; live: matches Claude Code's `/usage`. **The Extra Usage card has not been seen live**: the user's account reports extra usage as disabled (`out_of_credits`), so the card is hidden there, as upstream would hide it |
 | Polling, manual refresh, cancellation, backoff, per-profile coordinator, 30 s default, server retry guidance, late results dropped | Implemented | Automated (`RefreshCoordinatorTests`, `RefreshPolicyTests`), run five times without a flake |
 | G2: read-only usage for other account types | Pro and Team verified in Milestone 1; Max and Enterprise still need such accounts | — |
 | G3: rate limits and sustained 30-second polling | 429 and 5xx `Retry-After` handling implemented and tested with fixtures; **overnight live soak scheduled for the night of 2026-10-01** | Automated |
@@ -141,11 +141,24 @@ The parser ignores everything it does not use, as its tests require.
 
 For extra usage, `spend.used` and `spend.limit` are the precise source: each gives an integer amount in minor units with its own `exponent` and `currency`, so no cents-versus-dollars assumption is needed. `extra_usage` reports `used_credits` (decimal) and `monthly_limit` (integer) in units it does not state, beside `decimal_places`.
 
-The user's account has extra usage enabled, with 0.00 USD spent so far this month. On that basis the Extra Usage card was added from `spend` (parity difference 27). It needs one comparison by eye with claude.ai's usage page; the account should show "0.00 / <limit> USD".
+The Extra Usage card was then added from `spend` (parity difference 27). The user said their account allows extra spending and shows 0.00 USD spent, but the card did not appear in the running app. A second read-only request at 17:23 UTC, through `OAuthUsageProbe --spend true`, printed only flags, reason codes, currencies and the sign of each amount:
+
+```text
+spend: enabled false; disabled_reason "out_of_credits"; severity "normal"; can_toggle false; can_purchase_credits false
+  used: amount_minor zero, USD; limit: amount_minor positive, USD; cap.credits positive; balance, auto_reload null
+extra_usage: is_enabled false; disabled_reason "out_of_credits"; user_disabled false; spend_limit_reached false
+  credits_ever_enabled true; monthly_limit positive; used_credits zero; currency "USD"
+```
+
+So the endpoint reports extra usage as configured (a positive monthly limit, 0 used) but disabled because the account is out of credits. The card is hidden because `spend.enabled` is false, not because nothing has been spent: with `enabled` true, 0 spent shows as "0.00 / <limit> USD" (`PopoverModelTests.ZeroExtraUsageIsShownAsZero`). This differs from Fable: its card is absent when the endpoint reports no Fable window, as the user has seen after a week without using it. Upstream applies the same rule to claude.ai's overage endpoint (`overage.isEnabled == true`), so it would hide the card too. This is upstream's behaviour rather than a defect in the port, but it is a gap: a configured but disabled extra usage is indistinguishable from none. See "Open questions".
 
 ## Open questions
 
-- **Extra usage for CLI profiles.** The card now comes from `spend` (parity difference 27). Field names and types alone do not prove that `spend` describes the same spending as claude.ai's usage page. Until the card has been compared by eye with that page, it is unverified. A non-zero amount would make that comparison stronger.
+- **Extra usage for CLI profiles (left to a later stage).** The card now comes from `spend` (parity difference 27), but it has not been seen live. The user's account reports extra usage as disabled (`out_of_credits`), so the card is hidden there, as upstream would hide it. Two things remain:
+  - Whether to show configured but disabled extra usage, for example the limit with the reason. That would depart from upstream and needs the possible `disabled_reason` values.
+  - A comparison with claude.ai's usage page once the account has credit and the endpoint reports extra usage enabled.
+
+  The Milestone 3 browser route reads claude.ai's own overage endpoint, so it is the natural place to compare the two sources and decide.
 - **Tray identity per profile.** The plan derives each icon's GUID from the profile ID plus metric, so each profile gets its own Explorer placement preference. Upstream's single-profile items are keyed by metric only. This matters once profiles can be switched (Milestone 3).
 
 ## Reproducing
@@ -160,4 +173,6 @@ dotnet test --solution ClaudeUsageTracker.slnx
 dotnet run --project src/ClaudeUsageTracker.App -- --fixture <folder>
 # One read-only request with the default Claude Code login, printing field names and types only:
 dotnet run --project spikes/OAuthUsageProbe -c Release -- --repeat 1 --shape true
+# The same, printing only extra-usage flags, reason codes, currencies and the sign of each amount:
+dotnet run --project spikes/OAuthUsageProbe -c Release -- --repeat 1 --spend true
 ```

@@ -114,6 +114,7 @@ Recorded on 2026-09-30.
     - Amounts are exact: `amount_minor` scaled by the given `exponent`, printed with that many decimal places. Upstream stored minor units as a `Double` and always divided by 100 and printed two decimals, which is wrong for currencies without minor units.
     - The overage balance line under the card is not shown, because the usage endpoint's `spend.balance` has only been seen as null and its shape is unknown.
     - `extra_usage`, whose units are not stated, is not used.
+    - As upstream, disabled extra usage hides the card even when a limit is set. The user's account reports `disabled_reason` `out_of_credits` with a positive limit, so the card has not been seen live ([milestone-2.md](milestone-2.md#open-questions)).
 
 ## Upstream test inventory
 

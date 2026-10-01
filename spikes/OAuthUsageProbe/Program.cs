@@ -4,6 +4,8 @@
 // Output is allowlisted metadata: status, timing, header names and the JSON shape.
 // --shape true prints the whole body as field names and value types only (numbers as integer or
 // decimal, strings as a kind such as "timestamp"), never values; ID-like keys are masked.
+// --spend true prints only the extra-usage flags and reason codes of `spend` and `extra_usage`, with
+// each amount reduced to zero/positive/negative; no amount, free text or identifier is printed.
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
@@ -17,6 +19,7 @@ var interval = TimeSpan.FromSeconds(int.Parse(options.GetValueOrDefault("interva
 // Upstream's CLI OAuth user agent (ClaudeAPIService.buildAuthenticatedRequest).
 var userAgent = options.GetValueOrDefault("user-agent", "claude-code/2.1.5");
 var shapeOnly = options.GetValueOrDefault("shape", "false") == "true";
+var spendOnly = options.GetValueOrDefault("spend", "false") == "true";
 
 var credentialPath = Path.Combine(configDirectory, ".credentials.json");
 string accessToken;
@@ -78,6 +81,10 @@ for (var i = 1; i <= repeat; i++)
     if (shapeOnly)
     {
         DescribeShape(body);
+    }
+    else if (spendOnly)
+    {
+        DescribeSpend(body);
     }
     else
     {
@@ -163,6 +170,55 @@ static void DescribeShape(byte[] body)
 
     static string MaskKey(string key) =>
         Guid.TryParse(key, out _) || (key.Length >= 16 && key.All(char.IsAsciiHexDigit)) ? "<id-like key>" : key;
+}
+
+// Extra-usage flags only: booleans, short lower-case reason codes, currencies, exponents and the sign of
+// each amount.
+static void DescribeSpend(byte[] body)
+{
+    using var document = JsonDocument.Parse(body);
+    var root = document.RootElement;
+    foreach (var (objectName, fields) in new[]
+    {
+        ("spend", new[] { "enabled", "disabled_reason", "severity", "can_toggle", "can_purchase_credits", "used", "limit", "cap", "balance", "auto_reload" }),
+        ("extra_usage", new[] { "is_enabled", "disabled_reason", "user_disabled", "spend_limit_reached", "credits_ever_enabled", "monthly_limit", "used_credits", "currency", "decimal_places" }),
+    })
+    {
+        if (!root.TryGetProperty(objectName, out var obj) || obj.ValueKind != JsonValueKind.Object)
+        {
+            Console.WriteLine($"  {objectName}: {(root.TryGetProperty(objectName, out var other) ? other.ValueKind.ToString() : "absent")}");
+            continue;
+        }
+
+        Console.WriteLine($"  {objectName}:");
+        foreach (var field in fields)
+        {
+            Console.WriteLine($"    {field}: {(obj.TryGetProperty(field, out var value) ? Flag(value) : "absent")}");
+        }
+    }
+
+    static string Flag(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null => value.ValueKind.ToString().ToLowerInvariant(),
+        JsonValueKind.Number => Sign(value),
+        JsonValueKind.String when IsCode(value.GetString()!) => $"\"{value.GetString()}\"",
+        JsonValueKind.String => $"(text, {value.GetString()!.Length} chars)",
+        JsonValueKind.Object => "{" + string.Join(", ", value.EnumerateObject().Select(p => p.Name switch
+        {
+            "amount_minor" => $"amount_minor: {Sign(p.Value)}",
+            _ => $"{p.Name}: {Flag(p.Value)}",
+        })) + "}",
+        _ => value.ValueKind.ToString(),
+    };
+
+    // A reason code or currency, not free text.
+    static bool IsCode(string text) =>
+        text.Length is > 0 and <= 64 && text.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '_')
+        || (text.Length == 3 && text.All(char.IsAsciiLetterUpper));
+
+    // Small integers such as an exponent are printed; amounts are reduced to their sign.
+    static string Sign(JsonElement number) =>
+        number.GetDecimal() switch { 0 => "zero", > 0 => "positive", _ => "negative" };
 }
 
 static void DescribeBody(byte[] body)
