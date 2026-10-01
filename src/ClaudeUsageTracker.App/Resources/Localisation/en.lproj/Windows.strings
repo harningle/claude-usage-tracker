@@ -167,6 +167,7 @@
 "windows.cli.ownership.app" = "This tracker: no known Claude Code folder holds this account any more";
 "windows.cli.ownership.unresolved" = "Nobody: it can't be told which Claude Code folder holds this account";
 "windows.cli.notice.other_folder_unreadable" = "Another Claude Code folder could not be read, so the tracker will not renew any login until it can.";
+"windows.cli.notice.other_copy_unreadable" = "Another profile's saved login could not be read, so the tracker will not renew any login until it can.";
 "windows.cli.used_elsewhere.title" = "This login is also used elsewhere";
 "windows.cli.used_elsewhere.description" = "Turn on when this Claude Code login is also used on another PC or in a copied folder. The tracker then never renews it, because that would sign the other copy out.";
 "windows.codex.folder" = "Codex folder";

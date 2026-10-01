@@ -11,7 +11,10 @@ namespace ClaudeUsageTracker.App.Storage;
 /// <c>ToString</c> can print the tokens.
 /// </summary>
 /// <param name="oauthJson">The <c>claudeAiOauth</c> object as compact JSON.</param>
-/// <param name="pending">A renewed login that still has to be written back to Claude Code's files.</param>
+/// <param name="pending">
+/// Folders that still hold the token a renewal used up and have to be given this copy's login. A newer login
+/// of the same account that Claude Code writes meanwhile replaces the copy's login and keeps the record.
+/// </param>
 public sealed class CliSecret(
     string oauthJson, CredentialOwnership ownership, string sourceConfigDirectory, DateTimeOffset savedAt, PendingWriteBack? pending = null)
 {
@@ -269,6 +272,8 @@ public sealed class ProfileSecretStore(SecretStore store)
     }
 
     public bool Exists(Guid profileId) => store.Exists(profileId);
+
+    public IReadOnlyList<Guid> ProfileIds() => store.ProfileIds();
 
     public void Delete(Guid profileId) => store.Delete(profileId);
 }

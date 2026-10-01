@@ -282,16 +282,104 @@ public sealed class CodexUsageSourceTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
-    private (CodexUsageSource Source, LinkHarness Links, ScriptedHandler Usage) Create(ScriptedHandler tokens, Func<string?, HttpResponseMessage> usage)
+    // Pasted credentials last renewed more than eight days ago, so each resolution renews them.
+    private const string Stale = """{"tokens":{"access_token":"codex-at","refresh_token":"codex-rt","account_id":"chatgpt-1"},"last_refresh":"2026-09-01T12:00:00Z"}""";
+
+    private (CodexUsageSource Source, LinkHarness Links, ScriptedHandler Usage) Create(
+        ScriptedHandler tokens, Func<string?, HttpResponseMessage> usage, string pasted = Pasted)
     {
         var links = new LinkHarness(_temp.Path, Path.Combine(_temp.Path, "home"), _time, tokens);
         var handler = new ScriptedHandler((request, _) => Task.FromResult(usage(request.Headers.Authorization?.Parameter)));
         var source = new CodexUsageSource(links.Secrets, links.Lock, links.Tokens,
             new CodexClient(new HttpClient(handler), _time, new RequestLog(_temp.Path)), _time, () => Path.Combine(_temp.Path, "home", ".codex"));
         var bundle = links.Secrets.Load(_profileId);
-        bundle.CodexAuthJson = Pasted;
+        bundle.CodexAuthJson = pasted;
         links.Secrets.Save(_profileId, bundle);
         return (source, links, handler);
+    }
+
+    private string SecretFile => new SecretStore(Path.Combine(_temp.Path, "secrets")).PathFor(_profileId);
+
+    [Fact]
+    public async Task RenewedCredentialsThatCouldNotBeSavedAreSavedLater()
+    {
+        var (source, links, _) = Create(
+            LinkHarness.TokenEndpoint(() => LinkHarness.Json(HttpStatusCode.OK, """{"access_token":"codex-at-2","refresh_token":"codex-rt-2"}""")),
+            _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var watch = Watch();
+
+        SourceCredentials first;
+        using (new FileStream(SecretFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            first = await source.ResolveAsync(watch, CancellationToken.None);
+        }
+
+        // The renewed login is used and the failure is shown; once the file is free it is saved.
+        Assert.Equal("codex-at-2", ((ClaudeUsageTracker.Core.Providers.Codex.CodexCredentials)first.Secret!).AccessToken);
+        Assert.NotNull(first.StorageError);
+        var second = await source.ResolveAsync(watch, CancellationToken.None);
+
+        Assert.Null(second.StorageError);
+        Assert.Contains("codex-rt-2", links.Secrets.Load(_profileId).CodexAuthJson, StringComparison.Ordinal);
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task CredentialsPastedAfterAnUnsavedRenewalAreNotOverwritten()
+    {
+        var (source, links, _) = Create(
+            LinkHarness.TokenEndpoint(() => LinkHarness.Json(HttpStatusCode.OK, """{"access_token":"codex-at-2","refresh_token":"codex-rt-2"}""")),
+            _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var watch = Watch();
+        using (new FileStream(SecretFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await source.ResolveAsync(watch, CancellationToken.None);
+        }
+
+        // The user pastes another account's credentials before the renewed ones could be saved.
+        const string replacement = """{"tokens":{"access_token":"other-at","refresh_token":"other-rt","account_id":"chatgpt-2"},"last_refresh":"2026-09-30T12:00:00Z"}""";
+        var bundle = links.Secrets.Load(_profileId);
+        bundle.CodexAuthJson = replacement;
+        links.Secrets.Save(_profileId, bundle);
+
+        var resolved = await source.ResolveAsync(watch, CancellationToken.None);
+
+        Assert.Equal("other-at", ((ClaudeUsageTracker.Core.Providers.Codex.CodexCredentials)resolved.Secret!).AccessToken);
+        Assert.Null(resolved.StorageError);
+        Assert.Equal(replacement, links.Secrets.Load(_profileId).CodexAuthJson);
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task RejectedRefreshTokenIsNotSentAgainUntilTheCredentialsChange()
+    {
+        var (source, links, _) = Create(
+            LinkHarness.TokenEndpoint(() => LinkHarness.Json(HttpStatusCode.BadRequest, """{"error":"refresh_token_reused"}""")),
+            _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var watch = Watch();
+
+        Assert.Equal(LinkStatus.LoginRejected, (await source.ResolveAsync(watch, CancellationToken.None)).Status);
+        Assert.Equal(LinkStatus.LoginRejected, (await source.ResolveAsync(watch, CancellationToken.None)).Status);
+
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task FailedRenewalIsTriedAgainOnlyAfterFiveMinutes()
+    {
+        var (source, links, _) = Create(
+            LinkHarness.TokenEndpoint(() => LinkHarness.Json(HttpStatusCode.ServiceUnavailable, "{}")),
+            _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var watch = Watch();
+
+        // A failed renewal still leaves a token worth trying.
+        Assert.Equal(LinkStatus.Ready, (await source.ResolveAsync(watch, CancellationToken.None)).Status);
+        await source.ResolveAsync(watch, CancellationToken.None);
+        Assert.Equal(1, links.TokenRequests);
+
+        _time.Now += TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1);
+        await source.ResolveAsync(watch, CancellationToken.None);
+        Assert.Equal(2, links.TokenRequests);
     }
 
     private ProfileWatch Watch() => ProfileWatch.From(new ProfileSettings

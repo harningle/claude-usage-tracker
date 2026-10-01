@@ -284,6 +284,7 @@ public sealed class SettingsViewModel : ObservableObject
                     LinkNotice.HandBackPending => Strings.Get("windows.banner.hand_back_pending"),
                     LinkNotice.RenewalFailed => Strings.Get("windows.banner.renewal_failed"),
                     LinkNotice.OtherFolderUnreadable => Strings.Get("windows.cli.notice.other_folder_unreadable"),
+                    LinkNotice.OtherCopyUnreadable => Strings.Get("windows.cli.notice.other_copy_unreadable"),
                     _ => null,
                 });
         }

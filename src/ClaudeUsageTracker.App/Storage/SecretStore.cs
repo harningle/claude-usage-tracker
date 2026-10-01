@@ -32,6 +32,14 @@ public sealed class SecretStore
 
     public bool Exists(Guid profileId) => File.Exists(PathFor(profileId));
 
+    /// <summary>The profiles that have a secret file; none before the first one is saved.</summary>
+    public IReadOnlyList<Guid> ProfileIds() =>
+        Directory.Exists(_directory)
+            ? [.. Directory.EnumerateFiles(_directory, "*.secret")
+                .Select(path => Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id) ? id : (Guid?)null)
+                .OfType<Guid>()]
+            : [];
+
     /// <summary>Encrypts and atomically replaces the profile's secret file, then verifies the read-back.</summary>
     public void Write(Guid profileId, byte[] plaintext)
     {

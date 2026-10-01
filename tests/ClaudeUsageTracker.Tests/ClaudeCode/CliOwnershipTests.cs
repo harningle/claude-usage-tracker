@@ -279,6 +279,220 @@ public sealed class CliOwnershipTests : IDisposable
     }
 
     [Fact]
+    public async Task ConcurrentTakeoverNeverReusesATokenWhenTheHandBackFails()
+    {
+        var release = new TaskCompletionSource();
+        var calls = 0;
+        var tokens = new ScriptedHandler(async (_, _) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                await release.Task;
+                return LinkHarness.Grant("at-2", "rt-2");
+            }
+
+            return LinkHarness.Grant("at-3", "rt-3");
+        });
+        var harness = Harness(tokens);
+        var (first, link) = await LinkExpired(harness);
+        var second = Guid.NewGuid();
+        _time.Now = Now;
+        await harness.Service.WriteMirrorAsync(second, harness.Service.Read(Default), CancellationToken.None);
+        _time.Now = Now.AddHours(9);
+
+        using (new FileStream(DefaultFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // Claude Code's file cannot be replaced, so it still holds the token after the first renewal.
+            var checks = new[] { Check(harness, first, link), Check(harness, second, link) };
+            await Task.Delay(200, TestContext.Current.CancellationToken);
+            release.SetResult();
+            await Task.WhenAll(checks);
+        }
+
+        Assert.Equal(1, harness.TokenRequests);
+    }
+
+    [Fact]
+    public async Task ProfilesOwningTheSameAccountShareOneRenewal()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
+        var (first, link) = await LinkExpired(harness);
+        var second = Guid.NewGuid();
+        _time.Now = Now;
+        await harness.Service.WriteMirrorAsync(second, harness.Service.Read(Default), CancellationToken.None);
+        _time.Now = Now.AddHours(1);
+        // Claude Code moved to another account, so both profiles' copies become the tracker's own.
+        Write(DefaultFile, "at-other", "rt-other", Now.AddHours(20));
+        File.WriteAllText(Path.Combine(UserProfile, ".claude.json"), LinkHarness.Account("acc-2", "other@example.com"));
+        Assert.Equal(CredentialOwnership.AppOwned, (await Check(harness, first, link)).Ownership);
+        Assert.Equal(CredentialOwnership.AppOwned, (await Check(harness, second, link)).Ownership);
+
+        _time.Now = Now.AddHours(9);
+        Assert.Equal("at-2", (await Check(harness, first, link)).Credentials?.AccessToken);
+        var other = await Check(harness, second, link);
+        // And after a restart, when nothing is remembered in memory.
+        var restarted = Harness();
+        var afterRestart = await Check(restarted, second, link);
+
+        Assert.Equal("at-2", other.Credentials?.AccessToken);
+        Assert.Equal("at-2", afterRestart.Credentials?.AccessToken);
+        Assert.Equal(1, harness.TokenRequests);
+        Assert.Equal(0, restarted.TokenRequests);
+    }
+
+    [Fact]
+    public async Task RenewalReachesAProfileThatHasNotYetSeenTheLoginBecomeTheTrackersOwn()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
+        var (first, link) = await LinkExpired(harness);
+        var second = Guid.NewGuid();
+        _time.Now = Now;
+        await harness.Service.WriteMirrorAsync(second, harness.Service.Read(Default), CancellationToken.None);
+        _time.Now = Now.AddHours(9);
+        // Claude Code signed out. Only the first profile is checked, so only its copy becomes the tracker's own
+        // and is renewed; the second profile's copy is still marked as Claude Code's.
+        File.Delete(DefaultFile);
+        Assert.Equal("at-2", (await Check(harness, first, link)).Credentials?.AccessToken);
+
+        var other = await Check(harness, second, link);
+        // And after a restart, when nothing is remembered in memory.
+        var restarted = Harness();
+        var afterRestart = await Check(restarted, second, link);
+
+        Assert.Equal("at-2", other.Credentials?.AccessToken);
+        Assert.Equal("at-2", afterRestart.Credentials?.AccessToken);
+        Assert.Equal(1, harness.TokenRequests);
+        Assert.Equal(0, restarted.TokenRequests);
+    }
+
+    [Fact]
+    public async Task NoFurtherRenewalWhileAFolderOfTheLineageStillAwaitsItsHandBack()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2"), () => LinkHarness.Grant("at-3", "rt-3")));
+        var copied = Path.Combine(_temp.Path, "copied-claude");
+        var copiedFile = Path.Combine(copied, ".credentials.json");
+        harness.Known.Add(copied);
+        var (profileId, link) = await LinkExpired(harness);
+        Write(copiedFile, "at-1", "rt-1", Now.AddHours(8));
+
+        using (new FileStream(copiedFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // The linked folder gets the renewed login; the other folder cannot be written yet.
+            Assert.Equal(LinkNotice.HandBackPending, (await Check(harness, profileId, link)).Notice);
+            Assert.Contains("\"at-2\"", File.ReadAllText(DefaultFile), StringComparison.Ordinal);
+
+            // The renewed login expires before the other folder is free: it is not renewed again, and that
+            // folder is not forgotten.
+            _time.Now = Now.AddHours(18);
+            var waiting = await Check(harness, profileId, link);
+
+            Assert.Equal(LinkStatus.WaitingForCliRefresh, waiting.Status);
+            Assert.Equal(LinkNotice.HandBackPending, waiting.Notice);
+            Assert.Equal(1, harness.TokenRequests);
+            Assert.Single(harness.Secrets.Load(profileId).Cli?.Pending?.Targets ?? []);
+        }
+
+        // Once it is free it gets the renewed login, and from then on the whole lineage is renewed together.
+        var check = await Check(harness, profileId, link);
+
+        Assert.Equal("at-3", check.Credentials?.AccessToken);
+        Assert.Contains("\"at-3\"", File.ReadAllText(copiedFile), StringComparison.Ordinal);
+        Assert.Contains("\"at-3\"", File.ReadAllText(DefaultFile), StringComparison.Ordinal);
+        Assert.Equal(2, harness.TokenRequests);
+    }
+
+    [Fact]
+    public async Task PendingHandBackPassesOnALoginClaudeCodeRenewedMeanwhile()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
+        var copied = Path.Combine(_temp.Path, "copied-claude");
+        var copiedFile = Path.Combine(copied, ".credentials.json");
+        harness.Known.Add(copied);
+        var (profileId, link) = await LinkExpired(harness);
+        Write(copiedFile, "at-1", "rt-1", Now.AddHours(8));
+        using (new FileStream(copiedFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await Check(harness, profileId, link);
+        }
+
+        // Before the other folder gets its hand-back, Claude Code renews the linked folder's login by itself,
+        // using up rt-2.
+        Write(DefaultFile, "at-3", "rt-3", Now.AddHours(17));
+        await Check(harness, profileId, link);
+        var check = await Check(harness, profileId, link);
+
+        // The other folder gets the newest login, never the token Claude Code has already used.
+        Assert.Equal("at-3", check.Credentials?.AccessToken);
+        Assert.Contains("\"rt-3\"", File.ReadAllText(copiedFile), StringComparison.Ordinal);
+        Assert.Null(harness.Secrets.Load(profileId).Cli?.Pending);
+        Assert.Equal(1, harness.TokenRequests);
+    }
+
+    [Fact]
+    public async Task AfterARestartATokenAnotherProfileIsHandingBackIsNotSentAgain()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
+        var (first, link) = await LinkExpired(harness);
+        var second = Guid.NewGuid();
+        _time.Now = Now;
+        await harness.Service.WriteMirrorAsync(second, harness.Service.Read(Default), CancellationToken.None);
+        _time.Now = Now.AddHours(9);
+        using (new FileStream(DefaultFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // The first profile renews, but cannot hand the login back yet.
+            await Check(harness, first, link);
+        }
+
+        // A restart, and other profiles are checked before the first one finishes its hand-back. The second
+        // was given the renewal; a third is linked now, from the folder that still holds the used-up token.
+        var restarted = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-3", "rt-3")));
+        var third = Guid.NewGuid();
+        await restarted.Service.WriteMirrorAsync(third, restarted.Service.Read(Default), CancellationToken.None);
+        var shared = await Check(restarted, second, link);
+        var waiting = await Check(restarted, third, link);
+
+        Assert.Equal("at-2", shared.Credentials?.AccessToken);
+        Assert.Null(waiting.Credentials);
+        Assert.Equal(LinkNotice.HandBackPending, waiting.Notice);
+        Assert.Equal(0, restarted.TokenRequests);
+        var handedBack = await Check(restarted, first, link);
+        Assert.Equal("at-2", handedBack.Credentials?.AccessToken);
+        Assert.Equal("at-2", (await Check(restarted, third, link)).Credentials?.AccessToken);
+        Assert.Equal(0, restarted.TokenRequests);
+    }
+
+    [Fact]
+    public async Task UnreadableCopyOfAnotherProfileBlocksEveryRenewal()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
+        var (first, link) = await LinkExpired(harness);
+        var second = Guid.NewGuid();
+        _time.Now = Now;
+        await harness.Service.WriteMirrorAsync(second, harness.Service.Read(Default), CancellationToken.None);
+        _time.Now = Now.AddHours(9);
+        using (new FileStream(DefaultFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // The first profile renews, but cannot hand the login back yet.
+            await Check(harness, first, link);
+        }
+
+        // After a restart, the first profile's saved copy, with its pending record, cannot be read.
+        var restarted = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-3", "rt-3")));
+        var firstFile = new SecretStore(Path.Combine(_temp.Path, "secrets")).PathFor(first);
+        LinkCheck waiting;
+        using (new FileStream(firstFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            waiting = await Check(restarted, second, link);
+        }
+
+        Assert.Equal(0, restarted.TokenRequests);
+        Assert.Equal(LinkNotice.OtherCopyUnreadable, waiting.Notice);
+        Assert.Equal("at-2", (await Check(restarted, first, link)).Credentials?.AccessToken);
+        Assert.Equal("at-2", (await Check(restarted, second, link)).Credentials?.AccessToken);
+        Assert.Equal(0, restarted.TokenRequests);
+    }
+
+    [Fact]
     public async Task AccountThatLeftEveryKnownFolderBecomesTheTrackersOwn()
     {
         var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
@@ -321,6 +535,49 @@ public sealed class CliOwnershipTests : IDisposable
         Assert.Equal(LinkStatus.Ready, check.Status);
         Assert.Equal(CredentialOwnership.CliLinked, check.Ownership);
         Assert.Equal(CredentialOwnership.CliLinked, harness.Secrets.Load(profileId).Cli?.Ownership);
+    }
+
+    [Fact]
+    public async Task OwnedLoginMarkedAsUsedElsewhereIsNotRenewed()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
+        var (profileId, link) = await LinkExpired(harness);
+        _time.Now = Now.AddHours(1);
+        File.Delete(DefaultFile);
+        Assert.Equal(CredentialOwnership.AppOwned, (await Check(harness, profileId, link)).Ownership);
+
+        // The user then says the login is also used on another PC.
+        link.UsedElsewhere = true;
+        _time.Now = Now.AddHours(9);
+        var check = await Check(harness, profileId, link);
+
+        Assert.Null(check.Credentials);
+        Assert.Equal(CredentialOwnership.CliLinked, check.Ownership);
+        Assert.Equal(CredentialOwnership.CliLinked, harness.Secrets.Load(profileId).Cli?.Ownership);
+        Assert.Equal(0, harness.TokenRequests);
+    }
+
+    [Fact]
+    public async Task OwnedLoginBackInAnotherKnownFolderIsClaudeCodesAgain()
+    {
+        var harness = Harness(LinkHarness.TokenEndpoint(() => LinkHarness.Grant("at-2", "rt-2")));
+        var other = Path.Combine(_temp.Path, "other-claude");
+        harness.Known.Add(other);
+        var (profileId, link) = await LinkExpired(harness);
+        _time.Now = Now.AddHours(1);
+        File.Delete(DefaultFile);
+        Assert.Equal(CredentialOwnership.AppOwned, (await Check(harness, profileId, link)).Ownership);
+
+        // The login is put back into another known folder, and Claude Code runs there.
+        Write(Path.Combine(other, ".credentials.json"), "at-1", "rt-1", Now.AddHours(8));
+        harness.ClaudeRunning();
+        _time.Now = Now.AddHours(9);
+        var check = await Check(harness, profileId, link);
+
+        Assert.Null(check.Credentials);
+        Assert.Equal(CredentialOwnership.CliLinked, check.Ownership);
+        Assert.Equal(CredentialOwnership.CliLinked, harness.Secrets.Load(profileId).Cli?.Ownership);
+        Assert.Equal(0, harness.TokenRequests);
     }
 
     [Fact]
