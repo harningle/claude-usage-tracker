@@ -1,19 +1,23 @@
+using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ClaudeUsageTracker.App.Storage;
+using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.Core.ClaudeCode;
 
 namespace ClaudeUsageTracker.App.ClaudeCode;
 
 public enum LinkStatus
 {
-    /// <summary>The linked account is signed in with a usable token.</summary>
+    /// <summary>The account's login is usable.</summary>
     Ready,
 
     /// <summary>
-    /// The linked account's token has expired. Claude Code refreshes it on next use; the app does not
-    /// rotate a CLI-owned token in Milestone 2, so it waits and re-reads.
+    /// The linked account's token has expired and the tracker may not renew it now: Claude Code is running
+    /// or may be, the login is also used elsewhere, or a renewal just failed. Claude Code refreshes it on
+    /// next use, and the tracker re-reads the file at each interval.
     /// </summary>
     WaitingForCliRefresh,
 
@@ -26,28 +30,86 @@ public enum LinkStatus
 
     /// <summary>Neither account identity nor token lineage can show that this is the linked account.</summary>
     AccountUnverified,
+
+    /// <summary>The login service refused to renew this login; only signing in again helps.</summary>
+    LoginRejected,
+
+    /// <summary>A login the tracker renews itself has expired and the renewal got no usable answer; it is tried again.</summary>
+    RefreshFailed,
 }
 
-/// <param name="Credentials">Only set for <see cref="LinkStatus.Ready"/>.</param>
-/// <param name="MirrorError">A failure to update the app's encrypted copy; polling may continue.</param>
-public sealed record LinkCheck(LinkStatus Status, CliSnapshot Snapshot, CliCredentials? Credentials, string? MirrorError);
+/// <summary>Who may renew a profile's Claude Code login (plan.md section 2, "Secrets, refresh ownership and persistence").</summary>
+public enum CredentialOwnership
+{
+    /// <summary>A known Claude Code folder holds this account's login, so Claude Code owns the token lineage.</summary>
+    CliLinked,
+
+    /// <summary>No known folder holds the account any more; the tracker's copy is the only one and the tracker renews it.</summary>
+    AppOwned,
+
+    /// <summary>It cannot be told who holds the login (an unreadable folder, a login without identity). Nothing is renewed.</summary>
+    Unresolved,
+}
+
+/// <summary>Something about the login that the user should know although usage may still be shown.</summary>
+public enum LinkNotice
+{
+    /// <summary>The tracker renewed Claude Code's login but could not yet write it back to every folder.</summary>
+    HandBackPending,
+
+    /// <summary>The tracker tried to renew the login and got no usable answer.</summary>
+    RenewalFailed,
+
+    /// <summary>Another known Claude Code folder could not be read, so the tracker will not renew anything.</summary>
+    OtherFolderUnreadable,
+}
+
+/// <param name="Credentials">The login to poll with, from the linked folder or the profile's own copy; null when none is usable.</param>
+/// <param name="MirrorError">A failure to read or update the app's encrypted copy; polling may continue.</param>
+public sealed record LinkCheck(LinkStatus Status, CliSnapshot Snapshot, CliCredentials? Credentials, string? MirrorError)
+{
+    public CredentialOwnership Ownership { get; init; } = CredentialOwnership.CliLinked;
+
+    public LinkNotice? Notice { get; init; }
+}
 
 /// <summary>
-/// Links profiles to Claude Code config directories and mirrors the CLI-owned login into the
-/// profile's DPAPI file. The mirror is the CLI-linked app copy (plan.md section 2); it is never used to
-/// refresh, and polling always uses the CLI's own current file.
+/// Links profiles to Claude Code logins and keeps each profile's encrypted copy. A profile follows an
+/// account. While a known Claude Code folder holds that account, the login is Claude Code's: the tracker
+/// reads it through and mirrors it, and renews it only when it has expired and no Claude Code process
+/// could be using it (the guarded takeover of upstream issue #268), writing the result back to every
+/// folder that held the same token lineage. When no known folder holds the account any more, the copy
+/// becomes the tracker's own and is renewed by it. Every change to a copy happens under the app-wide
+/// credential lock.
 /// </summary>
-public sealed class CliLinkService(SecretStore secrets, TimeProvider time, string userProfile)
+public sealed class CliLinkService(
+    ProfileSecretStore secrets,
+    TimeProvider time,
+    string userProfile,
+    CredentialLock credentialLock,
+    OAuthTokenClient tokens,
+    CliProcessGuard processes,
+    Func<IReadOnlyList<CliConfigDirectory>> inventory)
 {
-    private const int BundleVersion = 1;
-    private const string BundleKind = "claudeCliOAuth";
-
     /// <summary>A torn read during a CLI write is retried once after this delay.</summary>
     internal static readonly TimeSpan RereadDelay = TimeSpan.FromMilliseconds(250);
 
-    // The last mirrored login per profile, so an unchanged file is not re-encrypted every poll.
-    private readonly Dictionary<Guid, string> _mirrored = [];
+    /// <summary>After a renewal that got no usable answer, the next attempt waits this long.</summary>
+    internal static readonly TimeSpan RenewalRetryDelay = TimeSpan.FromMinutes(5);
+
     private readonly Lock _gate = new();
+
+    // Refresh tokens a successful grant used up: never sent again.
+    private readonly HashSet<string> _consumed = [];
+
+    // Refresh tokens the login service rejected: not sent again until the login changes.
+    private readonly HashSet<string> _rejected = [];
+
+    // Renewed logins that could not be saved yet. They are kept for a later save and nothing else is renewed
+    // for that profile meanwhile.
+    private readonly Dictionary<Guid, CliSecret> _unsaved = [];
+
+    private readonly Dictionary<Guid, DateTimeOffset> _renewalNotBefore = [];
 
     public CliSnapshot Read(CliConfigDirectory directory) => CliStore.Read(directory, time.GetUtcNow());
 
@@ -72,32 +134,38 @@ public sealed class CliLinkService(SecretStore secrets, TimeProvider time, strin
         };
     }
 
-    /// <summary>Encrypts the snapshot's <c>claudeAiOauth</c> login into the profile's file and verifies it.</summary>
-    public void WriteMirror(Guid profileId, CliSnapshot snapshot)
+    /// <summary>Saves the snapshot's <c>claudeAiOauth</c> login as the profile's CLI-linked copy and verifies it.</summary>
+    public async Task WriteMirrorAsync(Guid profileId, CliSnapshot snapshot, CancellationToken cancellation)
     {
-        lock (_gate)
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
-            WriteMirrorLocked(profileId, snapshot);
+            SaveCopy(profileId, MirrorOf(snapshot));
+            Forget(profileId);
         }
     }
 
     /// <summary>
-    /// Deletes the profile's encrypted copy. Writes and deletes are serialised, so a check that started
-    /// before an unlink cannot recreate the file after it (callers cancel such checks first).
+    /// Removes the profile's copy of the Claude Code login; its other secrets stay. Changes are serialised,
+    /// so a check that started before an unlink cannot recreate the copy after it (callers cancel such
+    /// checks first).
     /// </summary>
-    public void DeleteMirror(Guid profileId)
+    public async Task DeleteMirrorAsync(Guid profileId, CancellationToken cancellation)
     {
-        lock (_gate)
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
-            secrets.Delete(profileId);
-            _mirrored.Remove(profileId);
+            if (secrets.Exists(profileId))
+            {
+                SaveCopy(profileId, null);
+            }
+
+            Forget(profileId);
         }
     }
 
     /// <summary>
-    /// Reads the linked directory and decides whether it still holds the linked account. A usable or
-    /// expired login of the same account updates the mirror when it changed, which captures Claude
-    /// Code's own token rotations. A copy that cannot be read is reported and left untouched.
+    /// Reads the linked folder and decides which login the profile may poll with. A usable or expired login
+    /// of the linked account updates the copy when it changed, which captures Claude Code's own rotations.
+    /// A copy that cannot be read is reported and left untouched.
     /// </summary>
     public async Task<LinkCheck> CheckAsync(Guid profileId, CliLink link, CancellationToken cancellation)
     {
@@ -109,143 +177,572 @@ public sealed class CliLinkService(SecretStore secrets, TimeProvider time, strin
             snapshot = Read(directory);
         }
 
-        var status = snapshot.State switch
+        var mirrorError = await SaveUnsavedAsync(profileId, cancellation).ConfigureAwait(false);
+        var (copy, loadError) = LoadCopy(profileId);
+        mirrorError ??= loadError;
+
+        LinkNotice? notice = null;
+        if (copy?.Pending is not null)
         {
-            CliLoginState.NotSignedIn => LinkStatus.NotSignedIn,
-            CliLoginState.Unreadable => LinkStatus.Unreadable,
-            CliLoginState.Invalid => LinkStatus.Invalid,
-            _ => (LinkStatus?)null,
-        };
-        if (status is { } failed)
-        {
-            return new LinkCheck(failed, snapshot, null, null);
+            (copy, notice) = await ReconcileAsync(profileId, cancellation).ConfigureAwait(false);
+            // The hand-back may just have written the folder.
+            snapshot = Read(directory);
         }
 
-        var (mirrored, mirrorError) = ReadMirror(profileId);
-        var mirroredRefresh = RefreshTokenOf(mirrored);
-        if (mirroredRefresh is not null && mirroredRefresh != snapshot.Credentials!.RefreshToken)
+        if (snapshot.Credentials is not { } stored)
+        {
+            return snapshot.State == CliLoginState.NotSignedIn
+                ? await AccountLeftAsync(profileId, link, snapshot, copy, LinkStatus.NotSignedIn, mirrorError, notice, cancellation).ConfigureAwait(false)
+                : FromCopy(
+                    snapshot.State == CliLoginState.Unreadable ? LinkStatus.Unreadable : LinkStatus.Invalid,
+                    snapshot, copy, CredentialOwnership.Unresolved, mirrorError, notice);
+        }
+
+        // The folder still holding the login this app renewed and has yet to hand back is the same lineage.
+        var awaitingHandBack = copy?.Pending is { } pending && pending.ConsumedRefreshToken == stored.RefreshToken
+                               && stored.AccessToken != AccessTokenOf(copy);
+        var lineage = awaitingHandBack ? stored.RefreshToken : RefreshTokenOf(copy);
+        if (lineage is not null && lineage != stored.RefreshToken)
         {
             // The token lineage changed: Claude Code refreshed, or a /login is writing .credentials.json and
             // .claude.json one after the other. Trust the files only once two reads agree.
             await Task.Delay(RereadDelay, time, cancellation).ConfigureAwait(false);
             var again = Read(directory);
-            if (again.Credentials?.RawJson != snapshot.Credentials.RawJson || again.Account?.Identity != snapshot.Account?.Identity)
+            if (again.Credentials?.RawJson != stored.RawJson || again.Account?.Identity != snapshot.Account?.Identity)
             {
-                return new LinkCheck(LinkStatus.Unreadable, again, null, mirrorError);
+                return FromCopy(LinkStatus.Unreadable, again, copy, CredentialOwnership.Unresolved, mirrorError, notice);
             }
         }
 
-        var credentials = snapshot.Credentials!;
-        var match = CliLoginLabels.Compare(link.Identity, snapshot.Account?.Identity, mirroredRefresh, credentials.RefreshToken);
-        if (match == CliAccountMatch.DifferentAccount)
+        switch (CliLoginLabels.Compare(link.Identity, snapshot.Account?.Identity, lineage, stored.RefreshToken))
         {
-            return new LinkCheck(LinkStatus.AccountChanged, snapshot, null, mirrorError);
+            case CliAccountMatch.DifferentAccount:
+                return await AccountLeftAsync(profileId, link, snapshot, copy, LinkStatus.AccountChanged, mirrorError, notice, cancellation)
+                    .ConfigureAwait(false);
+            case CliAccountMatch.Unresolved:
+                return FromCopy(LinkStatus.AccountUnverified, snapshot, copy, CredentialOwnership.Unresolved, mirrorError, notice);
         }
 
-        if (match == CliAccountMatch.Unresolved)
+        if (awaitingHandBack)
         {
-            return new LinkCheck(LinkStatus.AccountUnverified, snapshot, null, mirrorError);
+            // The copy is newer than the folder. It is used for polling but never renewed again until the
+            // hand-back is settled.
+            return FromCopy(LinkStatus.WaitingForCliRefresh, snapshot, copy, CredentialOwnership.CliLinked, mirrorError, notice, LinkStatus.Ready);
         }
 
-        if (mirrorError is null && OAuthObject(credentials.RawJson) is { } oauth && oauth != mirrored)
+        if (mirrorError is null && OAuthObject(stored.RawJson) is { } oauth
+            && (copy is null || copy.OAuthJson != oauth || copy.Ownership != CredentialOwnership.CliLinked))
         {
-            lock (_gate)
-            {
-                // Checked under the same lock as DeleteMirror: a superseded check never writes.
-                cancellation.ThrowIfCancellationRequested();
-                try
-                {
-                    WriteMirrorLocked(profileId, snapshot);
-                }
-                catch (Exception e) when (e is SecretStoreException or System.IO.IOException or UnauthorizedAccessException
-                                              or System.Security.Cryptography.CryptographicException)
-                {
-                    mirrorError = e.Message;
-                }
-            }
+            mirrorError = await MirrorAsync(profileId, snapshot, cancellation).ConfigureAwait(false);
         }
 
-        return snapshot.State == CliLoginState.Expired
-            ? new LinkCheck(LinkStatus.WaitingForCliRefresh, snapshot, null, mirrorError)
-            : new LinkCheck(LinkStatus.Ready, snapshot, credentials, mirrorError);
-    }
-
-    private void WriteMirrorLocked(Guid profileId, CliSnapshot snapshot)
-    {
-        var oauth = OAuthObject(snapshot.Credentials?.RawJson)
-                    ?? throw new InvalidOperationException("The snapshot has no claudeAiOauth login to mirror.");
-        var bundle = new JsonObject
-        {
-            ["version"] = BundleVersion,
-            ["kind"] = BundleKind,
-            ["sourceConfigDirectory"] = snapshot.Directory.Path,
-            ["mirroredAt"] = time.GetUtcNow().ToString("O"),
-            ["claudeAiOauth"] = JsonNode.Parse(oauth),
-        };
-        secrets.Write(profileId, Encoding.UTF8.GetBytes(bundle.ToJsonString()));
-        _mirrored[profileId] = oauth;
+        return snapshot.State == CliLoginState.Usable
+            ? new LinkCheck(LinkStatus.Ready, snapshot, stored, mirrorError) { Notice = notice }
+            : await TakeOverAsync(profileId, link, snapshot, mirrorError, notice, cancellation).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The mirrored login, or an error when the file exists but cannot be used (another Windows user's,
-    /// a newer format, unreadable). No file is neither.
+    /// The linked folder no longer holds the linked account: it is signed out or holds another account. The
+    /// profile keeps following its account through its copy. Once no known folder holds the account, no
+    /// Claude Code process could still have it in memory and nothing is in doubt, the copy becomes the
+    /// tracker's own.
     /// </summary>
-    private (string? Oauth, string? Error) ReadMirror(Guid profileId)
+    private async Task<LinkCheck> AccountLeftAsync(
+        Guid profileId, CliLink link, CliSnapshot snapshot, CliSecret? copy, LinkStatus status, string? mirrorError, LinkNotice? notice,
+        CancellationToken cancellation)
     {
-        lock (_gate)
+        if (copy is null)
         {
-            if (_mirrored.TryGetValue(profileId, out var cached))
+            return new LinkCheck(status, snapshot, null, mirrorError) { Ownership = CredentialOwnership.Unresolved, Notice = notice };
+        }
+
+        if (copy.Ownership == CredentialOwnership.AppOwned)
+        {
+            return await UseOwnedAsync(profileId, snapshot, copy, mirrorError, cancellation).ConfigureAwait(false);
+        }
+
+        var lineage = RefreshTokenOf(copy);
+        var unresolved = false;
+        foreach (var other in inventory().Where(d => !SameDirectory(d.Path, snapshot.Directory.Path)).Select(Read))
+        {
+            if (other.State is CliLoginState.Unreadable or CliLoginState.Invalid)
             {
-                return (cached, null);
+                unresolved = true;
+            }
+            else if (other.Credentials is { } elsewhere)
+            {
+                switch (CliLoginLabels.Compare(link.Identity, other.Account?.Identity, lineage, elsewhere.RefreshToken))
+                {
+                    case CliAccountMatch.SameAccount when other.State == CliLoginState.Usable:
+                        // Another known folder holds the account, so it is still Claude Code's to renew.
+                        if (mirrorError is null && OAuthObject(elsewhere.RawJson) != copy.OAuthJson)
+                        {
+                            mirrorError = await MirrorAsync(profileId, other, cancellation).ConfigureAwait(false);
+                        }
+
+                        return new LinkCheck(LinkStatus.Ready, other, elsewhere, mirrorError) { Notice = notice };
+                    case CliAccountMatch.SameAccount:
+                        return FromCopy(LinkStatus.WaitingForCliRefresh, other, copy, CredentialOwnership.CliLinked, mirrorError, notice);
+                    case CliAccountMatch.Unresolved:
+                        unresolved = true;
+                        break;
+                }
             }
         }
 
-        byte[]? plaintext;
-        try
+        if (unresolved)
         {
-            plaintext = secrets.Read(profileId);
-        }
-        catch (Exception e) when (e is SecretStoreException or System.IO.IOException or UnauthorizedAccessException)
-        {
-            return (null, e.Message);
+            return FromCopy(status, snapshot, copy, CredentialOwnership.Unresolved, mirrorError, notice ?? LinkNotice.OtherFolderUnreadable);
         }
 
-        if (plaintext is null)
+        if (link.UsedElsewhere || mirrorError is not null || processes.ActivityFor(snapshot.Directory) != StoreActivity.Idle)
         {
-            return (null, null);
+            return FromCopy(status, snapshot, copy, CredentialOwnership.CliLinked, mirrorError, notice);
         }
 
-        try
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
-            var root = JsonNode.Parse(plaintext) as JsonObject;
-            if (root?["kind"]?.GetValue<string>() != BundleKind || root["claudeAiOauth"] is not JsonObject oauthNode)
+            var current = LoadCopy(profileId).Copy;
+            if (current is null || current.Pending is not null)
             {
-                return (null, "The encrypted copy of this profile's login is not a Claude Code login copy.");
+                return FromCopy(status, snapshot, current, CredentialOwnership.CliLinked, mirrorError, notice);
             }
 
-            var oauth = oauthNode.ToJsonString();
-            lock (_gate)
+            copy = new CliSecret(current.OAuthJson, CredentialOwnership.AppOwned, current.SourceConfigDirectory, time.GetUtcNow());
+            if (Persist(profileId, copy) is { } error)
             {
-                _mirrored[profileId] = oauth;
+                // Ownership that is not on disk would be forgotten at the next start; stay linked until it saves.
+                Forget(profileId);
+                return FromCopy(status, snapshot, current, CredentialOwnership.CliLinked, error, notice);
+            }
+        }
+
+        return await UseOwnedAsync(profileId, snapshot, copy, mirrorError, cancellation).ConfigureAwait(false);
+    }
+
+    /// <summary>Polls with the tracker's own copy, renewing it when it has expired.</summary>
+    private async Task<LinkCheck> UseOwnedAsync(
+        Guid profileId, CliSnapshot snapshot, CliSecret copy, string? mirrorError, CancellationToken cancellation)
+    {
+        LinkCheck Result(LinkStatus status, CliCredentials? credentials, LinkNotice? notice = null) =>
+            new(status, snapshot, credentials, mirrorError) { Ownership = CredentialOwnership.AppOwned, Notice = notice };
+
+        if (CliCredentials.Parse(copy.CredentialsJson) is not { } credentials)
+        {
+            return Result(LinkStatus.Invalid, null);
+        }
+
+        if (!credentials.IsExpiredOrExpiring(time.GetUtcNow()))
+        {
+            return Result(LinkStatus.Ready, credentials);
+        }
+
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
+        {
+            // Another check may have renewed it while this one waited for the lock.
+            if (LoadCopy(profileId).Copy is { Ownership: CredentialOwnership.AppOwned } current)
+            {
+                copy = current;
+                credentials = CliCredentials.Parse(copy.CredentialsJson) ?? credentials;
+                if (!credentials.IsExpiredOrExpiring(time.GetUtcNow()))
+                {
+                    return Result(LinkStatus.Ready, credentials);
+                }
             }
 
-            return (oauth, null);
-        }
-        catch (Exception e) when (e is JsonException or InvalidOperationException)
-        {
-            return (null, "The encrypted copy of this profile's login is damaged.");
-        }
-        finally
-        {
-            Array.Clear(plaintext);
+            if (credentials.RefreshToken is not { } refreshToken || IsRejected(refreshToken))
+            {
+                return Result(LinkStatus.LoginRejected, null);
+            }
+
+            if (MayNotRenew(profileId, refreshToken))
+            {
+                return Result(LinkStatus.RefreshFailed, null, LinkNotice.RenewalFailed);
+            }
+
+            var outcome = await tokens.RefreshClaudeAsync(refreshToken, cancellation).ConfigureAwait(false);
+            switch (outcome.Result)
+            {
+                case RefreshResult.Succeeded:
+                    var renewed = Renewed(copy.CredentialsJson, refreshToken, outcome, CredentialOwnership.AppOwned, copy.SourceConfigDirectory, null);
+                    mirrorError = Persist(profileId, renewed) ?? mirrorError;
+                    return Result(LinkStatus.Ready, CliCredentials.Parse(renewed.CredentialsJson));
+                case RefreshResult.LoginRejected:
+                    Reject(refreshToken);
+                    return Result(LinkStatus.LoginRejected, null);
+                default:
+                    HoldRenewal(profileId);
+                    return Result(LinkStatus.RefreshFailed, null, LinkNotice.RenewalFailed);
+            }
         }
     }
 
-    private static string? RefreshTokenOf(string? oauth) =>
-        oauth is not null
-        && JsonNode.Parse(oauth) is JsonObject node
-        && node["refreshToken"] is JsonValue value
+    /// <summary>
+    /// The guarded idle takeover: the linked folder holds the linked account with an expired token. The
+    /// tracker renews it once, only when no Claude Code process could be using any folder that holds the
+    /// same lineage, saves the result, then writes it back to those folders.
+    /// </summary>
+    private async Task<LinkCheck> TakeOverAsync(
+        Guid profileId, CliLink link, CliSnapshot snapshot, string? mirrorError, LinkNotice? notice, CancellationToken cancellation)
+    {
+        LinkCheck Waiting(LinkNotice? why = null) =>
+            new(LinkStatus.WaitingForCliRefresh, snapshot, null, mirrorError) { Notice = why ?? notice };
+
+        var refreshToken = snapshot.Credentials!.RefreshToken;
+        if (refreshToken is null || link.UsedElsewhere || mirrorError is not null)
+        {
+            return Waiting();
+        }
+
+        if (IsRejected(refreshToken))
+        {
+            return new LinkCheck(LinkStatus.LoginRejected, snapshot, null, mirrorError) { Notice = notice };
+        }
+
+        if (MayNotRenew(profileId, refreshToken))
+        {
+            return Waiting(LinkNotice.RenewalFailed);
+        }
+
+        // Expiry alone does not prove the CLI idle: sleep, a network failure or a stalled session can leave a
+        // live Claude Code holding an expired login.
+        if (processes.ActivityFor(snapshot.Directory) != StoreActivity.Idle)
+        {
+            return Waiting();
+        }
+
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
+        {
+            // Checked again under the lock: another profile may have renewed this login, or Claude Code may
+            // have started or changed the file meanwhile.
+            var fresh = Read(snapshot.Directory);
+            if (fresh.Credentials?.RawJson != snapshot.Credentials.RawJson || fresh.Account?.Identity != snapshot.Account?.Identity)
+            {
+                return Waiting();
+            }
+
+            var stores = inventory().Select(d => SameDirectory(d.Path, snapshot.Directory.Path) ? fresh : Read(d)).ToList();
+            if (stores.Any(s => s.State is CliLoginState.Unreadable or CliLoginState.Invalid))
+            {
+                return Waiting(LinkNotice.OtherFolderUnreadable);
+            }
+
+            var holders = stores.Where(s => s.Credentials?.RefreshToken == refreshToken).ToList();
+            if (holders.Any(h => processes.ActivityFor(h.Directory) != StoreActivity.Idle))
+            {
+                return Waiting();
+            }
+
+            var outcome = await tokens.RefreshClaudeAsync(refreshToken, cancellation).ConfigureAwait(false);
+            switch (outcome.Result)
+            {
+                case RefreshResult.Succeeded:
+                    var pending = new PendingWriteBack(refreshToken, time.GetUtcNow(), [.. holders.Select(h => h.Directory.Path)]);
+                    var renewed = Renewed(fresh.Credentials!.RawJson, refreshToken, outcome, CredentialOwnership.CliLinked, snapshot.Directory.Path, pending);
+                    // Saved before it is handed back, so a crash in between can be reconciled at the next start. If
+                    // it cannot be saved it is still handed back: the folder is where Claude Code looks.
+                    mirrorError = Persist(profileId, renewed);
+                    var (settled, handBack) = WriteBack(profileId, renewed);
+                    return new LinkCheck(LinkStatus.Ready, fresh, CliCredentials.Parse(settled.CredentialsJson), mirrorError ?? HasUnsavedError(profileId))
+                    {
+                        Notice = handBack,
+                    };
+                case RefreshResult.LoginRejected:
+                    Reject(refreshToken);
+                    return new LinkCheck(LinkStatus.LoginRejected, snapshot, null, mirrorError) { Notice = notice };
+                default:
+                    HoldRenewal(profileId);
+                    return Waiting(LinkNotice.RenewalFailed);
+            }
+        }
+    }
+
+    /// <summary>Tries again to hand a renewed login back to the folders that still hold the old one.</summary>
+    private async Task<(CliSecret? Copy, LinkNotice? Notice)> ReconcileAsync(Guid profileId, CancellationToken cancellation)
+    {
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
+        {
+            var copy = LoadCopy(profileId).Copy;
+            return copy?.Pending is null ? (copy, null) : WriteBack(profileId, copy);
+        }
+    }
+
+    /// <summary>
+    /// Writes a renewed login into each pending folder that still holds the login it replaced and that no
+    /// Claude Code process could be using, then verifies the read-back. A folder that was signed out or
+    /// now holds a newer login is left alone and dropped from the list: a newer CLI login is never
+    /// replaced. The caller holds the credential lock. Claude Code does not honour that lock, so a write by
+    /// it between the read and the replace here remains possible; the process check makes it unlikely.
+    /// </summary>
+    private (CliSecret Copy, LinkNotice? Notice) WriteBack(Guid profileId, CliSecret copy)
+    {
+        var pending = copy.Pending!;
+        var renewed = CliCredentials.Parse(copy.CredentialsJson)
+                      ?? throw new InvalidOperationException("The renewed login to hand back is not a Claude Code login.");
+        var known = inventory();
+        var remaining = new List<string>();
+        foreach (var path in pending.Targets)
+        {
+            var directory = known.FirstOrDefault(d => SameDirectory(d.Path, path))
+                            ?? new CliConfigDirectory(CliStore.Normalise(path), false, userProfile);
+            if (processes.ActivityFor(directory) != StoreActivity.Idle)
+            {
+                remaining.Add(path);
+                continue;
+            }
+
+            var current = Read(directory);
+            if (current.State == CliLoginState.NotSignedIn)
+            {
+                continue;
+            }
+
+            if (current.Credentials is not { } stored)
+            {
+                remaining.Add(path);
+                continue;
+            }
+
+            if (stored.AccessToken == renewed.AccessToken || stored.RefreshToken != pending.ConsumedRefreshToken)
+            {
+                // Already handed back, or a newer login is there.
+                continue;
+            }
+
+            try
+            {
+                var merged = ClaudeCliCredentials.ApplyTokens(
+                    stored.RawJson, renewed.AccessToken, renewed.RefreshToken, renewed.ExpiresAt?.ToUnixTimeMilliseconds() ?? 0);
+                AtomicFile.WriteAllBytes(directory.CredentialsFile, Encoding.UTF8.GetBytes(merged!));
+                if (Read(directory).Credentials?.AccessToken != renewed.AccessToken)
+                {
+                    remaining.Add(path);
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                remaining.Add(path);
+            }
+        }
+
+        var settled = new CliSecret(
+            copy.OAuthJson, copy.Ownership, copy.SourceConfigDirectory, copy.SavedAt,
+            remaining.Count == 0 ? null : new PendingWriteBack(pending.ConsumedRefreshToken, pending.CreatedAt, remaining));
+        if (remaining.Count != pending.Targets.Count || HasUnsaved(profileId))
+        {
+            Persist(profileId, settled);
+        }
+
+        return (settled, remaining.Count == 0 ? null : LinkNotice.HandBackPending);
+    }
+
+    /// <summary>The copy after a successful grant: the old login with the new tokens and expiry.</summary>
+    private CliSecret Renewed(
+        string credentialsJson, string sentRefreshToken, ClaudeRefreshOutcome outcome, CredentialOwnership ownership, string source,
+        PendingWriteBack? pending)
+    {
+        var response = outcome.Response!;
+        if (response.RefreshToken is { } rotated && rotated != sentRefreshToken)
+        {
+            lock (_gate)
+            {
+                _consumed.Add(sentRefreshToken);
+            }
+        }
+
+        var merged = ClaudeCliCredentials.MergeRefreshedCredentials(credentialsJson, response, outcome.At)
+                     ?? throw new InvalidOperationException("The login that was renewed is not a Claude Code login.");
+        return new CliSecret(OAuthObject(merged)!, ownership, source, time.GetUtcNow(), pending);
+    }
+
+    /// <summary>Copies the folder's current login into the profile's file, under the lock. Returns the error, if any.</summary>
+    private async Task<string?> MirrorAsync(Guid profileId, CliSnapshot snapshot, CancellationToken cancellation)
+    {
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
+        {
+            // A superseded check never writes.
+            cancellation.ThrowIfCancellationRequested();
+            try
+            {
+                SaveCopy(profileId, MirrorOf(snapshot));
+                return null;
+            }
+            catch (Exception e) when (IsStorageFailure(e))
+            {
+                return e.Message;
+            }
+        }
+    }
+
+    private CliSecret MirrorOf(CliSnapshot snapshot) =>
+        new(OAuthObject(snapshot.Credentials?.RawJson) ?? throw new InvalidOperationException("The snapshot has no claudeAiOauth login to mirror."),
+            CredentialOwnership.CliLinked, snapshot.Directory.Path, time.GetUtcNow());
+
+    /// <summary>The profile's result when only its copy can be used: its token while unexpired, otherwise nothing.</summary>
+    private LinkCheck FromCopy(
+        LinkStatus status, CliSnapshot snapshot, CliSecret? copy, CredentialOwnership ownership, string? mirrorError, LinkNotice? notice,
+        LinkStatus? statusWhenUsable = null)
+    {
+        var credentials = copy is not null && CliCredentials.Parse(copy.CredentialsJson) is { } parsed
+                          && !parsed.IsExpiredOrExpiring(time.GetUtcNow())
+            ? parsed
+            : null;
+        return new LinkCheck(credentials is null ? status : statusWhenUsable ?? status, snapshot, credentials, mirrorError)
+        {
+            Ownership = ownership,
+            Notice = notice,
+        };
+    }
+
+    /// <summary>Saves a renewed login that an earlier save failed for. Returns the error while it still cannot be saved.</summary>
+    private async Task<string?> SaveUnsavedAsync(Guid profileId, CancellationToken cancellation)
+    {
+        if (!HasUnsaved(profileId))
+        {
+            return null;
+        }
+
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
+        {
+            CliSecret? unsaved;
+            lock (_gate)
+            {
+                _unsaved.TryGetValue(profileId, out unsaved);
+            }
+
+            return unsaved is null ? null : Persist(profileId, unsaved);
+        }
+    }
+
+    /// <summary>
+    /// Saves a copy; on failure keeps it in memory for a later save and returns the error. The caller holds
+    /// the credential lock.
+    /// </summary>
+    private string? Persist(Guid profileId, CliSecret copy)
+    {
+        try
+        {
+            SaveCopy(profileId, copy);
+            lock (_gate)
+            {
+                _unsaved.Remove(profileId);
+            }
+
+            return null;
+        }
+        catch (Exception e) when (IsStorageFailure(e))
+        {
+            lock (_gate)
+            {
+                _unsaved[profileId] = copy;
+            }
+
+            return e.Message;
+        }
+    }
+
+    private void SaveCopy(Guid profileId, CliSecret? copy)
+    {
+        var bundle = secrets.Load(profileId);
+        bundle.Cli = copy;
+        secrets.Save(profileId, bundle);
+    }
+
+    /// <summary>The saved copy, or the renewed one still waiting to be saved; an error when the file cannot be used.</summary>
+    private (CliSecret? Copy, string? Error) LoadCopy(Guid profileId)
+    {
+        lock (_gate)
+        {
+            if (_unsaved.TryGetValue(profileId, out var unsaved))
+            {
+                return (unsaved, null);
+            }
+        }
+
+        try
+        {
+            return (secrets.Load(profileId).Cli, null);
+        }
+        catch (Exception e) when (IsStorageFailure(e))
+        {
+            return (null, e.Message);
+        }
+    }
+
+    private static bool IsStorageFailure(Exception e) =>
+        e is SecretStoreException or IOException or UnauthorizedAccessException or CryptographicException;
+
+    private bool HasUnsaved(Guid profileId)
+    {
+        lock (_gate)
+        {
+            return _unsaved.ContainsKey(profileId);
+        }
+    }
+
+    private string? HasUnsavedError(Guid profileId) =>
+        HasUnsaved(profileId) ? "The renewed login could not be saved yet; it is kept in memory and saving is tried again." : null;
+
+    /// <summary>
+    /// Whether a renewal must not be sent now: the token was already used up by a successful grant, a
+    /// renewed login is still waiting to be saved, or an attempt failed a moment ago.
+    /// </summary>
+    private bool MayNotRenew(Guid profileId, string refreshToken)
+    {
+        lock (_gate)
+        {
+            return _consumed.Contains(refreshToken)
+                   || _unsaved.ContainsKey(profileId)
+                   || (_renewalNotBefore.TryGetValue(profileId, out var notBefore) && time.GetUtcNow() < notBefore);
+        }
+    }
+
+    private bool IsRejected(string refreshToken)
+    {
+        lock (_gate)
+        {
+            return _rejected.Contains(refreshToken);
+        }
+    }
+
+    private void Reject(string refreshToken)
+    {
+        lock (_gate)
+        {
+            _rejected.Add(refreshToken);
+        }
+    }
+
+    private void HoldRenewal(Guid profileId)
+    {
+        lock (_gate)
+        {
+            _renewalNotBefore[profileId] = time.GetUtcNow() + RenewalRetryDelay;
+        }
+    }
+
+    private void Forget(Guid profileId)
+    {
+        lock (_gate)
+        {
+            _unsaved.Remove(profileId);
+            _renewalNotBefore.Remove(profileId);
+        }
+    }
+
+    private static bool SameDirectory(string a, string b) =>
+        string.Equals(CliStore.Normalise(a), CliStore.Normalise(b), StringComparison.OrdinalIgnoreCase);
+
+    private static string? RefreshTokenOf(CliSecret? copy) => TokenOf(copy, "refreshToken");
+
+    private static string? AccessTokenOf(CliSecret? copy) => TokenOf(copy, "accessToken");
+
+    private static string? TokenOf(CliSecret? copy, string name) =>
+        copy is not null
+        && JsonNode.Parse(copy.OAuthJson) is JsonObject node
+        && node[name] is JsonValue value
         && value.TryGetValue(out string? token)
+        && token.Length > 0
             ? token
             : null;
 

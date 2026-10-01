@@ -32,8 +32,26 @@ public sealed class AppSettings
     /// <summary>Set when the wizard is first shown automatically, as upstream does.</summary>
     public bool HasShownWizardOnce { get; set; }
 
+    /// <summary>Upstream raw values <c>single</c> or <c>multi</c>: one profile in the tray, or every selected one.</summary>
+    public string ProfileDisplayMode { get; set; } = "single";
+
+    public MultiProfileDisplayConfig MultiProfileDisplayConfig { get; set; } = new();
+
+    /// <summary>
+    /// Data of removed profiles or links that could not be deleted at the time (a file in use, a browser
+    /// still running). Startup tries again, so a removal is never silently left half done.
+    /// </summary>
+    public List<PendingCleanup> PendingCleanups { get; set; } = [];
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
+
+    [JsonIgnore]
+    public bool IsMultiProfile
+    {
+        get => ProfileDisplayMode == "multi";
+        set => ProfileDisplayMode = value ? "multi" : "single";
+    }
 
     [JsonIgnore]
     public PopoverTimeDisplay TimeDisplay
@@ -71,6 +89,47 @@ public sealed class AppSettings
 
     public ProfileSettings? ActiveProfile =>
         Profiles.FirstOrDefault(p => p.Id == ActiveProfileId) ?? Profiles.FirstOrDefault();
+
+    /// <summary>
+    /// The profiles shown in the tray and therefore polled: the active one, or in multi-profile mode
+    /// every profile selected for display (upstream <c>getSelectedProfiles</c>).
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<ProfileSettings> DisplayedProfiles =>
+        IsMultiProfile ? [.. Profiles.Where(p => p.IsSelectedForDisplay)]
+        : ActiveProfile is { } active ? [active]
+        : [];
+}
+
+/// <summary>What a failed removal left behind for one profile ID.</summary>
+public sealed class PendingCleanup
+{
+    public Guid ProfileId { get; set; }
+
+    /// <summary>Remove the encrypted secret file (the whole profile was deleted).</summary>
+    public bool Secrets { get; set; }
+
+    /// <summary>Remove the usage and billing caches and the history.</summary>
+    public bool Data { get; set; }
+
+    /// <summary>Remove the WebView2 user-data folder.</summary>
+    public bool Browser { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Which credential a profile's usage comes from.</summary>
+public enum UsageSourceKind
+{
+    /// <summary>A Claude Code login, through the read-only OAuth usage endpoint.</summary>
+    ClaudeCode,
+
+    /// <summary>A claude.ai browser session, through same-origin WebView2 requests.</summary>
+    ClaudeAi,
+
+    /// <summary>A Codex CLI login.</summary>
+    Codex,
 }
 
 public sealed class ProfileSettings
@@ -99,8 +158,17 @@ public sealed class ProfileSettings
 
     public DateTimeOffset? LastUsedAt { get; set; }
 
-    /// <summary>The Claude Code config directory this profile follows, or null when unlinked.</summary>
+    /// <summary>The Claude Code login this profile follows, or null when unlinked.</summary>
     public CliLink? CliLink { get; set; }
+
+    /// <summary>The claude.ai organisation tracked through this profile's browser session, or null.</summary>
+    public ClaudeAiLink? ClaudeAi { get; set; }
+
+    /// <summary>The Anthropic Console organisation whose billing is tracked, or null.</summary>
+    public ConsoleLink? Console { get; set; }
+
+    /// <summary>The Codex login this profile follows, or null.</summary>
+    public CodexLink? Codex { get; set; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
@@ -110,6 +178,17 @@ public sealed class ProfileSettings
     public Provider ProviderKind => Provider == Core.Providers.Provider.Codex.RawValue()
         ? Core.Providers.Provider.Codex
         : Core.Providers.Provider.Anthropic;
+
+    /// <summary>
+    /// Where usage comes from, or null when nothing is set up. As upstream, a claude.ai session is used
+    /// before a Claude Code login, and a profile only ever uses its own provider's credentials.
+    /// </summary>
+    [JsonIgnore]
+    public UsageSourceKind? UsageSource =>
+        ProviderKind == Core.Providers.Provider.Codex ? (Codex is null ? null : UsageSourceKind.Codex)
+        : ClaudeAi is not null ? UsageSourceKind.ClaudeAi
+        : CliLink is not null ? UsageSourceKind.ClaudeCode
+        : null;
 }
 
 /// <summary>
@@ -134,11 +213,107 @@ public sealed class CliLink
 
     public DateTimeOffset LinkedAt { get; set; }
 
+    /// <summary>
+    /// Set by the user when this login is also used somewhere the tracker cannot see (another PC, a copied
+    /// folder). The tracker then never renews it itself, because that would strand the other copy.
+    /// </summary>
+    public bool UsedElsewhere { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 
     [JsonIgnore]
     public string? Identity => AccountUuid ?? EmailAddress;
+}
+
+/// <summary>
+/// A profile's claude.ai link. The session itself lives in the profile's WebView2 user-data folder
+/// (plan.md section 2); only the chosen organisation is kept here.
+/// </summary>
+public sealed class ClaudeAiLink
+{
+    public string OrganizationId { get; set; } = "";
+
+    public string? OrganizationName { get; set; }
+
+    public DateTimeOffset LinkedAt { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>A profile's Anthropic Console link. The session key is in the profile's encrypted secret file.</summary>
+public sealed class ConsoleLink
+{
+    public string OrganizationId { get; set; } = "";
+
+    public string? OrganizationName { get; set; }
+
+    public DateTimeOffset LinkedAt { get; set; }
+
+    /// <summary>When the Console session cookie expires, if the browser reported it. Not a secret.</summary>
+    public DateTimeOffset? SessionKeyExpiry { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>
+/// A profile's Codex link: the Codex CLI's own <c>auth.json</c>, read live, or credentials pasted by the
+/// user, which are in the profile's encrypted secret file.
+/// </summary>
+public sealed class CodexLink
+{
+    public const string AuthFileSource = "authFile";
+    public const string ManualSource = "manual";
+
+    /// <summary><see cref="AuthFileSource"/> or <see cref="ManualSource"/>.</summary>
+    public string Source { get; set; } = AuthFileSource;
+
+    /// <summary>The Codex home directory holding <c>auth.json</c>, for the auth-file source.</summary>
+    public string? CodexHome { get; set; }
+
+    /// <summary>The ChatGPT account the link was made for, so another account's login is never shown as this one.</summary>
+    public string? AccountId { get; set; }
+
+    public string? Email { get; set; }
+
+    public DateTimeOffset LinkedAt { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+
+    [JsonIgnore]
+    public bool IsManual => Source == ManualSource;
+
+    [JsonIgnore]
+    public string? Identity => AccountId ?? Email;
+}
+
+/// <summary>Port of upstream <c>MultiProfileDisplayConfig</c> with its <c>init</c> defaults.</summary>
+public sealed class MultiProfileDisplayConfig
+{
+    /// <summary><c>concentric</c>, <c>progressBar</c>, <c>compact</c> or <c>percentage</c>.</summary>
+    public string IconStyle { get; set; } = "concentric";
+
+    public bool ShowWeek { get; set; } = true;
+
+    public bool ShowProfileLabel { get; set; } = true;
+
+    public bool UseSystemColor { get; set; }
+
+    public bool ShowTimeMarker { get; set; } = true;
+
+    public bool ShowPaceMarker { get; set; } = true;
+
+    public bool UsePaceColoring { get; set; } = true;
+
+    public bool ShowRemainingPercentage { get; set; }
+
+    public bool ShowActiveProfileIndicator { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
 /// <summary>Port of upstream <c>MenuBarIconConfiguration</c> with its <c>init</c> defaults.</summary>

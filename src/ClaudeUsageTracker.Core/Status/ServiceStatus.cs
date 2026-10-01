@@ -19,6 +19,10 @@ public sealed record ServiceStatus(ServiceStatusIndicator Indicator, string Desc
     public const string ClaudeStatusUrl = "https://status.claude.com/api/v2/status.json";
     public const string ClaudeStatusPage = "https://status.claude.com";
 
+    /// <summary>OpenAI's Statuspage, for Codex profiles (upstream's Codex descriptor).</summary>
+    public const string OpenAiStatusUrl = "https://status.openai.com/api/v2/status.json";
+    public const string OpenAiStatusPage = "https://status.openai.com";
+
     /// <summary>
     /// Parses a Statuspage <c>status.json</c> body (<c>{"status": {"indicator", "description"}}</c>);
     /// null when either field is missing. An unrecognised indicator is <see cref="ServiceStatusIndicator.Unknown"/>.

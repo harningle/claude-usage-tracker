@@ -158,6 +158,93 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal("acc-1", loaded.ActiveProfile?.CliLink?.Identity);
         Assert.Equal(@"C:\Users\someone\.claude", loaded.ActiveProfile?.CliLink?.ConfigDirectory);
     }
+
+    /// <summary>Windows equivalent of upstream <c>testDecodesOldPlistWithoutCustomKeychainField</c>: Milestone 2 settings load unchanged.</summary>
+    [Fact]
+    public void MilestoneTwoSettingsWithoutTheNewerLinksLoad()
+    {
+        var settings = LoadJson("""
+            {"version":1,"profiles":[{"id":"11111111-2222-3333-4444-555555555555","name":"Work",
+              "cliLink":{"configDirectory":"C:\\Users\\someone\\.claude","isDefaultDirectory":true,"accountUuid":"acc-1"}}],
+             "activeProfileId":"11111111-2222-3333-4444-555555555555"}
+            """);
+
+        var profile = Assert.Single(settings.Profiles);
+        Assert.Equal("acc-1", profile.CliLink?.Identity);
+        Assert.False(profile.CliLink?.UsedElsewhere);
+        Assert.Null(profile.ClaudeAi);
+        Assert.Null(profile.Console);
+        Assert.Null(profile.Codex);
+        Assert.False(settings.IsMultiProfile);
+        Assert.Empty(settings.PendingCleanups);
+        Assert.Equal("concentric", settings.MultiProfileDisplayConfig.IconStyle);
+    }
+
+    /// <summary>
+    /// Windows equivalent of upstream <c>testHasAnyCredentialsRecognizesCustomKeychainPin</c>: a linked Claude Code
+    /// folder is a usage source, and upstream's precedence picks the claude.ai session first.
+    /// </summary>
+    [Fact]
+    public void UsageSourceFollowsUpstreamPrecedence()
+    {
+        var profile = new ProfileSettings { Name = "P" };
+        Assert.Null(profile.UsageSource);
+
+        profile.CliLink = new CliLink { ConfigDirectory = @"C:\Users\someone\.claude" };
+        Assert.Equal(UsageSourceKind.ClaudeCode, profile.UsageSource);
+
+        profile.ClaudeAi = new ClaudeAiLink { OrganizationId = "org-1" };
+        Assert.Equal(UsageSourceKind.ClaudeAi, profile.UsageSource);
+
+        // A Codex profile never uses Anthropic credentials, nor the other way round.
+        profile.Provider = Provider.Codex.RawValue();
+        Assert.Null(profile.UsageSource);
+        profile.Codex = new CodexLink();
+        Assert.Equal(UsageSourceKind.Codex, profile.UsageSource);
+        profile.Provider = Provider.Anthropic.RawValue();
+        Assert.Equal(UsageSourceKind.ClaudeAi, profile.UsageSource);
+    }
+
+    [Fact]
+    public void EveryLinkAndDisplayOptionRoundTripsWithoutSecrets()
+    {
+        var store = new SettingsStore(SettingsPath);
+        var at = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        var profile = new ProfileSettings
+        {
+            Name = "Mixed",
+            ClaudeAi = new ClaudeAiLink { OrganizationId = "org-1", OrganizationName = "Team", LinkedAt = at },
+            Console = new ConsoleLink { OrganizationId = "org-api", SessionKeyExpiry = at.AddDays(28), LinkedAt = at },
+            Codex = new CodexLink { Source = CodexLink.ManualSource, AccountId = "chatgpt-1", Email = "user@example.com", LinkedAt = at },
+            CliLink = new CliLink { ConfigDirectory = @"C:\Users\someone\.claude", AccountUuid = "acc-1", UsedElsewhere = true },
+            IsSelectedForDisplay = false,
+        };
+        var cleanup = new PendingCleanup { ProfileId = Guid.NewGuid(), Browser = true };
+        store.Save(new AppSettings
+        {
+            Profiles = [profile],
+            IsMultiProfile = true,
+            MultiProfileDisplayConfig = new MultiProfileDisplayConfig { IconStyle = "compact", ShowWeek = false, ShowActiveProfileIndicator = true },
+            PendingCleanups = [cleanup],
+        });
+
+        var loaded = store.Load();
+        var round = Assert.Single(loaded.Profiles);
+
+        Assert.Equal("Team", round.ClaudeAi?.OrganizationName);
+        Assert.Equal(at.AddDays(28), round.Console?.SessionKeyExpiry);
+        Assert.True(round.Codex?.IsManual);
+        Assert.Equal("chatgpt-1", round.Codex?.Identity);
+        Assert.True(round.CliLink?.UsedElsewhere);
+        Assert.False(round.IsSelectedForDisplay);
+        Assert.True(loaded.IsMultiProfile);
+        Assert.Equal("compact", loaded.MultiProfileDisplayConfig.IconStyle);
+        Assert.True(loaded.MultiProfileDisplayConfig.ShowActiveProfileIndicator);
+        Assert.Equal(cleanup.ProfileId, Assert.Single(loaded.PendingCleanups).ProfileId);
+        var text = File.ReadAllText(SettingsPath);
+        Assert.DoesNotContain("sessionKey\"", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("token", text, StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>

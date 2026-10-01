@@ -6,10 +6,10 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using ClaudeUsageTracker.App.Interop;
+using ClaudeUsageTracker.App.Localisation;
 using ClaudeUsageTracker.App.Themes;
 using ClaudeUsageTracker.App.Tray;
 using ClaudeUsageTracker.App.ViewModels;
-using ClaudeUsageTracker.Core.Status;
 
 namespace ClaudeUsageTracker.App.Views;
 
@@ -41,13 +41,18 @@ public partial class PopoverWindow : Window
         viewModel.PropertyChanged += OnViewModelChanged;
         SourceInitialized += (_, _) => ThemeManager.RoundCorners(this);
         Deactivated += OnDeactivated;
-        SizeChanged += (_, _) => Reposition();
+        // The new size comes from layout; the window rectangle may not have caught up with it yet.
+        SizeChanged += (_, e) => Reposition(e.NewSize.Height);
         PreviewKeyDown += OnPreviewKeyDown;
     }
 
     public event EventHandler? RefreshRequested;
     public event EventHandler? SettingsRequested;
     public event EventHandler? SetupRequested;
+    public event EventHandler? ManageProfilesRequested;
+
+    /// <summary>A profile was chosen in the switcher menu.</summary>
+    public event Action<Guid>? ProfileSelected;
 
     public bool IsDetached => _detached;
 
@@ -62,22 +67,19 @@ public partial class PopoverWindow : Window
         _detached = false;
         Topmost = true;
         var handle = new WindowInteropHelper(this).EnsureHandle();
-        var (_, work, dpi) = MonitorFor();
+        var (_, work, _) = MonitorFor();
 
         // Move the hidden window onto the icon's monitor first, so WPF adopts that monitor's DPI before layout.
         NativeMethods.SetWindowPos(handle, IntPtr.Zero, work.X, work.Y, 0, 0,
             NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
-        if (Content is FrameworkElement content)
-        {
-            content.Measure(new Size(Width - BorderThickness.Left - BorderThickness.Right, double.PositiveInfinity));
-            var height = content.DesiredSize.Height + BorderThickness.Top + BorderThickness.Bottom;
-            Place(new Size(Width * dpi / 96.0, height * dpi / 96.0));
-        }
+        Place(ContentHeight());
 
         Show();
         Activate();
         NativeMethods.SetForegroundWindow(handle);
-        Reposition();
+        // Placed by the content it shows now: the window still has the size of the previous content (another
+        // profile's cards) until the next layout pass.
+        Reposition(ContentHeight());
         if (fromKeyboard)
         {
             MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
@@ -104,21 +106,31 @@ public partial class PopoverWindow : Window
         return (ToRect(info.rcMonitor), ToRect(info.rcWork), dpi);
     }
 
-    private void Reposition()
+    /// <summary>The height, in DIPs, that the window takes for its current content.</summary>
+    private double ContentHeight()
     {
-        if (!IsVisible || _detached)
+        if (Content is not FrameworkElement content)
         {
-            return;
+            return ActualHeight;
         }
 
-        var handle = new WindowInteropHelper(this).Handle;
-        NativeMethods.GetWindowRect(handle, out var rect);
-        Place(new Size(rect.Right - rect.Left, rect.Bottom - rect.Top));
+        content.Measure(new Size(Width - BorderThickness.Left - BorderThickness.Right, double.PositiveInfinity));
+        return Math.Min(content.DesiredSize.Height + BorderThickness.Top + BorderThickness.Bottom, MaxHeight);
     }
 
-    private void Place(Size physicalSize)
+    private void Reposition(double height)
+    {
+        if (IsVisible && !_detached)
+        {
+            Place(height);
+        }
+    }
+
+    /// <param name="height">The window height in DIPs.</param>
+    private void Place(double height)
     {
         var (monitor, work, dpi) = MonitorFor();
+        var physicalSize = new Size(Width * dpi / 96.0, height * dpi / 96.0);
         var position = PopoverPlacement.Place(_iconRect, _anchor, monitor, work, physicalSize, EdgeGap * dpi / 96.0);
         NativeMethods.SetWindowPos(new WindowInteropHelper(this).Handle, IntPtr.Zero, (int)position.X, (int)position.Y, 0, 0,
             NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
@@ -193,7 +205,34 @@ public partial class PopoverWindow : Window
     }
 
     private void OnStatusClick(object sender, RoutedEventArgs e) =>
-        Process.Start(new ProcessStartInfo(ServiceStatus.ClaudeStatusPage) { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo(((PopoverViewModel)DataContext).StatusPage) { UseShellExecute = true });
+
+    /// <summary>Upstream's profile switcher: every profile, then Manage Profiles. A native menu, so it follows the system theme.</summary>
+    private void OnProfileClick(object sender, RoutedEventArgs e)
+    {
+        var profiles = ((PopoverViewModel)DataContext).Profiles;
+        var items = profiles.Select((p, i) => (Id: i + 1, Text: (string?)p.Name)).ToList();
+        var manage = profiles.Count + 1;
+        items.Add((0, null));
+        items.Add((manage, Strings.Get("popover.manage_profiles")));
+        var corner = ProfileButton.PointToScreen(new Point(0, ProfileButton.ActualHeight));
+
+        // The menu takes the foreground for a moment; that must not close the popover.
+        var wasDetached = _detached;
+        _detached = true;
+        var chosen = NativeMethods.ShowMenu(new WindowInteropHelper(this).Handle, (int)corner.X, (int)corner.Y, items,
+            profiles.ToList().FindIndex(p => p.IsCurrent) + 1);
+        _detached = wasDetached;
+        if (chosen == manage)
+        {
+            Dismiss();
+            ManageProfilesRequested?.Invoke(this, EventArgs.Empty);
+        }
+        else if (chosen > 0)
+        {
+            ProfileSelected?.Invoke(profiles[chosen - 1].Id);
+        }
+    }
 
     private void OnBannerClick(object sender, RoutedEventArgs e)
     {

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClaudeUsageTracker.Core.Billing;
 using ClaudeUsageTracker.Core.Usage;
 
 namespace ClaudeUsageTracker.App.Storage;
@@ -31,6 +32,26 @@ public sealed record CachedUsage
     public Dictionary<string, JsonElement>? Extra { get; init; }
 }
 
+/// <summary>The last Console billing observed for a profile, with the organisation it belongs to.</summary>
+public sealed record CachedApiUsage
+{
+    public const int CurrentVersion = 1;
+
+    public int Version { get; init; } = CurrentVersion;
+
+    public required Guid ProfileId { get; init; }
+
+    public required DateTimeOffset ObservedAt { get; init; }
+
+    /// <summary>The Console organisation the values belong to, so another organisation's cache is never shown.</summary>
+    public required string OrganizationId { get; init; }
+
+    public required ApiUsage Usage { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; init; }
+}
+
 /// <summary>
 /// One cache file per profile, separate from settings and secrets so polling never rewrites either.
 /// The cache is re-fetchable: an unreadable file reads as no cache and never costs the profile.
@@ -38,6 +59,30 @@ public sealed record CachedUsage
 public sealed class UsageCacheStore(string directory)
 {
     public string PathFor(Guid profileId) => Path.Combine(directory, $"{profileId:N}.usage.json");
+
+    public string ApiPathFor(Guid profileId) => Path.Combine(directory, $"{profileId:N}.api.json");
+
+    /// <summary>The cached Console billing, or null when absent, unreadable, from a newer format or for another profile.</summary>
+    public CachedApiUsage? LoadApi(Guid profileId)
+    {
+        try
+        {
+            var cached = JsonSerializer.Deserialize<CachedApiUsage>(File.ReadAllBytes(ApiPathFor(profileId)), SettingsStore.JsonOptions);
+            return cached is { Version: <= CachedApiUsage.CurrentVersion } && cached.ProfileId == profileId ? cached : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void SaveApi(CachedApiUsage cached)
+    {
+        Directory.CreateDirectory(directory);
+        AtomicFile.WriteAllBytes(ApiPathFor(cached.ProfileId), JsonSerializer.SerializeToUtf8Bytes(cached, SettingsStore.JsonOptions));
+    }
+
+    public void DeleteApi(Guid profileId) => File.Delete(ApiPathFor(profileId));
 
     /// <summary>The cached usage, or null when absent, unreadable, from a newer format or for another profile.</summary>
     public CachedUsage? Load(Guid profileId)

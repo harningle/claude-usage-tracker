@@ -141,7 +141,7 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DeleteObject(IntPtr gdiObject);
 
-    public const uint MfString = 0x0, MfSeparator = 0x800;
+    public const uint MfString = 0x0, MfChecked = 0x8, MfSeparator = 0x800;
     public const uint TpmRightButton = 0x2, TpmNoNotify = 0x80, TpmReturnCmd = 0x100;
     public const uint WmNull = 0x0;
     public const uint SwpNoSize = 0x1, SwpNoZOrder = 0x4, SwpNoActivate = 0x10;
@@ -176,14 +176,15 @@ internal static class NativeMethods
     public static extern IntPtr MonitorFromRect(ref Rect rect, uint flags);
 
     /// <summary>Shows a native popup menu and returns the chosen item's ID, or 0 when dismissed.</summary>
-    public static int ShowMenu(IntPtr owner, int x, int y, IReadOnlyList<(int Id, string? Text)> items)
+    /// <param name="checkedId">The item drawn with a check mark, or 0 for none.</param>
+    public static int ShowMenu(IntPtr owner, int x, int y, IReadOnlyList<(int Id, string? Text)> items, int checkedId = 0)
     {
         var menu = CreatePopupMenu();
         try
         {
             foreach (var (id, text) in items)
             {
-                AppendMenuW(menu, text is null ? MfSeparator : MfString, (UIntPtr)id, text);
+                AppendMenuW(menu, text is null ? MfSeparator : id == checkedId ? MfString | MfChecked : MfString, (UIntPtr)id, text);
             }
 
             // The owner must be foreground for the menu to dismiss on an outside click (documented tray rule).

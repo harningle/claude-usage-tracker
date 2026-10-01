@@ -25,4 +25,10 @@ public sealed class AppPaths(string root)
 
     /// <summary>Allowlisted request metadata only.</summary>
     public string DiagnosticsDirectory => Path.Combine(Root, "diagnostics");
+
+    /// <summary>Usage history per profile.</summary>
+    public string HistoryDirectory => Path.Combine(Root, "history");
+
+    /// <summary>One WebView2 user-data folder per profile; browser sessions live there, managed by WebView2.</summary>
+    public string BrowserDirectory => Path.Combine(Root, "browser");
 }

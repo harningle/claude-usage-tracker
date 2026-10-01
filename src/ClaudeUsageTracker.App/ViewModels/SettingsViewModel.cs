@@ -2,10 +2,16 @@ using System.Globalization;
 using System.Reflection;
 using System.Windows.Media;
 using ClaudeUsageTracker.App.ClaudeCode;
+using ClaudeUsageTracker.App.Diagnostics;
 using ClaudeUsageTracker.App.Localisation;
+using ClaudeUsageTracker.App.Profiles;
+using ClaudeUsageTracker.App.Setup;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Tray;
 using ClaudeUsageTracker.App.Usage;
+using ClaudeUsageTracker.Core.Billing;
+using ClaudeUsageTracker.Core.Providers;
+using ClaudeUsageTracker.Core.Refresh;
 using ClaudeUsageTracker.Core.Usage;
 
 namespace ClaudeUsageTracker.App.ViewModels;
@@ -13,7 +19,17 @@ namespace ClaudeUsageTracker.App.ViewModels;
 /// <summary>An icon style option with a preview drawn by the tray renderer itself.</summary>
 public sealed record IconStyleOption(string RawValue, string Name, ImageSource Preview);
 
-public sealed record DetailRow(string Label, string Value);
+public sealed record DetailRow(string Label, string Value) : ListItem;
+
+/// <summary>One credential page: whether it is set up, what it tracks and how it is doing.</summary>
+/// <param name="Notice">Something about the credential the user should act on or know.</param>
+public sealed record CredentialView(
+    WizardRoute Route, bool IsLinked, string StatusTitle, string? StatusDetail, IReadOnlyList<DetailRow> Details, string SetupLabel, string? Notice);
+
+public sealed record ProfileRow(Guid Id, string Name, string ProviderName, bool IsActive, bool IsDisplayed, bool CanDelete) : ListItem;
+
+/// <summary>A request of the network log, as text. It holds only what <see cref="RequestLogEntry"/> holds.</summary>
+public sealed record LogRow(string Time, string Operation, string Request, string Status, string Duration, string? Error) : ListItem;
 
 /// <summary>
 /// The settings window's state. Like upstream, every control persists on change; unlike upstream, a
@@ -21,32 +37,67 @@ public sealed record DetailRow(string Label, string Value);
 /// </summary>
 public sealed class SettingsViewModel : ObservableObject
 {
+    /// <summary>The network log view shows this many of the newest requests; the export holds all of them.</summary>
+    public const int LogRowLimit = 200;
+
     private readonly AppSettings _settings;
     private readonly Action _changed;
+    private readonly Action _applied;
+    private readonly ProfileService _profiles;
+    private readonly RequestLog _log;
     private ProfileUsageState? _state;
     private CliSnapshot? _snapshot;
+    private string? _profileError;
 
-    public SettingsViewModel(AppSettings settings, Action changed, bool taskbarDark)
+    /// <param name="changed">Saves the settings and applies them, after an edit made here.</param>
+    /// <param name="applied">Applies settings that <paramref name="profiles"/> already saved.</param>
+    public SettingsViewModel(
+        AppSettings settings, Action changed, Action applied, ProfileService profiles, HistoryViewModel history, RequestLog log, bool taskbarDark)
     {
         _settings = settings;
         _changed = changed;
+        _applied = applied;
+        _profiles = profiles;
+        _log = log;
+        History = history;
         IconStyles =
         [
-            Option("battery", "windows.icon_style.battery", TrayIconStyle.Battery, taskbarDark),
-            Option("progressBar", "windows.icon_style.progress_bar", TrayIconStyle.ProgressBar, taskbarDark),
-            Option("percentageOnly", "windows.icon_style.percentage", TrayIconStyle.PercentageOnly, taskbarDark),
-            Option("icon", "windows.icon_style.icon", TrayIconStyle.Ring, taskbarDark),
-            Option("compact", "windows.icon_style.compact", TrayIconStyle.Dot, taskbarDark),
+            Option("battery", "windows.icon_style.battery", new TrayIconSpec(TrayIconStyle.Battery, 0.6, 60, UsageStatusLevel.Safe, 0.45, PaceStatus.OnTrack, false, "S", false), taskbarDark),
+            Option("progressBar", "windows.icon_style.progress_bar", new TrayIconSpec(TrayIconStyle.ProgressBar, 0.6, 60, UsageStatusLevel.Safe, 0.45, PaceStatus.OnTrack, false, "S", false), taskbarDark),
+            Option("percentageOnly", "windows.icon_style.percentage", new TrayIconSpec(TrayIconStyle.PercentageOnly, 0.6, 60, UsageStatusLevel.Safe, 0.45, PaceStatus.OnTrack, false, "S", false), taskbarDark),
+            Option("icon", "windows.icon_style.icon", new TrayIconSpec(TrayIconStyle.Ring, 0.6, 60, UsageStatusLevel.Safe, 0.45, PaceStatus.OnTrack, false, "S", false), taskbarDark),
+            Option("compact", "windows.icon_style.compact", new TrayIconSpec(TrayIconStyle.Dot, 0.6, 60, UsageStatusLevel.Safe, 0.45, PaceStatus.OnTrack, false, "S", false), taskbarDark),
+        ];
+        static TrayIconSpec Multi(TrayIconStyle style) =>
+            new(style, 0.6, 60, UsageStatusLevel.Moderate, 0.45, PaceStatus.OnTrack, false, null, false)
+            {
+                HasSecondary = true, SecondaryFraction = 0.35, SecondaryLevel = UsageStatusLevel.Safe,
+            };
+        MultiStyles =
+        [
+            Option("concentric", "multiprofile.style_circles", Multi(TrayIconStyle.Concentric), taskbarDark),
+            Option("progressBar", "multiprofile.style_bars", Multi(TrayIconStyle.DualBar), taskbarDark),
+            Option("compact", "multiprofile.style_dots", Multi(TrayIconStyle.Dot), taskbarDark),
+            Option("percentage", "multiprofile.style_percent", Multi(TrayIconStyle.PercentageOnly), taskbarDark),
         ];
     }
 
     public IReadOnlyList<IconStyleOption> IconStyles { get; }
 
+    public IReadOnlyList<IconStyleOption> MultiStyles { get; }
+
+    public HistoryViewModel History { get; }
+
     private ProfileSettings? Profile => _settings.ActiveProfile;
     private IconConfiguration Icon => Profile?.IconConfig ?? new IconConfiguration();
+    private MultiProfileDisplayConfig MultiConfig => _settings.MultiProfileDisplayConfig;
 
     public bool HasProfile => Profile is not null;
     public string ProfileName => Profile?.Name ?? Strings.Get("popover.no_profile");
+
+    /// <summary>The credential pages a provider has: claude.ai, Console and Claude Code for Anthropic, Codex for Codex.</summary>
+    public bool IsCodexProfile => Profile?.ProviderKind == Provider.Codex;
+    public bool IsAnthropicProfile => !IsCodexProfile;
 
     // Appearance (per profile), upstream AppearanceSettingsView.
 
@@ -59,6 +110,7 @@ public sealed class SettingsViewModel : ObservableObject
 
     public bool SessionEnabled { get => Metric("session").IsEnabled; set => Edit(() => Metric("session").IsEnabled = value); }
     public bool WeekEnabled { get => Metric("week").IsEnabled; set => Edit(() => Metric("week").IsEnabled = value); }
+    public bool ApiEnabled { get => Metric("api").IsEnabled; set => Edit(() => Metric("api").IsEnabled = value); }
 
     public IconStyleOption SessionStyle
     {
@@ -72,7 +124,23 @@ public sealed class SettingsViewModel : ObservableObject
         set => Edit(() => Metric("week").IconStyle = value.RawValue);
     }
 
-    public bool AllMetricsOff => !SessionEnabled && !WeekEnabled;
+    public IconStyleOption ApiStyle
+    {
+        get => StyleOf("api");
+        set => Edit(() => Metric("api").IconStyle = value.RawValue);
+    }
+
+    /// <summary>The API credits metric is offered only where it can show something: a profile with Console billing set up.</summary>
+    public bool HasApiMetric => Profile is { Console: not null } profile && profile.ProviderKind.Descriptor().Capabilities.ConsoleBilling;
+
+    public bool AllMetricsOff => !SessionEnabled && !WeekEnabled && !(HasApiMetric && ApiEnabled);
+
+    /// <summary>In multi-profile mode the tray is drawn from the multi-profile options, as upstream.</summary>
+    public bool IsMultiProfile
+    {
+        get => _settings.IsMultiProfile;
+        set => Run(() => _profiles.SetMultiProfile(value));
+    }
 
     // General (per profile): upstream GeneralSettingsView's refresh interval.
 
@@ -99,65 +167,271 @@ public sealed class SettingsViewModel : ObservableObject
     public bool TimeFormat12 { get => _settings.TimeFormat == TimeFormatPreference.TwelveHour; set => SetTimeFormat(value, TimeFormatPreference.TwelveHour); }
     public bool TimeFormat24 { get => _settings.TimeFormat == TimeFormatPreference.TwentyFourHour; set => SetTimeFormat(value, TimeFormatPreference.TwentyFourHour); }
 
-    // CLI Account, upstream CLIAccountView.
+    // Credentials: upstream PersonalUsageView, APIBillingView, CLIAccountView and CodexAccountView.
 
     public bool IsLinked => Profile?.CliLink is not null;
+    public bool HasClaudeAi => Profile?.ClaudeAi is not null;
+    public bool HasConsole => Profile?.Console is not null;
+    public bool HasCodex => Profile?.Codex is not null;
 
-    public string LinkStatusTitle => Strings.Get(IsLinked ? "cli.synced" : "cli.not_synced");
-
-    public string? LinkedSince => Profile?.CliLink is { } link
-        ? Strings.Format("windows.cli.linked_at", TimeZoneInfo.ConvertTime(link.LinkedAt, TimeZoneInfo.Local).ToString("g", Strings.Culture))
-        : null;
-
-    public string DetailsSubtitle => Strings.Get(IsLinked ? "cli.credentials_synced" : "cli.no_credentials");
-
-    public string SyncLabel => Strings.Get(IsLinked ? "cli.resync" : "cli.sync_from_code");
-
-    public IReadOnlyList<DetailRow> Details
+    public CredentialView ClaudeAi
     {
         get
         {
-            if (Profile?.CliLink is not { } link)
+            var link = Profile?.ClaudeAi;
+            var rows = new List<DetailRow>();
+            if (link is not null)
             {
-                return [];
+                rows.Add(new(Strings.Get("wizard.organization"), link.OrganizationName ?? link.OrganizationId));
+                rows.Add(new(Strings.Get("windows.cli.current_state"), _state?.Source == UsageSourceKind.ClaudeAi ? SessionState() : Strings.Get("windows.cli.state.not_checked")));
+                rows.Add(new(Strings.Get("wizard.session_key"), Strings.Get("windows.claude_ai.session_in_browser")));
             }
 
-            var rows = new List<DetailRow>
-            {
-                new(Strings.Get("windows.setup.review.account"),
-                    link.EmailAddress is { } email ? (link.OrganizationName is { } org ? $"{email} — {org}" : email) : Strings.Get("windows.setup.review.account_unknown")),
-                new(Strings.Get("windows.setup.review.folder"), link.ConfigDirectory),
-                new(Strings.Get("windows.cli.current_state"), CurrentState()),
-            };
-            if (_state?.MirrorError is { } mirrorError)
-            {
-                rows.Add(new(Strings.Get("windows.cli.mirror"), mirrorError));
-            }
+            return new CredentialView(
+                WizardRoute.ClaudeAi, link is not null,
+                Strings.Get(link is null ? "personal.status_not_connected" : "personal.status_connected"),
+                link is null ? null : LinkedAt(link.LinkedAt), rows,
+                Strings.Get(link is null ? "personal.signin_button" : "personal.reconfigure"),
+                link is not null && Profile?.CliLink is not null ? Strings.Get("windows.claude_ai.used_before_cli") : null);
+        }
+    }
 
-            if (_snapshot?.Credentials is { } credentials)
+    public CredentialView Console
+    {
+        get
+        {
+            var link = Profile?.Console;
+            var rows = new List<DetailRow>();
+            if (link is not null)
             {
-                // Only the token's fixed type prefix is shown; upstream also showed the last four characters.
-                rows.Add(new(Strings.Get("cli.access_token"), MaskedToken(credentials.AccessToken)));
-                rows.Add(new(Strings.Get("cli.subscription"), credentials.SubscriptionType ?? link.SubscriptionType ?? "unknown"));
-                if (credentials.Scopes.Count > 0)
+                rows.Add(new(Strings.Get("wizard.organization"), link.OrganizationName ?? link.OrganizationId));
+                if (_state?.Api is { } api)
                 {
-                    rows.Add(new(Strings.Get("cli.scopes"), string.Join(", ", credentials.Scopes)));
+                    rows.Add(new(Strings.Get("menubar.api_credits"), Strings.Format(
+                        "windows.setup.review.billing_values",
+                        CurrencyText.Format(api.Usage.UsedAmount, api.Usage.Currency, Strings.Culture),
+                        CurrencyText.Format(api.Usage.RemainingAmount, api.Usage.Currency, Strings.Culture))));
+                    rows.Add(new(Strings.Get("windows.api.last_updated"), LocalTime(api.ObservedAt)));
+                }
+
+                if (link.SessionKeyExpiry is { } expiry)
+                {
+                    rows.Add(new(Strings.Get("windows.api.session_expires"), LocalTime(expiry)));
                 }
             }
 
-            return rows;
+            return new CredentialView(
+                WizardRoute.Console, link is not null,
+                Strings.Get(link is null ? "common.not_connected" : "common.connected"),
+                link is null ? null : LinkedAt(link.LinkedAt), rows,
+                Strings.Get(link is null ? "api.configure" : "personal.reconfigure"),
+                _state?.ApiFailure switch
+                {
+                    null => null,
+                    FetchFailure.CredentialsRejected => Strings.Get("windows.api.note.session_expired"),
+                    _ => Strings.Get("windows.api.note.not_updated"),
+                });
         }
     }
+
+    public CredentialView Cli
+    {
+        get
+        {
+            var link = Profile?.CliLink;
+            var rows = new List<DetailRow>();
+            if (link is not null)
+            {
+                rows.Add(new(Strings.Get("windows.setup.review.account"),
+                    link.EmailAddress is { } email ? (link.OrganizationName is { } org ? $"{email} — {org}" : email) : Strings.Get("windows.setup.review.account_unknown")));
+                rows.Add(new(Strings.Get("windows.setup.review.folder"), link.ConfigDirectory));
+                var checkedNow = _state?.Source == UsageSourceKind.ClaudeCode;
+                rows.Add(new(Strings.Get("windows.cli.current_state"), checkedNow ? CliState() : Strings.Get("windows.cli.state.not_checked")));
+                if (checkedNow && _state?.Ownership is { } ownership)
+                {
+                    rows.Add(new(Strings.Get("windows.cli.ownership"), Strings.Get(ownership switch
+                    {
+                        CredentialOwnership.AppOwned => "windows.cli.ownership.app",
+                        CredentialOwnership.Unresolved => "windows.cli.ownership.unresolved",
+                        _ => "windows.cli.ownership.cli",
+                    })));
+                }
+
+                if (_state?.MirrorError is { } mirrorError)
+                {
+                    rows.Add(new(Strings.Get("windows.cli.mirror"), mirrorError));
+                }
+
+                if (_snapshot?.Credentials is { } credentials)
+                {
+                    // Only the token's fixed type prefix is shown; upstream also showed the last four characters.
+                    rows.Add(new(Strings.Get("cli.access_token"), MaskedToken(credentials.AccessToken)));
+                    rows.Add(new(Strings.Get("cli.subscription"), credentials.SubscriptionType ?? link.SubscriptionType ?? "unknown"));
+                    if (credentials.Scopes.Count > 0)
+                    {
+                        rows.Add(new(Strings.Get("cli.scopes"), string.Join(", ", credentials.Scopes)));
+                    }
+                }
+            }
+
+            return new CredentialView(
+                WizardRoute.ClaudeCode, link is not null,
+                Strings.Get(link is null ? "cli.not_synced" : "cli.synced"),
+                link is null ? null : LinkedAt(link.LinkedAt), rows,
+                Strings.Get(link is null ? "cli.sync_from_code" : "cli.resync"),
+                _state?.Source != UsageSourceKind.ClaudeCode ? null : _state.Notice switch
+                {
+                    LinkNotice.HandBackPending => Strings.Get("windows.banner.hand_back_pending"),
+                    LinkNotice.RenewalFailed => Strings.Get("windows.banner.renewal_failed"),
+                    LinkNotice.OtherFolderUnreadable => Strings.Get("windows.cli.notice.other_folder_unreadable"),
+                    _ => null,
+                });
+        }
+    }
+
+    /// <summary>
+    /// The user's statement that this Claude Code login is also used where the tracker cannot see it
+    /// (another PC, a copied folder). The tracker then never renews it.
+    /// </summary>
+    public bool UsedElsewhere
+    {
+        get => Profile?.CliLink?.UsedElsewhere == true;
+        set => Edit(() =>
+        {
+            if (Profile?.CliLink is { } link)
+            {
+                link.UsedElsewhere = value;
+            }
+        });
+    }
+
+    public CredentialView Codex
+    {
+        get
+        {
+            var link = Profile?.Codex;
+            var rows = new List<DetailRow>();
+            if (link is not null)
+            {
+                rows.Add(new(Strings.Get("windows.setup.review.account"), link.Email ?? Strings.Get("windows.setup.review.codex_account_unknown")));
+                rows.Add(new(Strings.Get("windows.setup.review.source"), Strings.Get(link.IsManual ? "codex.source_manual" : "codex.source_authfile")));
+                if (!link.IsManual && link.CodexHome is { } home)
+                {
+                    rows.Add(new(Strings.Get("windows.codex.folder"), home));
+                }
+
+                rows.Add(new(Strings.Get("windows.cli.current_state"), _state?.Source == UsageSourceKind.Codex ? CodexState() : Strings.Get("windows.cli.state.not_checked")));
+                if (_state?.Usage?.Usage.PlanType is { } plan)
+                {
+                    rows.Add(new(Strings.Get("cli.subscription"), plan));
+                }
+            }
+
+            return new CredentialView(
+                WizardRoute.Codex, link is not null,
+                Strings.Get(link is null ? "codex.not_connected" : "codex.connected"),
+                link is null ? null : LinkedAt(link.LinkedAt), rows,
+                Strings.Get(link is null ? "windows.codex.connect" : "personal.reconfigure"),
+                link is { IsManual: false } ? Strings.Get("codex.live_read_note") : null);
+        }
+    }
+
+    // Manage Profiles, upstream ManageProfilesView.
+
+    public IReadOnlyList<ProfileRow> Profiles => _settings.Profiles
+        .Select(p => new ProfileRow(
+            p.Id, p.Name, p.ProviderKind.Descriptor().DisplayName, p.Id == Profile?.Id, p.IsSelectedForDisplay, _settings.Profiles.Count > 1))
+        .ToList();
+
+    /// <summary>Why the last profile action did not happen.</summary>
+    public string? ProfileError { get => _profileError; private set => Set(ref _profileError, value); }
+
+    public IconStyleOption MultiStyle
+    {
+        get => MultiStyles.FirstOrDefault(o => o.RawValue == MultiConfig.IconStyle) ?? MultiStyles[0];
+        set => EditApp(() => MultiConfig.IconStyle = value.RawValue);
+    }
+
+    public bool MultiShowWeek { get => MultiConfig.ShowWeek; set => EditApp(() => MultiConfig.ShowWeek = value); }
+    public bool MultiMonochrome { get => MultiConfig.UseSystemColor; set => EditApp(() => MultiConfig.UseSystemColor = value); }
+    public bool MultiShowRemaining { get => MultiConfig.ShowRemainingPercentage; set => EditApp(() => MultiConfig.ShowRemainingPercentage = value); }
+    public bool MultiShowTimeMarker { get => MultiConfig.ShowTimeMarker; set => EditApp(() => MultiConfig.ShowTimeMarker = value); }
+    public bool MultiShowPaceMarker { get => MultiConfig.ShowPaceMarker; set => EditApp(() => MultiConfig.ShowPaceMarker = value); }
+    public bool MultiUsePaceColoring { get => MultiConfig.UsePaceColoring; set => EditApp(() => MultiConfig.UsePaceColoring = value); }
+    public bool MultiActiveIndicator { get => MultiConfig.ShowActiveProfileIndicator; set => EditApp(() => MultiConfig.ShowActiveProfileIndicator = value); }
+
+    /// <summary>The Percent style has room for the session only; the page says so while the week is switched on.</summary>
+    public bool MultiWeekInTooltipOnly => MultiConfig is { IconStyle: "percentage", ShowWeek: true };
+
+    public void CreateProfile(string? name, Provider provider) => Run(() => _profiles.Create(name, provider));
+
+    public void RenameProfile(Guid id, string name) => Run(() =>
+    {
+        if (Find(id) is { } profile)
+        {
+            _profiles.Rename(profile, name);
+        }
+    });
+
+    /// <summary>Makes a profile the one that is viewed and configured here. Claude Code's own login is not touched.</summary>
+    public void ActivateProfile(Guid id) => Run(() =>
+    {
+        if (Find(id) is { } profile && profile.Id != Profile?.Id)
+        {
+            _profiles.Activate(profile);
+        }
+    });
+
+    public void ToggleDisplayed(Guid id) => Run(() =>
+    {
+        if (Find(id) is { } profile && !_profiles.ToggleDisplayed(profile))
+        {
+            throw new SetupException(Strings.Get("multiprofile.at_least_one"));
+        }
+    });
+
+    /// <summary>Reads the active profile's history again; the History page calls it when it opens.</summary>
+    public void ReloadHistory() => History.Load(Profile);
+
+    // Debug Tools: the network log, upstream DebugNetworkLogView.
+
+    public IReadOnlyList<LogRow> LogRows { get; private set; } = [];
+
+    public string LogCount => LogRows.Count == 0 ? Strings.Get("debug.no_requests") : Strings.Format("debug.requests_logged", LogRows.Count);
+
+    public void ReloadLog()
+    {
+        LogRows = _log.ReadRecent(LogRowLimit)
+            .Select(e => new LogRow(
+                TimeZoneInfo.ConvertTime(e.At, TimeZoneInfo.Local).ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                e.Operation,
+                $"{e.Method} {e.Route} ({e.Transport})",
+                e.Status?.ToString(CultureInfo.InvariantCulture) ?? "—",
+                $"{e.DurationMs.ToString(CultureInfo.InvariantCulture)} ms",
+                e.ErrorCategory))
+            .ToList();
+        RaisePropertyChanged(nameof(LogRows));
+        RaisePropertyChanged(nameof(LogCount));
+    }
+
+    public void ClearLog()
+    {
+        _log.Clear();
+        ReloadLog();
+    }
+
+    public int ExportLog(string path) => _log.Export(path);
 
     public string Version =>
         Strings.Format("about.version", Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0");
 
-    /// <summary>Refreshes the CLI account page from the coordinator's state and a fresh read of the linked folder.</summary>
-    public void UpdateLink(ProfileUsageState? state, CliSnapshot? snapshot)
+    /// <summary>Refreshes the credential pages from the coordinator's state and a fresh read of the linked Claude Code folder.</summary>
+    public void Update(ProfileUsageState? state, CliSnapshot? snapshot)
     {
         _state = state;
         _snapshot = snapshot;
-        foreach (var name in new[] { nameof(IsLinked), nameof(LinkStatusTitle), nameof(LinkedSince), nameof(DetailsSubtitle), nameof(SyncLabel), nameof(Details), nameof(HasProfile), nameof(ProfileName) })
+        History.RecordingError = state?.HistoryError;
+        foreach (var name in new[] { nameof(ClaudeAi), nameof(Console), nameof(Cli), nameof(Codex) })
         {
             RaisePropertyChanged(name);
         }
@@ -175,7 +449,13 @@ public sealed class SettingsViewModel : ObservableObject
     public static string MaskedToken(string token) =>
         token.Length > 20 ? token[..12] + "•••••" : "•••••••••";
 
-    private string CurrentState() => _state?.Link switch
+    private ProfileSettings? Find(Guid id) => _settings.Profiles.FirstOrDefault(p => p.Id == id);
+
+    private static string LinkedAt(DateTimeOffset at) => Strings.Format("windows.cli.linked_at", LocalTime(at));
+
+    private static string LocalTime(DateTimeOffset at) => TimeZoneInfo.ConvertTime(at, TimeZoneInfo.Local).ToString("g", Strings.Culture);
+
+    private string CliState() => _state?.Link switch
     {
         LinkStatus.Ready => Strings.Get("windows.cli.state.ready"),
         LinkStatus.WaitingForCliRefresh => Strings.Get("windows.banner.waiting_for_cli"),
@@ -183,6 +463,29 @@ public sealed class SettingsViewModel : ObservableObject
         LinkStatus.Unreadable or LinkStatus.Invalid => Strings.Get("windows.banner.cli_unreadable"),
         LinkStatus.AccountChanged => Strings.Get("windows.banner.account_changed"),
         LinkStatus.AccountUnverified => Strings.Get("windows.banner.account_unverified"),
+        LinkStatus.LoginRejected => Strings.Get("windows.banner.login_rejected"),
+        LinkStatus.RefreshFailed => Strings.Get("windows.banner.renewal_failed"),
+        _ => Strings.Get("windows.cli.state.not_checked"),
+    };
+
+    private string SessionState() => (_state?.Link, _state?.LastFailure) switch
+    {
+        (LinkStatus.NotSignedIn, _) or (_, FetchFailure.CredentialsRejected) => Strings.Get("popover.banner.credentials_expired"),
+        (LinkStatus.AccountChanged, _) => Strings.Get("windows.banner.claude_ai_other_account"),
+        (_, FetchFailure.Challenge) => Strings.Get("windows.banner.challenge"),
+        (LinkStatus.Ready, null) when _state?.LastSuccessAt is not null => Strings.Get("windows.claude_ai.state.ready"),
+        _ => Strings.Get("windows.cli.state.not_checked"),
+    };
+
+    private string CodexState() => _state?.Link switch
+    {
+        LinkStatus.Ready => Strings.Get("windows.cli.state.ready"),
+        LinkStatus.WaitingForCliRefresh => Strings.Get("windows.banner.waiting_for_codex"),
+        LinkStatus.NotSignedIn => Strings.Get("error.codex_credentials_not_found"),
+        LinkStatus.Unreadable or LinkStatus.Invalid => Strings.Get("error.codex_credentials_invalid"),
+        LinkStatus.AccountChanged or LinkStatus.AccountUnverified => Strings.Get("windows.banner.codex_account_changed"),
+        LinkStatus.LoginRejected => Strings.Get("error.codex_auth_expired"),
+        LinkStatus.RefreshFailed => Strings.Get("error.codex_auth_refresh_failed"),
         _ => Strings.Get("windows.cli.state.not_checked"),
     };
 
@@ -201,15 +504,37 @@ public sealed class SettingsViewModel : ObservableObject
     private IconStyleOption StyleOf(string type) =>
         IconStyles.FirstOrDefault(o => o.RawValue == Metric(type).IconStyle) ?? IconStyles[0];
 
+    /// <summary>An edit of the active profile's own settings.</summary>
     private void Edit(Action change)
     {
-        if (Profile is null)
+        if (Profile is not null)
         {
-            return;
+            EditApp(change);
         }
+    }
 
+    /// <summary>An edit of an app-wide setting.</summary>
+    private void EditApp(Action change)
+    {
         change();
         _changed();
+        Reload();
+    }
+
+    /// <summary>A profile action that saves the settings itself; a failure is shown on the page and nothing changes.</summary>
+    private void Run(Action action)
+    {
+        try
+        {
+            action();
+            ProfileError = null;
+        }
+        catch (SetupException e)
+        {
+            ProfileError = e.Message;
+        }
+
+        _applied();
         Reload();
     }
 
@@ -217,9 +542,7 @@ public sealed class SettingsViewModel : ObservableObject
     {
         if (selected && _settings.TimeDisplay != value)
         {
-            _settings.TimeDisplay = value;
-            _changed();
-            Reload();
+            EditApp(() => _settings.TimeDisplay = value);
         }
     }
 
@@ -227,13 +550,11 @@ public sealed class SettingsViewModel : ObservableObject
     {
         if (selected && _settings.TimeFormat != value)
         {
-            _settings.TimeFormat = value;
-            _changed();
-            Reload();
+            EditApp(() => _settings.TimeFormat = value);
         }
     }
 
-    private static IconStyleOption Option(string raw, string nameKey, TrayIconStyle style, bool taskbarDark)
+    private static IconStyleOption Option(string raw, string nameKey, TrayIconSpec spec, bool taskbarDark)
     {
         var group = new DrawingGroup();
         using (var context = group.Open())
@@ -241,8 +562,7 @@ public sealed class SettingsViewModel : ObservableObject
             // A dark tile behind the preview, like the taskbar it will sit on.
             context.DrawRoundedRectangle(new SolidColorBrush(taskbarDark ? Color.FromRgb(0x20, 0x20, 0x20) : Color.FromRgb(0xF3, 0xF3, 0xF3)),
                 null, new System.Windows.Rect(-6, -6, 44, 44), 6, 6);
-            TrayIconRenderer.Draw(context, 32,
-                new TrayIconSpec(style, 0.6, 60, UsageStatusLevel.Safe, 0.45, PaceStatus.OnTrack, false, "S", false), taskbarDark);
+            TrayIconRenderer.Draw(context, 32, spec, taskbarDark);
         }
 
         group.Freeze();

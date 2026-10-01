@@ -1,8 +1,14 @@
+using System.IO;
+using System.Security.Cryptography;
 using ClaudeUsageTracker.App.ClaudeCode;
+using ClaudeUsageTracker.App.CodexCli;
 using ClaudeUsageTracker.App.Localisation;
 using ClaudeUsageTracker.App.Storage;
+using ClaudeUsageTracker.Core.Billing;
 using ClaudeUsageTracker.Core.ClaudeCode;
 using ClaudeUsageTracker.Core.Profiles;
+using ClaudeUsageTracker.Core.Providers;
+using ClaudeUsageTracker.Core.Providers.Codex;
 using ClaudeUsageTracker.Core.Usage;
 
 namespace ClaudeUsageTracker.App.Setup;
@@ -11,18 +17,33 @@ namespace ClaudeUsageTracker.App.Setup;
 public sealed class SetupException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
-/// Saves a tested Claude Code link. Upstream's CLI route saved without a test or review, re-read a
-/// possibly different login at save time and could lose the copy to a stale in-memory save. Here the save
-/// re-reads the folder, refuses a login whose account changed since the test, then writes the settings and
-/// only after them the encrypted copy. If the copy cannot be written, the settings are restored, so a
-/// profile never ends up linked to one account while holding another's copy.
+/// Saves tested configurations: a Claude Code link, a claude.ai organisation, a Console organisation or a
+/// Codex login. Upstream's routes saved without a test or review and could lose a credential to a stale
+/// in-memory save. Here every save writes the settings first and the secret second, and restores the
+/// settings if the secret cannot be written, so a profile never ends up linked to something it holds no
+/// credentials for. As upstream, the wizard configures the active profile, and the profile's provider
+/// changes only when a route completes.
 /// </summary>
-public sealed class SetupService(SettingsStore store, AppSettings settings, CliLinkService links, UsageCacheStore cache, TimeProvider time)
+public sealed class SetupService(
+    SettingsStore store, AppSettings settings, CliLinkService links, ProfileSecretStore secrets, CredentialLock credentialLock,
+    UsageCacheStore cache, TimeProvider time)
 {
+    private Guid _newProfileId = Guid.NewGuid();
+
     /// <summary>The profile setup will configure: the active one, or a new one when none exists.</summary>
     public ProfileSettings? TargetProfile => settings.ActiveProfile;
 
-    public ProfileSettings Save(CliSnapshot tested, UsageData testedUsage, DateTimeOffset observedAt)
+    /// <summary>
+    /// The ID the target profile has or will get. A browser sign-in made before saving uses it, so the
+    /// session lands in the browser context the saved profile will use.
+    /// </summary>
+    public Guid TargetProfileId => TargetProfile?.Id ?? _newProfileId;
+
+    /// <summary>
+    /// Links a Claude Code login. The folder is re-read first, and a login whose account changed since the
+    /// test is refused.
+    /// </summary>
+    public async Task<ProfileSettings> SaveCliAsync(CliSnapshot tested, UsageData testedUsage, DateTimeOffset observedAt, CancellationToken cancellation)
     {
         var current = links.Read(tested.Directory);
         if (current.State != CliLoginState.Usable || current.Credentials is null)
@@ -37,24 +58,127 @@ public sealed class SetupService(SettingsStore store, AppSettings settings, CliL
             throw new SetupException(Strings.Get("windows.setup.error.changed_since_test"));
         }
 
+        var link = links.CreateLink(current);
+        var profile = await SaveAsync(
+            Provider.Anthropic,
+            p =>
+            {
+                var previous = p.CliLink;
+                // Whether the login is also used elsewhere is the user's statement about the account, not the folder.
+                link.UsedElsewhere = previous?.UsedElsewhere == true && previous.Identity == link.Identity;
+                p.CliLink = link;
+                return () => p.CliLink = previous;
+            },
+            p => links.WriteMirrorAsync(p.Id, current, cancellation)).ConfigureAwait(false);
+        CacheUsage(profile.Id, "oauthUsage", link.Identity, testedUsage, observedAt);
+        return profile;
+    }
+
+    /// <summary>
+    /// Links a claude.ai organisation. The session itself is already in the profile's browser context; only
+    /// the organisation is saved.
+    /// </summary>
+    public async Task<ProfileSettings> SaveClaudeAiAsync(ClaudeOrganization organization, UsageData testedUsage, DateTimeOffset observedAt)
+    {
+        var profile = await SaveAsync(
+            Provider.Anthropic,
+            p =>
+            {
+                var previous = p.ClaudeAi;
+                p.ClaudeAi = new ClaudeAiLink
+                {
+                    OrganizationId = organization.Uuid,
+                    OrganizationName = organization.Name.Length > 0 ? organization.Name : null,
+                    LinkedAt = time.GetUtcNow(),
+                };
+                return () => p.ClaudeAi = previous;
+            },
+            null).ConfigureAwait(false);
+        CacheUsage(profile.Id, "claudeAi", organization.Uuid, testedUsage, observedAt);
+        return profile;
+    }
+
+    /// <summary>Links an Anthropic Console organisation and saves its session key in the profile's encrypted file.</summary>
+    public Task<ProfileSettings> SaveConsoleAsync(ConsoleOrganization organization, ConsoleSecret key, CancellationToken cancellation) =>
+        SaveAsync(
+            Provider.Anthropic,
+            p =>
+            {
+                var previous = p.Console;
+                p.Console = new ConsoleLink
+                {
+                    OrganizationId = organization.Uuid,
+                    OrganizationName = organization.Name.Length > 0 ? organization.Name : null,
+                    LinkedAt = time.GetUtcNow(),
+                    SessionKeyExpiry = key.Expires,
+                };
+                return () => p.Console = previous;
+            },
+            p => ChangeSecretsAsync(p.Id, bundle => bundle.Console = key, cancellation));
+
+    /// <summary>
+    /// Links a Codex login: the Codex CLI's own <c>auth.json</c> in <paramref name="codexHome"/>, read live,
+    /// or credentials the user pasted, which are saved in the profile's encrypted file.
+    /// </summary>
+    public async Task<ProfileSettings> SaveCodexAsync(
+        string codexHome, string? pastedJson, CodexCredentials tested, UsageData testedUsage, DateTimeOffset observedAt, CancellationToken cancellation)
+    {
+        var link = new CodexLink
+        {
+            Source = pastedJson is null ? CodexLink.AuthFileSource : CodexLink.ManualSource,
+            CodexHome = codexHome,
+            AccountId = tested.ResolvedAccountId,
+            Email = tested.Email,
+            LinkedAt = time.GetUtcNow(),
+        };
+        var profile = await SaveAsync(
+            Provider.Codex,
+            p =>
+            {
+                var previous = p.Codex;
+                p.Codex = link;
+                return () => p.Codex = previous;
+            },
+            // Pasted credentials are kept only for the manual source; following the CLI's file removes an earlier paste.
+            p => pastedJson is null && !secrets.Exists(p.Id)
+                ? Task.CompletedTask
+                : ChangeSecretsAsync(p.Id, bundle => bundle.CodexAuthJson = pastedJson, cancellation)).ConfigureAwait(false);
+        CacheUsage(profile.Id, "codex", link.Identity, testedUsage, observedAt);
+        return profile;
+    }
+
+    /// <summary>
+    /// Applies one route to the target profile. Settings are written first and the secret second; if the
+    /// secret cannot be written, the settings are restored.
+    /// </summary>
+    /// <param name="apply">Sets the link and returns how to undo it.</param>
+    private async Task<ProfileSettings> SaveAsync(Provider provider, Func<ProfileSettings, Action> apply, Func<ProfileSettings, Task>? writeSecrets)
+    {
         var existing = settings.ActiveProfile;
         var profile = existing ?? new ProfileSettings
         {
+            Id = _newProfileId,
             Name = FunnyNames.Random(settings.Profiles.Select(p => p.Name)),
             CreatedAt = time.GetUtcNow(),
         };
 
-        var previous = (profile.CliLink, settings.ActiveProfileId, settings.HasCompletedSetup, profile.LastUsedAt);
+        var previous = (settings.ActiveProfileId, settings.HasCompletedSetup, profile.LastUsedAt, profile.Provider);
+        var undo = apply(profile);
         void Restore()
         {
-            (profile.CliLink, settings.ActiveProfileId, settings.HasCompletedSetup, profile.LastUsedAt) = previous;
+            undo();
+            (settings.ActiveProfileId, settings.HasCompletedSetup, profile.LastUsedAt, profile.Provider) = previous;
             if (existing is null)
             {
                 settings.Profiles.Remove(profile);
             }
         }
 
-        profile.CliLink = links.CreateLink(current);
+        if (profile.ProviderKind != provider)
+        {
+            profile.Provider = provider.RawValue();
+        }
+
         profile.LastUsedAt = time.GetUtcNow();
         if (existing is null)
         {
@@ -67,87 +191,68 @@ public sealed class SetupService(SettingsStore store, AppSettings settings, CliL
         {
             store.Save(settings);
         }
-        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             Restore();
             throw new SetupException(Strings.Format("windows.setup.error.save_failed", e.Message), e);
         }
 
-        try
+        if (writeSecrets is not null)
         {
-            links.WriteMirror(profile.Id, current);
-        }
-        catch (Exception e) when (e is SecretStoreException or System.IO.IOException or UnauthorizedAccessException
-                                      or System.Security.Cryptography.CryptographicException)
-        {
-            Restore();
             try
             {
-                store.Save(settings);
+                await writeSecrets(profile).ConfigureAwait(false);
             }
-            catch (Exception restore) when (restore is System.IO.IOException or UnauthorizedAccessException)
+            catch (Exception e) when (e is SecretStoreException or IOException or UnauthorizedAccessException or CryptographicException)
             {
-                throw new SetupException(Strings.Format("windows.setup.error.save_failed", $"{e.Message} {restore.Message}"), e);
-            }
+                Restore();
+                try
+                {
+                    store.Save(settings);
+                }
+                catch (Exception restore) when (restore is IOException or UnauthorizedAccessException)
+                {
+                    throw new SetupException(Strings.Format("windows.setup.error.save_failed", $"{e.Message} {restore.Message}"), e);
+                }
 
-            throw new SetupException(Strings.Format("windows.setup.error.save_failed", e.Message), e);
+                throw new SetupException(Strings.Format("windows.setup.error.save_failed", e.Message), e);
+            }
         }
 
-        try
+        if (existing is null)
         {
-            cache.Save(new CachedUsage
-            {
-                ProfileId = profile.Id,
-                ObservedAt = observedAt,
-                Source = "oauthUsage",
-                AccountIdentity = profile.CliLink.Identity,
-                Usage = testedUsage,
-            });
-        }
-        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
-        {
-            // The cache only shortens the first popover load; the next poll fetches again.
+            _newProfileId = Guid.NewGuid();
         }
 
         return profile;
     }
 
-    /// <summary>
-    /// Removes a profile's link and its encrypted copy. Claude Code's own files are untouched.
-    /// <paramref name="linkRemoved"/> runs after the settings are saved and before the copy is deleted, so the
-    /// caller can stop in-flight checks of the old link first.
-    /// </summary>
-    public void Unlink(ProfileSettings profile, Action linkRemoved)
+    private async Task ChangeSecretsAsync(Guid profileId, Action<ProfileSecrets> change, CancellationToken cancellation)
     {
-        var previous = profile.CliLink;
-        profile.CliLink = null;
-        try
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
-            store.Save(settings);
+            var bundle = secrets.Load(profileId);
+            change(bundle);
+            secrets.Save(profileId, bundle);
         }
-        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
-        {
-            profile.CliLink = previous;
-            throw new SetupException(Strings.Format("windows.setup.error.save_failed", e.Message), e);
-        }
+    }
 
-        linkRemoved();
+    private void CacheUsage(Guid profileId, string source, string? identity, UsageData usage, DateTimeOffset observedAt)
+    {
         try
         {
-            links.DeleteMirror(profile.Id);
+            cache.Save(new CachedUsage
+            {
+                ProfileId = profileId,
+                ObservedAt = observedAt,
+                Source = source,
+                AccountIdentity = identity,
+                Usage = usage,
+            });
         }
-        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new SetupException(Strings.Format("windows.setup.error.copy_not_deleted", e.Message), e);
-        }
-
-        try
-        {
-            cache.Delete(profile.Id);
-        }
-        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
-        {
-            // The cache holds no secrets and is never shown without a matching link.
+            // The cache only shortens the first popover load; the next poll fetches again.
         }
     }
 }

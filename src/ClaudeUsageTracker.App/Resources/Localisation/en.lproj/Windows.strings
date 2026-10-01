@@ -7,7 +7,7 @@
 */
 
 /* MARK: - Popover states upstream did not distinguish */
-"windows.banner.not_set_up" = "Not set up yet. Link your Claude Code login to start tracking.";
+"windows.banner.not_set_up" = "Not set up yet. Run the setup to start tracking.";
 "windows.banner.waiting_for_cli" = "Waiting for Claude Code to refresh its login";
 "windows.banner.account_changed" = "Claude Code is now signed in to a different account.";
 "windows.banner.account_unverified" = "Can't confirm which account Claude Code is signed in to.";
@@ -34,11 +34,9 @@
 "windows.setup.error.changed_since_test" = "The Claude Code login changed after the test. Test again before saving.";
 "windows.setup.error.save_failed" = "Couldn't save the configuration: %@";
 "windows.setup.window_title" = "Claude Usage Tracker Setup";
-"windows.setup.later_routes" = "Browser sign-in, session keys and the Console arrive in a later version of the Windows port.";
-"windows.setup.codex_later" = "Available in a later version";
 "windows.setup.not_found.title" = "No usable Claude Code login";
 "windows.setup.not_found.none" = "No Claude Code login was found. Sign in with the claude command (/login), then check again.";
-"windows.setup.not_found.expired" = "Claude Code's login has expired. Claude Code renews it the next time you use it: run any claude command, then check again. The tracker never renews Claude Code's login itself.";
+"windows.setup.not_found.expired" = "Claude Code's login has expired. Claude Code renews it the next time you use it: run any claude command, then check again.";
 "windows.setup.not_found.unreadable" = "Claude Code's login file could not be read. Check again in a moment.";
 "windows.setup.check_again" = "Check Again";
 "windows.setup.choose_folder" = "Use Another Claude Code Folder…";
@@ -90,7 +88,7 @@
 "windows.cli.current_state" = "Status";
 "windows.cli.state.ready" = "Signed in and readable";
 "windows.cli.state.not_checked" = "Not checked yet";
-"windows.cli.about" = "The tracker reads Claude Code's login without changing it and keeps an encrypted copy for this profile. It does not renew, switch or replace Claude Code's login in this version.";
+"windows.cli.about" = "The tracker reads Claude Code's login and keeps an encrypted copy for this profile. When the login has expired and no Claude Code is running, the tracker renews it and writes the renewed login back to Claude Code's files; it never replaces a newer login. If Claude Code switches to another account, this profile keeps its own copy and renews it itself. Switching Claude Code to this profile's account comes in a later version.";
 "windows.cli.remove_confirm.title" = "Remove CLI Account?";
 "windows.cli.remove_confirm.message" = "This removes the link and the encrypted copy from this profile. Claude Code stays signed in.";
 "windows.about.subtitle" = "for Windows";
@@ -108,3 +106,85 @@
 "windows.setup.test.forbidden" = "The usage service refused this account's request (HTTP %d). This account type may not support it yet.";
 "windows.setup.error.copy_not_deleted" = "The link was removed, but the encrypted copy could not be deleted: %@";
 "windows.cli.mirror" = "Encrypted copy";
+
+/* MARK: - Milestone 3: popover and tray */
+"windows.popover.switch_profile" = "Switch profile";
+"windows.banner.hand_back_pending" = "The tracker renewed Claude Code's login but could not write it back to Claude Code yet. It keeps trying.";
+"windows.banner.renewal_failed" = "Couldn't renew the login. The tracker tries again in a few minutes.";
+"windows.banner.login_rejected" = "The login was rejected. Sign in again in Claude Code, then set up this profile again.";
+"windows.banner.claude_ai_other_account" = "The claude.ai session belongs to an account that can't see this organization. Sign in again.";
+"windows.banner.waiting_for_codex" = "Waiting for the Codex CLI to refresh its login";
+"windows.banner.codex_account_changed" = "The Codex CLI is now signed in to a different account.";
+"windows.api.cost_title" = "API Cost";
+"windows.api.this_month" = "This Month";
+"windows.api.daily_cost" = "Cost per day";
+"windows.api.note.session_expired" = "Console session expired. Sign in again in Settings.";
+"windows.api.note.not_updated" = "Couldn't update billing; showing the last values.";
+"windows.metric.api_description" = "Console spend against spend plus remaining credits";
+
+/* MARK: - Milestone 3: setup routes */
+"windows.setup.subtitle" = "Set up tracking for this profile";
+"windows.setup.claude_ai.signin_description" = "Sign in to claude.ai in a window of this app. The session stays in this profile's own browser storage; the tracker never copies it elsewhere.";
+"windows.setup.claude_ai.storage_note" = "A pasted key goes into the same browser storage and is tested there. A key that fails the test is removed again.";
+"windows.setup.claude_ai.not_signed_in" = "claude.ai did not accept the sign-in yet. Sign in again.";
+"windows.setup.claude_ai.key_rejected" = "claude.ai rejected this session key. Copy the sessionKey cookie again and retry.";
+"windows.setup.claude_ai.key_challenged" = "claude.ai answered with a security check. Use Sign in instead of a pasted key.";
+"windows.setup.console.signin_title" = "Sign in to the Anthropic Console";
+"windows.setup.console.signin_description" = "Sign in to the Anthropic Console in a window of this app. Only its session cookie is kept, encrypted for this profile; the window's browser data is deleted afterwards.";
+"windows.setup.console.signin_button" = "Sign in to the Console";
+"windows.setup.console.key_help" = "The sessionKey cookie of platform.claude.com.";
+"windows.setup.console.storage_note" = "The key is saved only after the review, encrypted for your Windows account.";
+"windows.setup.console.select_org_subtitle" = "Select the Console organization whose billing to track";
+"windows.setup.console.key_rejected" = "The Console rejected this session. Sign in again.";
+"windows.setup.no_organizations" = "This account has no organizations to track.";
+"windows.setup.codex.not_detected" = "No Codex CLI login was found. Run codex to log in and choose Rescan, or paste the contents of auth.json below.";
+"windows.setup.codex.paste_note" = "Pasted credentials are tested first and saved only after the review, encrypted for your Windows account. The tracker renews them itself.";
+"windows.setup.review.source" = "Usage source";
+"windows.setup.review.source_claude_ai" = "claude.ai session in this profile's browser storage";
+"windows.setup.review.billing_now" = "Billing now";
+"windows.setup.review.billing_values" = "%@ spent, %@ remaining";
+"windows.setup.review.codex_account_unknown" = "Not reported by the Codex login";
+"windows.setup.review.provider_change" = "This profile tracks Anthropic now. Saving switches it to OpenAI Codex.";
+"windows.signin.loading" = "Opening the sign-in page…";
+"windows.signin.prompt" = "Sign in below. The window closes by itself when you are signed in.";
+"windows.signin.already" = "This browser is already signed in.";
+"windows.signin.continue" = "Continue";
+"windows.signin.other_account" = "Use Another Account";
+"windows.signin.browser_failed" = "The browser could not start: %@. Install or repair the Microsoft Edge WebView2 Runtime, then try again.";
+
+/* MARK: - Milestone 3: settings */
+"windows.claude_ai.about" = "Usage is read through this profile's own browser session, the way claude.ai itself asks for it. Removing the link deletes that browser storage, which signs it out.";
+"windows.claude_ai.session_in_browser" = "Kept in this profile's browser storage";
+"windows.claude_ai.state.ready" = "Signed in";
+"windows.claude_ai.used_before_cli" = "This profile also has a Claude Code login. As upstream, the claude.ai session is used for usage while it is set up.";
+"windows.claude_ai.remove_confirm.message" = "This removes the claude.ai link and deletes this profile's browser storage, which signs it out of claude.ai.";
+"windows.api.about" = "Billing is read with the Console session key, at most every 5 minutes. The key is stored encrypted for your Windows account and is never shown or logged.";
+"windows.api.last_updated" = "Last updated";
+"windows.api.session_expires" = "Session expires";
+"windows.api.remove_confirm.message" = "This removes the Console link and deletes its session key from this profile.";
+"windows.cli.ownership" = "Renewed by";
+"windows.cli.ownership.cli" = "Claude Code (the tracker renews it only while Claude Code is not running)";
+"windows.cli.ownership.app" = "This tracker: no known Claude Code folder holds this account any more";
+"windows.cli.ownership.unresolved" = "Nobody: it can't be told which Claude Code folder holds this account";
+"windows.cli.notice.other_folder_unreadable" = "Another Claude Code folder could not be read, so the tracker will not renew any login until it can.";
+"windows.cli.used_elsewhere.title" = "This login is also used elsewhere";
+"windows.cli.used_elsewhere.description" = "Turn on when this Claude Code login is also used on another PC or in a copied folder. The tracker then never renews it, because that would sign the other copy out.";
+"windows.codex.folder" = "Codex folder";
+"windows.codex.connect" = "Connect Codex";
+"windows.codex.remove_confirm.title" = "Remove Codex Account?";
+"windows.codex.remove_confirm.message" = "This removes the Codex link and any pasted credentials from this profile. The Codex CLI stays signed in.";
+"windows.appearance.multi_note" = "Multi-profile display is on: the tray uses the options under Manage Profiles. These options apply in single-profile mode.";
+"windows.history.earlier" = "Earlier";
+"windows.history.later" = "Later";
+"windows.history.about" = "Usage is recorded every 10 minutes for the session and every 2 hours for the week, and when a window resets. Billing is recorded when a monthly cycle ends.";
+"windows.export.done" = "Saved %d records to %@.";
+"windows.export.failed" = "Couldn't save the file: %@";
+"windows.profiles.provider_hint" = "Which service this profile tracks. It changes only when you set up the other provider for it.";
+"windows.profiles.cannot_delete_last" = "The last profile can't be deleted.";
+"windows.profiles.cleanup_pending" = "Some of the removed data is still in use. It is deleted the next time the app starts.";
+"windows.multiprofile.subtitle" = "Show several profiles in the notification area";
+"windows.multiprofile.enable_description" = "Show one icon for each selected profile. Clicking an icon shows that profile.";
+"windows.multiprofile.percent_note" = "The Percent style has room for the session only; the tooltip shows the week.";
+"windows.multiprofile.square_note" = "Windows tray icons are square, so the profile name and the values are in each icon's tooltip.";
+"windows.debug.subtitle" = "Network requests for troubleshooting";
+"windows.debug.note" = "Every request is logged with its operation, route, status and timing only, never its address parameters, headers, cookies, bodies or account data, so logging is always on. The export holds the same fields.";

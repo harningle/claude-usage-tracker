@@ -7,6 +7,8 @@ using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Diagnostics;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Usage;
+using ClaudeUsageTracker.Core.History;
+using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Core.Refresh;
 using ClaudeUsageTracker.Core.Status;
 using TestTime = Microsoft.Extensions.Time.Testing.FakeTimeProvider;
@@ -26,13 +28,21 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
     private readonly ConcurrentQueue<ProfileUsageState> _states = new();
     private readonly ConcurrentQueue<ServiceStatus?> _statuses = new();
     private readonly Guid _profileId = Guid.NewGuid();
+    private readonly ScriptedTransport _transport;
+    private volatile bool _signedIn = true;
     private RefreshCoordinator? _coordinator;
+    private LinkHarness _links = null!;
 
     private string UserProfile => Path.Combine(_temp.Path, "home");
     private string ClaudeDirectory => Path.Combine(UserProfile, ".claude");
     private UsageCacheStore Cache => new(Path.Combine(_temp.Path, "cache"));
+    private UsageHistoryStore History => new(Path.Combine(_temp.Path, "history"));
 
-    public RefreshCoordinatorTests() => Directory.CreateDirectory(ClaudeDirectory);
+    public RefreshCoordinatorTests()
+    {
+        Directory.CreateDirectory(ClaudeDirectory);
+        _transport = new((_, operation, _) => _signedIn ? ScriptedTransport.SignedIn(operation) : ScriptedTransport.Status(401));
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -75,9 +85,20 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
 
     private (RefreshCoordinator Coordinator, ScriptedHandler Handler) Create(ScriptedHandler handler, Action<Action>? post = null)
     {
-        var links = new CliLinkService(new SecretStore(Path.Combine(_temp.Path, "secrets")), _time, UserProfile);
-        var client = new UsageClient(new HttpClient(handler), _time, new RequestLog(Path.Combine(_temp.Path, "diagnostics")));
-        _coordinator = new RefreshCoordinator(links, client, Cache, _time, post ?? (action => action()));
+        _links = new LinkHarness(_temp.Path, UserProfile, _time);
+        var log = new RequestLog(Path.Combine(_temp.Path, "diagnostics"));
+        var http = new HttpClient(handler);
+        var client = new UsageClient(http, _time, log);
+        var sources = new Dictionary<UsageSourceKind, IUsageSource>
+        {
+            [UsageSourceKind.ClaudeCode] = new CliUsageSource(_links.Service, client),
+            [UsageSourceKind.ClaudeAi] = new ClaudeAiUsageSource(new ClaudeAiClient(_transport, _time, log), _transport),
+            [UsageSourceKind.Codex] = new CodexUsageSource(
+                _links.Secrets, _links.Lock, _links.Tokens, new CodexClient(http, _time, log), _time, () => Path.Combine(UserProfile, ".codex")),
+        };
+        _coordinator = new RefreshCoordinator(
+            kind => sources[kind], client, new ConsoleBillingSource(_links.Secrets, _links.Lock, new ConsoleClient(http, _time, log)), Cache,
+            new UsageHistoryService(History, _time), _time, post ?? (action => action()));
         _coordinator.StateChanged += _states.Enqueue;
         _coordinator.StatusChanged += _statuses.Enqueue;
         return (_coordinator, handler);
@@ -96,11 +117,13 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
     private static int UsageRequests(ScriptedHandler handler) =>
         handler.Requests.Count(r => r.RequestUri?.AbsolutePath == "/api/oauth/usage");
 
-    private async Task<ProfileUsageState> UntilAsync(Func<ProfileUsageState, bool> condition)
+    private Task<ProfileUsageState> UntilAsync(Func<ProfileUsageState, bool> condition) => UntilAsync(_profileId, condition);
+
+    private async Task<ProfileUsageState> UntilAsync(Guid profileId, Func<ProfileUsageState, bool> condition)
     {
         for (var i = 0; i < 500; i++)
         {
-            if (_coordinator?.Current(_profileId) is { } state && condition(state))
+            if (_coordinator?.Current(profileId) is { } state && condition(state))
             {
                 return state;
             }
@@ -256,16 +279,18 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task ExpiredCliTokenWaitsWithoutRequests()
+    public async Task ExpiredCliTokenWaitsWithoutRequestsWhileClaudeCodeRuns()
     {
         WriteLogin("at-1", Start.AddSeconds(30));
         var (coordinator, handler) = Create((_, _) => Usage(12));
+        _links.ClaudeRunning();
 
         coordinator.Watch(Profile());
         await UntilAsync(s => s.Link == LinkStatus.WaitingForCliRefresh);
         await AdvanceAsync(TimeSpan.FromSeconds(65));
 
         Assert.Equal(0, UsageRequests(handler));
+        Assert.Equal(0, _links.TokenRequests);
 
         // Claude Code refreshed its login: the next check picks it up.
         WriteLogin("at-2", Start.AddHours(8));
@@ -401,5 +426,222 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         }
 
         Assert.Equal(new ServiceStatus(ServiceStatusIndicator.None, "All Systems Operational"), Assert.Single(_statuses));
+    }
+
+    private ProfileSettings ClaudeAiProfile(Guid id, ConsoleLink? console = null) => new()
+    {
+        Id = id,
+        Name = "Browser",
+        ClaudeAi = new ClaudeAiLink { OrganizationId = "org-1", LinkedAt = Start },
+        Console = console,
+    };
+
+    [Fact]
+    public async Task ProfilesArePolledTogetherEachWithItsOwnCredentials()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var (coordinator, handler) = Create((_, _) => Json(HttpStatusCode.ServiceUnavailable, "{}"));
+        var browserId = Guid.NewGuid();
+
+        coordinator.Watch(Profile());
+        coordinator.Watch(ClaudeAiProfile(browserId));
+        var browser = await UntilAsync(browserId, s => s.LastSuccessAt is not null);
+        var cli = await UntilAsync(s => s.LastFailure is not null);
+
+        // The browser profile has usage while the CLI profile's service fails; neither borrows the other.
+        Assert.Equal(21, browser.Usage?.Usage.SessionPercentage);
+        Assert.Equal(UsageSourceKind.ClaudeAi, browser.Source);
+        Assert.Null(cli.Usage);
+        Assert.Equal(FetchFailure.ServerError, cli.LastFailure);
+        Assert.All(_transport.Requests, r => Assert.Equal(browserId, r.ProfileId));
+        Assert.All(handler.Requests.Where(r => r.RequestUri?.AbsolutePath == "/api/oauth/usage"),
+            r => Assert.Equal("at-1", r.Headers.Authorization?.Parameter));
+        Assert.Equal("org-1", Cache.Load(browserId)?.AccountIdentity);
+        Assert.Null(Cache.Load(_profileId));
+        Assert.Equal(2, coordinator.Watched.Count);
+    }
+
+    [Fact]
+    public async Task UnwatchedProfileStopsPolling()
+    {
+        var (coordinator, _) = Create((_, _) => Usage(12));
+        var browserId = Guid.NewGuid();
+        coordinator.Watch(ClaudeAiProfile(browserId));
+        await UntilAsync(browserId, s => s.LastSuccessAt is not null);
+        var before = _transport.Requests.Count;
+
+        await coordinator.UnwatchAsync(browserId);
+        await AdvanceAsync(TimeSpan.FromSeconds(65));
+
+        Assert.Null(coordinator.Current(browserId));
+        Assert.Equal(before, _transport.Requests.Count);
+    }
+
+    [Fact]
+    public async Task SignedOutBrowserSessionIsNotAskedAgainUntilItChanges()
+    {
+        _signedIn = false;
+        var (coordinator, _) = Create((_, _) => Usage(12));
+        var browserId = Guid.NewGuid();
+        int UsageAsks() => _transport.Requests.Count(r => r.Operation == ClaudeAiOperation.Usage);
+
+        coordinator.Watch(ClaudeAiProfile(browserId));
+        var signedOut = await UntilAsync(browserId, s => s.Link == LinkStatus.NotSignedIn);
+        Assert.Equal(FetchFailure.CredentialsRejected, signedOut.LastFailure);
+        await AdvanceAsync(TimeSpan.FromSeconds(95));
+        Assert.Equal(1, UsageAsks());
+
+        // A sign-in changes the session: the next check asks again.
+        _signedIn = true;
+        _transport.SessionChanged();
+        await AdvanceAsync(TimeSpan.FromSeconds(31));
+        var state = await UntilAsync(browserId, s => s.LastSuccessAt is not null);
+        Assert.Equal(LinkStatus.Ready, state.Link);
+        Assert.Equal(2, UsageAsks());
+    }
+
+    [Fact]
+    public async Task ConsoleBillingIsFetchedAtMostEveryFiveMinutesUnlessRefreshedByHand()
+    {
+        var (coordinator, handler) = Create((request, _) =>
+            ConsoleEndpoint.Answer(request.RequestUri!) is { } console ? Json(console.Status, console.Body) : Usage(12));
+        var browserId = Guid.NewGuid();
+        var bundle = _links.Secrets.Load(browserId);
+        bundle.Console = new ConsoleSecret("sk-ant-sid01-synthetic-console", null);
+        _links.Secrets.Save(browserId, bundle);
+        static int Spend(ScriptedHandler h) => h.Requests.Count(r => r.RequestUri!.AbsolutePath.EndsWith("/current_spend", StringComparison.Ordinal));
+
+        coordinator.Watch(ClaudeAiProfile(browserId, new ConsoleLink { OrganizationId = "org-api", LinkedAt = Start }));
+        var state = await UntilAsync(browserId, s => s.Api is not null && !s.ApiFromCache);
+
+        Assert.Equal(1234, state.Api?.Usage.CurrentSpendCents);
+        Assert.Equal(230m, state.Api?.Usage.ApiTokenCostCents);
+        Assert.Equal("CLI key", state.Api?.Usage.SortedCostSources()[0].KeyName);
+        Assert.Equal("org-api", Cache.LoadApi(browserId)?.OrganizationId);
+        Assert.All(handler.Requests, r => Assert.Equal("sessionKey=sk-ant-sid01-synthetic-console", r.Headers.GetValues("Cookie").Single()));
+
+        await AdvanceAsync(TimeSpan.FromSeconds(95));
+        Assert.Equal(1, Spend(handler));
+
+        coordinator.Refresh(browserId);
+        await UntilAsync(browserId, _ => Spend(handler) == 2);
+
+        await AdvanceAsync(RefreshCoordinator.BillingInterval + TimeSpan.FromSeconds(31));
+        await UntilAsync(browserId, _ => Spend(handler) == 3);
+    }
+
+    [Fact]
+    public async Task BillingFailureNeverStopsUsage()
+    {
+        var (coordinator, _) = Create((_, _) => Json(HttpStatusCode.Unauthorized, "{}"));
+        var browserId = Guid.NewGuid();
+        var bundle = _links.Secrets.Load(browserId);
+        bundle.Console = new ConsoleSecret("sk-ant-sid01-synthetic-console", null);
+        _links.Secrets.Save(browserId, bundle);
+
+        coordinator.Watch(ClaudeAiProfile(browserId, new ConsoleLink { OrganizationId = "org-api", LinkedAt = Start }));
+        var state = await UntilAsync(browserId, s => s.ApiFailure is not null && s.LastSuccessAt is not null);
+
+        Assert.Equal(FetchFailure.CredentialsRejected, state.ApiFailure);
+        Assert.Equal(21, state.Usage?.Usage.SessionPercentage);
+        Assert.Null(state.LastFailure);
+    }
+
+    [Fact]
+    public async Task SessionResetIsRecordedInTheHistory()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var resetAt = new DateTimeOffset(2026, 10, 1, 15, 0, 0, TimeSpan.Zero);
+        var (coordinator, _) = Create((_, _) => _time.GetUtcNow() < resetAt
+            ? Json(HttpStatusCode.OK, """{"five_hour":{"utilization":80,"resets_at":"2026-10-01T15:00:00Z"}}""")
+            : Json(HttpStatusCode.OK, """{"five_hour":{"utilization":2,"resets_at":"2026-10-01T20:00:00Z"}}"""));
+        coordinator.Watch(Profile());
+        await UntilAsync(s => s.Usage?.Usage.SessionPercentage == 80);
+
+        // The window resets at 15:00; the next check after it sees the new window.
+        _time.Advance(TimeSpan.FromHours(3) + TimeSpan.FromMinutes(1));
+        var state = await UntilAsync(s => s.Usage?.Usage.SessionPercentage == 2);
+
+        Assert.Null(state.HistoryError);
+        var reset = Assert.Single(History.Load(_profileId).SessionSnapshots, s => s.TriggeringResetTime == resetAt);
+        Assert.Equal(80, reset.SessionPercentage);
+    }
+
+    [Fact]
+    public async Task DamagedHistoryIsReportedAndNeverOverwritten()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "history"));
+        File.WriteAllText(History.PathFor(_profileId), "{ not json");
+        var (coordinator, _) = Create((_, _) => Usage(12));
+
+        coordinator.Watch(Profile());
+        var state = await UntilAsync(s => s.LastSuccessAt is not null);
+
+        Assert.NotNull(state.HistoryError);
+        Assert.Equal("{ not json", File.ReadAllText(History.PathFor(_profileId)));
+    }
+
+    /// <summary>
+    /// Windows equivalent of upstream <c>testEncodeExcludesSecretsByDefault</c>: after polling a Claude Code
+    /// profile and Console billing, no token or session key is in any file outside the encrypted secrets.
+    /// </summary>
+    [Fact]
+    public async Task NoSecretReachesSettingsHistoryCacheOrLogFiles()
+    {
+        WriteLogin("sk-ant-oat01-synthetic-access", Start.AddHours(8));
+        var (coordinator, _) = Create((request, _) =>
+            ConsoleEndpoint.Answer(request.RequestUri!) is { } console ? Json(console.Status, console.Body) : Usage(12));
+        var profile = Profile();
+        profile.Console = new ConsoleLink { OrganizationId = "org-api", LinkedAt = Start };
+        var bundle = _links.Secrets.Load(_profileId);
+        bundle.Console = new ConsoleSecret("sk-ant-sid01-synthetic-console", null);
+        _links.Secrets.Save(_profileId, bundle);
+        new SettingsStore(Path.Combine(_temp.Path, "settings.json")).Save(new AppSettings { Profiles = [profile] });
+
+        coordinator.Watch(profile);
+        await UntilAsync(s => s.LastSuccessAt is not null && s.Api is not null);
+
+        var secretsDirectory = Path.Combine(_temp.Path, "secrets");
+        var plainFiles = Directory.EnumerateFiles(_temp.Path, "*", SearchOption.AllDirectories)
+            .Where(f => !f.StartsWith(secretsDirectory, StringComparison.OrdinalIgnoreCase)
+                        && !f.StartsWith(UserProfile, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.Contains(plainFiles, f => f.EndsWith("requests.jsonl", StringComparison.Ordinal));
+        Assert.Contains(plainFiles, f => f.EndsWith(".usage.json", StringComparison.Ordinal));
+        Assert.Contains(plainFiles, f => f.EndsWith(".api.json", StringComparison.Ordinal));
+        Assert.Contains(plainFiles, f => f.EndsWith(".history.json", StringComparison.Ordinal));
+        foreach (var file in plainFiles)
+        {
+            var text = File.ReadAllText(file);
+            Assert.DoesNotContain("synthetic-access", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("rt-sk-ant", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("synthetic-console", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task CodexProfileReadsTheCliFileAndNeverRenewsIt()
+    {
+        var home = Path.Combine(UserProfile, ".codex");
+        Directory.CreateDirectory(home);
+        File.WriteAllText(Path.Combine(home, "auth.json"),
+            """{"tokens":{"access_token":"codex-at","refresh_token":"codex-rt","account_id":"chatgpt-1"},"last_refresh":"2026-09-01T10:00:00Z"}""");
+        var (coordinator, handler) = Create((_, _) => Json(HttpStatusCode.Unauthorized, "{}"));
+        var codexId = Guid.NewGuid();
+
+        coordinator.Watch(new ProfileSettings
+        {
+            Id = codexId,
+            Name = "Codex",
+            Provider = Provider.Codex.RawValue(),
+            Codex = new CodexLink { CodexHome = home, AccountId = "chatgpt-1", LinkedAt = Start },
+        });
+        var state = await UntilAsync(codexId, s => s.Link == LinkStatus.WaitingForCliRefresh);
+
+        Assert.Equal(UsageSourceKind.Codex, state.Source);
+        Assert.Equal(0, _links.TokenRequests);
+        Assert.Equal("Bearer codex-at", handler.Requests.Single().Headers.Authorization?.ToString());
+        Assert.Contains("codex-rt", File.ReadAllText(Path.Combine(home, "auth.json")), StringComparison.Ordinal);
     }
 }

@@ -68,6 +68,9 @@ public sealed class SettingsStore(string path)
             profile.IconConfig.Metrics ??= new IconConfiguration().Metrics;
         }
 
+        settings.MultiProfileDisplayConfig ??= new MultiProfileDisplayConfig();
+        settings.PendingCleanups ??= [];
+
         return settings;
     }
 

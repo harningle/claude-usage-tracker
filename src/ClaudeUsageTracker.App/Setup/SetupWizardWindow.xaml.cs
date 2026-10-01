@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using ClaudeUsageTracker.App.Localisation;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 
 namespace ClaudeUsageTracker.App.Setup;
@@ -29,7 +31,9 @@ public partial class SetupWizardWindow : Window
     private void OnWizardChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(SetupWizardViewModel.Step) or nameof(SetupWizardViewModel.Message)
-            or nameof(SetupWizardViewModel.Selected) or nameof(SetupWizardViewModel.Candidates))
+            or nameof(SetupWizardViewModel.Selected) or nameof(SetupWizardViewModel.Candidates)
+            or nameof(SetupWizardViewModel.Route) or nameof(SetupWizardViewModel.IsBusy)
+            or nameof(SetupWizardViewModel.SelectedOrganization) or nameof(SetupWizardViewModel.Organizations))
         {
             Dispatcher.BeginInvoke(Render);
         }
@@ -38,14 +42,20 @@ public partial class SetupWizardWindow : Window
     private void Render()
     {
         var step = _wizard.Step;
+        var console = _wizard.Route == WizardRoute.Console;
         ChoosePanel.Visibility = Show(step == WizardStep.ChooseProvider);
         BusyPanel.Visibility = Show(step is WizardStep.Detecting or WizardStep.Testing or WizardStep.Saving);
         DetectedPanel.Visibility = Show(step == WizardStep.Detected);
         NotFoundPanel.Visibility = Show(step == WizardStep.NotFound);
+        EnterKeyPanel.Visibility = Show(step == WizardStep.EnterKey);
+        OrganizationPanel.Visibility = Show(step == WizardStep.SelectOrganization);
+        CodexDetectedPanel.Visibility = Show(step == WizardStep.CodexDetected);
+        CodexNotDetectedPanel.Visibility = Show(step == WizardStep.CodexNotDetected);
         FailedPanel.Visibility = Show(step == WizardStep.TestFailed);
         ReviewPanel.Visibility = Show(step == WizardStep.Review);
         SaveError.Visibility = Show(step == WizardStep.Review && _wizard.Message is not null);
         Progress.Visibility = Show(step != WizardStep.ChooseProvider);
+        EnterKeyPanel.IsEnabled = !_wizard.IsBusy;
         BusyText.Text = step switch
         {
             WizardStep.Testing => Strings.Get("wizard.testing"),
@@ -54,25 +64,40 @@ public partial class SetupWizardWindow : Window
         };
         Subtitle.Text = step == WizardStep.ChooseProvider
             ? Strings.Get("setup.choose_provider.subtitle")
-            : Strings.Get("setup.welcome.subtitle");
+            : Strings.Get("windows.setup.subtitle");
         RenderProgress(_wizard.ProgressStep);
+
+        // Step 1 of the claude.ai and Console routes reads the same, apart from which site it names.
+        KeyTitle.Text = Strings.Get(console ? "windows.setup.console.signin_title" : "personal.signin_sheet_title");
+        KeyDescription.Text = Strings.Get(console ? "windows.setup.console.signin_description" : "windows.setup.claude_ai.signin_description");
+        SignInButton.Content = Strings.Get(console ? "windows.setup.console.signin_button" : "personal.signin_button");
+        KeyHelp.Text = Strings.Get(console ? "windows.setup.console.key_help" : "personal.help_session_key");
+        KeyStorageNote.Text = Strings.Get(console ? "windows.setup.console.storage_note" : "windows.setup.claude_ai.storage_note");
+        OrganizationSubtitle.Text = Strings.Get(console ? "windows.setup.console.select_org_subtitle" : "wizard.select_org_subtitle");
+        CodexAccount.Text = _wizard.CodexEmail is { } email ? Strings.Format("codex.signed_in_as", email) : "";
 
         if (step == WizardStep.Detected)
         {
-            // Check the selected candidate once its containers exist.
-            Dispatcher.BeginInvoke(() =>
-            {
-                foreach (var item in CandidateList.Items)
-                {
-                    if (CandidateList.ItemContainerGenerator.ContainerFromItem(item) is ContentPresenter presenter
-                        && FindRadio(presenter) is { } radio)
-                    {
-                        radio.IsChecked = ReferenceEquals(item, _wizard.Selected);
-                    }
-                }
-            }, System.Windows.Threading.DispatcherPriority.Loaded);
+            CheckSelected(CandidateList, _wizard.Selected);
+        }
+        else if (step == WizardStep.SelectOrganization)
+        {
+            CheckSelected(OrganizationList, _wizard.SelectedOrganization);
         }
     }
+
+    /// <summary>Checks the selected item's card once its container exists.</summary>
+    private void CheckSelected(ItemsControl list, object? selected) =>
+        Dispatcher.BeginInvoke(() =>
+        {
+            foreach (var item in list.Items)
+            {
+                if (list.ItemContainerGenerator.ContainerFromItem(item) is ContentPresenter presenter && FindRadio(presenter) is { } radio)
+                {
+                    radio.IsChecked = Equals(item, selected);
+                }
+            }
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
 
     private void RenderProgress(int current)
     {
@@ -118,13 +143,30 @@ public partial class SetupWizardWindow : Window
 
     private void OnAnthropic(object sender, RoutedEventArgs e) => _wizard.ChooseAnthropic();
 
+    private void OnCodex(object sender, RoutedEventArgs e) => _wizard.ChooseCodex();
+
+    private void OnManual(object sender, RoutedEventArgs e) => _wizard.SetUpWithClaudeAi();
+
     private void OnCheckAgain(object sender, RoutedEventArgs e) => _wizard.Detect();
 
     private void OnBack(object sender, RoutedEventArgs e) => _wizard.Back();
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 
-    private void OnSave(object sender, RoutedEventArgs e) => _wizard.Save();
+    private void OnSave(object sender, RoutedEventArgs e) => Run(() => _wizard.SaveAsync(_closing.Token));
+
+    private void OnStartTracking(object sender, RoutedEventArgs e) => Run(() => _wizard.TestAsync(_closing.Token));
+
+    private void OnSignIn(object sender, RoutedEventArgs e) => Run(() => _wizard.SignInAsync(_closing.Token));
+
+    private void OnTestKey(object sender, RoutedEventArgs e)
+    {
+        var key = KeyBox.Password;
+        KeyBox.Clear();
+        Run(() => _wizard.TestKeyAsync(key, _closing.Token));
+    }
+
+    private void OnTestCodex(object sender, RoutedEventArgs e) => Run(() => _wizard.TestCodexAsync(CodexBox.Text, _closing.Token));
 
     private void OnCandidateChecked(object sender, RoutedEventArgs e)
     {
@@ -134,15 +176,31 @@ public partial class SetupWizardWindow : Window
         }
     }
 
-    private async void OnStartTracking(object sender, RoutedEventArgs e)
+    private void OnOrganizationChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton { Tag: OrganizationView organization })
+        {
+            _wizard.SelectedOrganization = organization;
+        }
+    }
+
+    /// <summary>
+    /// Runs a step of the wizard. A step still running when the window closes is cancelled and saves
+    /// nothing; a browser that cannot start is reported instead of ending the app.
+    /// </summary>
+    private async void Run(Func<Task> step)
     {
         try
         {
-            await _wizard.TestAsync(_closing.Token);
+            await step();
         }
         catch (OperationCanceledException) when (_closing.IsCancellationRequested)
         {
-            // The window closed during the test; nothing was saved.
+            // The window closed during the step; nothing was saved.
+        }
+        catch (Exception error) when (error is WebView2RuntimeNotFoundException or COMException)
+        {
+            MessageBox.Show(this, Strings.Format("windows.signin.browser_failed", error.Message), Title, MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

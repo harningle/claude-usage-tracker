@@ -3,7 +3,6 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ClaudeUsageTracker.App.Diagnostics;
@@ -39,23 +38,21 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
 
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>Usage bodies are a few kilobytes; anything far larger is not the API's answer.</summary>
-    private const int MaxBodyBytes = 1024 * 1024;
-
-    // The server's requested wait binds every usage request from this client: polling, a manual refresh
-    // and a setup test alike.
+    // The server's requested wait binds every usage request for the same account from this client: polling,
+    // a manual refresh and a setup test alike. Other accounts are not held back by it.
     private readonly Lock _holdGate = new();
-    private DateTimeOffset _notBefore;
+    private readonly Dictionary<string, DateTimeOffset> _notBefore = [];
 
-    public async Task<FetchResult> FetchUsageAsync(string accessToken, CancellationToken cancellation)
+    /// <param name="holdKey">The account the request is for; a wait the server asked for applies per account.</param>
+    public async Task<FetchResult> FetchUsageAsync(string accessToken, CancellationToken cancellation, string holdKey = "")
     {
         var now = time.GetUtcNow();
         lock (_holdGate)
         {
-            if (now < _notBefore)
+            if (_notBefore.TryGetValue(holdKey, out var notBefore) && now < notBefore)
             {
                 // Nothing is sent until the wait is over; the caller learns how long remains.
-                return new FetchFailed(FetchFailure.RateLimited, null, _notBefore - now) { At = now };
+                return new FetchFailed(FetchFailure.RateLimited, null, notBefore - now) { At = now };
             }
         }
 
@@ -75,11 +72,11 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         {
-            return Fail(FetchFailure.Timeout, null, null, started);
+            return Fail(FetchFailure.Timeout, null, null, started, holdKey);
         }
         catch (Exception e) when (e is HttpRequestException or IOException)
         {
-            return Fail(FetchFailure.Network, null, null, started);
+            return Fail(FetchFailure.Network, null, null, started, holdKey);
         }
 
         using (response)
@@ -88,23 +85,21 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
             string body;
             try
             {
-                body = await ReadBoundedAsync(response.Content, timeout.Token).ConfigureAwait(false);
+                body = await HttpResponses.ReadBoundedAsync(response.Content, timeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
-                return Fail(FetchFailure.Timeout, status, null, started);
+                return Fail(FetchFailure.Timeout, status, null, started, holdKey);
             }
             catch (Exception e) when (e is HttpRequestException or IOException)
             {
                 // A connection lost mid-body surfaces as HttpIOException, an IOException.
-                return Fail(FetchFailure.Network, status, null, started);
+                return Fail(FetchFailure.Network, status, null, started, holdKey);
             }
 
-            var challenged = response.Headers.Contains("cf-mitigated")
-                             || (IsHtml(response) && body.Contains("Just a moment", StringComparison.Ordinal));
-            if (challenged)
+            if (HttpResponses.IsChallenge(response, body))
             {
-                return Fail(FetchFailure.Challenge, status, null, started);
+                return Fail(FetchFailure.Challenge, status, null, started, holdKey);
             }
 
             switch (response.StatusCode)
@@ -118,43 +113,43 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
                     }
                     catch (UsageParseException)
                     {
-                        return Fail(FetchFailure.InvalidResponse, status, null, started);
+                        return Fail(FetchFailure.InvalidResponse, status, null, started, holdKey);
                     }
 
                 case HttpStatusCode.Unauthorized:
-                    return Fail(FetchFailure.CredentialsRejected, status, null, started);
+                    return Fail(FetchFailure.CredentialsRejected, status, null, started, holdKey);
 
                 case HttpStatusCode.Forbidden:
                     // Only an API authentication error means the login itself was refused. An HTML 403 is a
                     // block in front of the API; other API errors (such as a permission error for an account
                     // type) leave the token usable.
-                    return Fail(IsHtml(response) ? FetchFailure.Challenge
+                    return Fail(HttpResponses.IsHtml(response) ? FetchFailure.Challenge
                         : ErrorType(body) == "authentication_error" ? FetchFailure.CredentialsRejected
-                        : FetchFailure.Forbidden, status, null, started);
+                        : FetchFailure.Forbidden, status, null, started, holdKey);
 
                 case HttpStatusCode.TooManyRequests:
-                    return Fail(FetchFailure.RateLimited, status, RetryAfter(response), started);
+                    return Fail(FetchFailure.RateLimited, status, HttpResponses.RetryAfter(response, time.GetUtcNow()), started, holdKey);
 
                 case >= HttpStatusCode.InternalServerError:
-                    return Fail(FetchFailure.ServerError, status, RetryAfter(response), started);
+                    return Fail(FetchFailure.ServerError, status, HttpResponses.RetryAfter(response, time.GetUtcNow()), started, holdKey);
 
                 default:
-                    return Fail(FetchFailure.InvalidResponse, status, null, started);
+                    return Fail(FetchFailure.InvalidResponse, status, null, started, holdKey);
             }
         }
     }
 
-    /// <summary>The Statuspage summary for claude.ai; null when it cannot be fetched or read.</summary>
-    public async Task<ServiceStatus?> FetchStatusAsync(CancellationToken cancellation)
+    /// <summary>A provider's Statuspage summary; null when it cannot be fetched or read.</summary>
+    public async Task<ServiceStatus?> FetchStatusAsync(CancellationToken cancellation, string statusUrl = ServiceStatus.ClaudeStatusUrl)
     {
         var started = Stopwatch.GetTimestamp();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
         try
         {
-            using var response = await http.GetAsync(ServiceStatus.ClaudeStatusUrl, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+            using var response = await http.GetAsync(statusUrl, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
-            var body = await ReadBoundedAsync(response.Content, timeout.Token).ConfigureAwait(false);
+            var body = await HttpResponses.ReadBoundedAsync(response.Content, timeout.Token).ConfigureAwait(false);
             var parsed = response.IsSuccessStatusCode ? ServiceStatus.Parse(body) : null;
             LogEntry("status", "/api/v2/status.json", (int)response.StatusCode, started, parsed is null ? "invalidResponse" : null);
             return parsed;
@@ -170,11 +165,6 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
             return null;
         }
     }
-
-    private TimeSpan? RetryAfter(HttpResponseMessage response) =>
-        response.Headers.TryGetValues("Retry-After", out var values)
-            ? RefreshPolicy.ParseRetryAfter(values.FirstOrDefault(), time.GetUtcNow())
-            : null;
 
     /// <summary>The API error type, e.g. <c>authentication_error</c>, from an error body; null otherwise.</summary>
     private static string? ErrorType(string body)
@@ -192,29 +182,7 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
         }
     }
 
-    private static bool IsHtml(HttpResponseMessage response) =>
-        response.Content.Headers.ContentType?.MediaType?.Contains("html", StringComparison.OrdinalIgnoreCase) == true;
-
-    private static async Task<string> ReadBoundedAsync(HttpContent content, CancellationToken cancellation)
-    {
-        await using var stream = await content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
-        using var buffer = new MemoryStream();
-        var chunk = new byte[16 * 1024];
-        int read;
-        while ((read = await stream.ReadAsync(chunk, cancellation).ConfigureAwait(false)) > 0)
-        {
-            if (buffer.Length + read > MaxBodyBytes)
-            {
-                break;
-            }
-
-            buffer.Write(chunk, 0, read);
-        }
-
-        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
-    }
-
-    private FetchFailed Fail(FetchFailure failure, int? status, TimeSpan? retryAfter, long started)
+    private FetchFailed Fail(FetchFailure failure, int? status, TimeSpan? retryAfter, long started, string holdKey)
     {
         Log(status, started, failure);
         var now = time.GetUtcNow();
@@ -224,9 +192,9 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
             var until = now + (retryAfter ?? RefreshPolicy.DefaultRateLimitWait);
             lock (_holdGate)
             {
-                if (until > _notBefore)
+                if (!_notBefore.TryGetValue(holdKey, out var held) || until > held)
                 {
-                    _notBefore = until;
+                    _notBefore[holdKey] = until;
                 }
             }
         }
@@ -235,7 +203,7 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
     }
 
     private void Log(int? status, long started, FetchFailure? failure) =>
-        LogEntry("oauthUsage", "/api/oauth/usage", status, started, failure is { } f ? char.ToLowerInvariant(f.ToString()[0]) + f.ToString()[1..] : null);
+        LogEntry("oauthUsage", "/api/oauth/usage", status, started, failure is { } f ? HttpResponses.Category(f) : null);
 
     private void LogEntry(string operation, string route, int? status, long started, string? error) =>
         log.Append(new RequestLogEntry(

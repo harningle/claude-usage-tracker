@@ -1,7 +1,7 @@
 <!--
   Upstream SettingsView: 720 x 750 DIP, a 190 DIP sidebar and one page per section. Only sections whose
-  features exist in Milestone 2 are listed; later ones appear with their features, not as placeholders.
-  Standard Windows chrome replaces upstream's borderless window and traffic-light buttons.
+  features exist are listed; later ones appear with their features, not as placeholders. Standard Windows
+  chrome replaces upstream's borderless window and traffic-light buttons.
 -->
 <Window x:Class="ClaudeUsageTracker.App.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -20,6 +20,12 @@
     </Style>
     <Style x:Key="ToggleRow" TargetType="Grid">
       <Setter Property="Margin" Value="0,0,0,16" />
+    </Style>
+    <Style x:Key="LinkedDot" TargetType="Ellipse">
+      <Setter Property="Width" Value="5" />
+      <Setter Property="Height" Value="5" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Fill" Value="{DynamicResource Status.Safe}" />
     </Style>
     <DataTemplate x:Key="StyleOption">
       <StackPanel Margin="2,4">
@@ -65,6 +71,69 @@
         </Setter.Value>
       </Setter>
     </Style>
+
+    <DataTemplate x:Key="DetailRows">
+      <Grid Margin="0,0,0,8">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="140" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding Label}" />
+        <TextBlock Grid.Column="1" Style="{StaticResource Text.Body}" Text="{Binding Value}" />
+      </Grid>
+    </DataTemplate>
+
+    <!--
+      The body of a credential page (upstream PersonalUsageView, APIBillingView, CLIAccountView and
+      CodexAccountView): status, details and the two actions. Setting up always goes through the wizard,
+      which tests and reviews before it saves.
+    -->
+    <DataTemplate x:Key="CredentialBody">
+      <StackPanel>
+        <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+              <Ellipse.Style>
+                <Style TargetType="Ellipse">
+                  <Setter Property="Fill" Value="{DynamicResource Foreground.Secondary}" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsLinked}" Value="True">
+                      <Setter Property="Fill" Value="{DynamicResource Status.Safe}" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Ellipse.Style>
+            </Ellipse>
+            <StackPanel Margin="10,0,0,0">
+              <TextBlock Style="{StaticResource Text.Base}" Text="{Binding StatusTitle}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding StatusDetail}"
+                         Visibility="{Binding StatusDetail, Converter={x:Static views:Converters.NotNullToVisible}}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+        <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8" Margin="0,12,0,0"
+                Visibility="{Binding Notice, Converter={x:Static views:Converters.NotNullToVisible}}">
+          <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Notice}" />
+        </Border>
+        <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+          <StackPanel>
+            <ItemsControl ItemsSource="{Binding Details}" ItemTemplate="{StaticResource DetailRows}" Focusable="False" />
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource PrimaryButton}" Click="OnCredentialSetup" Tag="{Binding Route}" Content="{Binding SetupLabel}"
+                      AutomationProperties.Name="{Binding SetupLabel}" />
+              <Button Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="OnCredentialRemove" Tag="{Binding Route}"
+                      AutomationProperties.Name="{l:Loc common.remove}" Visibility="{Binding IsLinked, Converter={StaticResource Visible}}">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" VerticalAlignment="Center" Margin="0,0,6,0"
+                             Foreground="{DynamicResource Status.Critical}" />
+                  <TextBlock Text="{l:Loc common.remove}" Foreground="{DynamicResource Status.Critical}" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </DataTemplate>
   </Window.Resources>
 
   <Grid>
@@ -77,11 +146,25 @@
     <DockPanel Background="{DynamicResource Sidebar.Background}">
       <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,8">
         <TextBlock Style="{StaticResource Caption}" Text="{l:Loc section.app}" />
+        <RadioButton x:Name="NavProfiles" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                     AutomationProperties.Name="{l:Loc section.manage_profiles_title}">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE716;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+            <TextBlock Text="{l:Loc section.manage_profiles_title}" />
+          </StackPanel>
+        </RadioButton>
         <RadioButton x:Name="NavPopover" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
                      AutomationProperties.Name="{l:Loc section.popover_title}">
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="&#xE737;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
             <TextBlock Text="{l:Loc section.popover_title}" />
+          </StackPanel>
+        </RadioButton>
+        <RadioButton x:Name="NavDebug" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                     AutomationProperties.Name="{l:Loc section.debug_title}">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xEBE8;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+            <TextBlock Text="{l:Loc section.debug_title}" />
           </StackPanel>
         </RadioButton>
         <Rectangle Height="1" Margin="4,8" Fill="{DynamicResource Line.Divider}" />
@@ -109,12 +192,48 @@
         <Border Background="{DynamicResource Card.Background}" BorderBrush="{DynamicResource Card.Border}" BorderThickness="1" CornerRadius="6" Padding="0,0,0,6">
           <StackPanel>
             <TextBlock Style="{StaticResource Caption}" Text="{l:Loc section.active_profile}" Margin="10,8,8,2" />
-            <TextBlock Style="{StaticResource Text.Base}" Text="{Binding ProfileName}" FontSize="12" FontWeight="SemiBold" Margin="10,0,8,4"
-                       TextTrimming="CharacterEllipsis" />
+            <!-- Upstream's sidebar profile switcher. -->
+            <Button x:Name="ProfileButton" Style="{StaticResource PlainButton}" Margin="6,0,6,2" Padding="4,2" Click="OnProfileMenu"
+                    HorizontalContentAlignment="Stretch" ToolTip="{l:Loc windows.popover.switch_profile}"
+                    AutomationProperties.Name="{Binding ProfileName}" AutomationProperties.HelpText="{l:Loc windows.popover.switch_profile}">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Icon}" Text="&#xE70D;" FontSize="8" />
+                <TextBlock Style="{StaticResource Text.Base}" Text="{Binding ProfileName}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+            </Button>
             <Rectangle Height="1" Margin="8,4" Fill="{DynamicResource Line.Divider}" />
             <TextBlock Style="{StaticResource Caption}" Text="{l:Loc section.credentials}" Margin="10,4,8,2" />
+            <RadioButton x:Name="NavClaudeAi" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                         AutomationProperties.Name="{l:Loc section.claudeai_title}"
+                         Visibility="{Binding IsAnthropicProfile, Converter={StaticResource Visible}}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="&#xE8D7;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{l:Loc section.claudeai_title}" />
+                <Ellipse Grid.Column="2" Style="{StaticResource LinkedDot}" Visibility="{Binding HasClaudeAi, Converter={StaticResource Visible}}" />
+              </Grid>
+            </RadioButton>
+            <RadioButton x:Name="NavConsole" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                         AutomationProperties.Name="{l:Loc section.api_console_title}"
+                         Visibility="{Binding IsAnthropicProfile, Converter={StaticResource Visible}}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="&#xE8C7;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{l:Loc section.api_console_title}" />
+                <Ellipse Grid.Column="2" Style="{StaticResource LinkedDot}" Visibility="{Binding HasConsole, Converter={StaticResource Visible}}" />
+              </Grid>
+            </RadioButton>
             <RadioButton x:Name="NavCli" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
-                         AutomationProperties.Name="{l:Loc section.cli_account_title}">
+                         AutomationProperties.Name="{l:Loc section.cli_account_title}"
+                         Visibility="{Binding IsAnthropicProfile, Converter={StaticResource Visible}}">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="Auto" />
@@ -123,8 +242,21 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="&#xE756;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{l:Loc section.cli_account_title}" />
-                <Ellipse Grid.Column="2" Width="5" Height="5" VerticalAlignment="Center"
-                         Fill="{DynamicResource Status.Safe}" Visibility="{Binding IsLinked, Converter={StaticResource Visible}}" />
+                <Ellipse Grid.Column="2" Style="{StaticResource LinkedDot}" Visibility="{Binding IsLinked, Converter={StaticResource Visible}}" />
+              </Grid>
+            </RadioButton>
+            <RadioButton x:Name="NavCodex" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                         AutomationProperties.Name="{l:Loc section.codex_account_title}"
+                         Visibility="{Binding IsCodexProfile, Converter={StaticResource Visible}}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="&#xE756;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{l:Loc section.codex_account_title}" />
+                <Ellipse Grid.Column="2" Style="{StaticResource LinkedDot}" Visibility="{Binding HasCodex, Converter={StaticResource Visible}}" />
               </Grid>
             </RadioButton>
             <Rectangle Height="1" Margin="8,6" Fill="{DynamicResource Line.Divider}" />
@@ -143,6 +275,13 @@
                 <TextBlock Text="{l:Loc settings.general}" />
               </StackPanel>
             </RadioButton>
+            <RadioButton x:Name="NavHistory" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                         AutomationProperties.Name="{l:Loc section.history_title}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="&#xE9D2;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+                <TextBlock Text="{l:Loc section.history_title}" />
+              </StackPanel>
+            </RadioButton>
           </StackPanel>
         </Border>
       </StackPanel>
@@ -151,57 +290,41 @@
     <!-- Pages -->
     <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Focusable="False">
       <Grid Margin="20">
+        <!-- Claude.ai -->
+        <StackPanel x:Name="PageClaudeAi">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc personal.title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc personal.subtitle}" />
+          <ContentControl Content="{Binding ClaudeAi}" ContentTemplate="{StaticResource CredentialBody}" Focusable="False" />
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE946;" Foreground="{DynamicResource Status.Info}" FontSize="12" VerticalAlignment="Top" Margin="0,2,8,0" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claude_ai.about}" MaxWidth="400" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- API Console -->
+        <StackPanel x:Name="PageConsole">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc api.title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc api.subtitle}" />
+          <ContentControl Content="{Binding Console}" ContentTemplate="{StaticResource CredentialBody}" Focusable="False" />
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE946;" Foreground="{DynamicResource Status.Info}" FontSize="12" VerticalAlignment="Top" Margin="0,2,8,0" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.api.about}" MaxWidth="400" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
         <!-- CLI Account -->
         <StackPanel x:Name="PageCli">
           <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc cli.title}" />
           <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc cli.subtitle}" />
-          <Border Style="{StaticResource Card}" Margin="0,24,0,0">
-            <StackPanel Orientation="Horizontal">
-              <Ellipse x:Name="LinkDot" Width="8" Height="8" VerticalAlignment="Center" />
-              <StackPanel Margin="10,0,0,0">
-                <TextBlock Style="{StaticResource Text.Base}" Text="{Binding LinkStatusTitle}" FontSize="13" FontWeight="Medium" />
-                <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding LinkedSince}"
-                           Visibility="{Binding LinkedSince, Converter={x:Static views:Converters.NotNullToVisible}}" />
-              </StackPanel>
-            </StackPanel>
-          </Border>
-          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
-            <StackPanel>
-              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc cli.account_details}" FontSize="13" FontWeight="Medium" />
-              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding DetailsSubtitle}" FontSize="12" Margin="0,4,0,12" />
-              <ItemsControl ItemsSource="{Binding Details}" Focusable="False">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Grid Margin="0,0,0,8">
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="140" />
-                        <ColumnDefinition Width="*" />
-                      </Grid.ColumnDefinitions>
-                      <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding Label}" />
-                      <TextBlock Grid.Column="1" Style="{StaticResource Text.Body}" Text="{Binding Value}" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc cli.sync_instructions}"
-                         Visibility="{Binding IsLinked, Converter={x:Static views:Converters.InverseVisible}}" Margin="0,0,0,8" />
-              <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                <Button Style="{StaticResource PrimaryButton}" Click="OnSync" AutomationProperties.Name="{Binding SyncLabel}">
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE895;" FontFamily="{StaticResource IconFont}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <TextBlock Text="{Binding SyncLabel}" />
-                  </StackPanel>
-                </Button>
-                <Button Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="OnRemove" AutomationProperties.Name="{l:Loc common.remove}"
-                        Visibility="{Binding IsLinked, Converter={StaticResource Visible}}">
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" VerticalAlignment="Center" Margin="0,0,6,0"
-                               Foreground="{DynamicResource Status.Critical}" />
-                    <TextBlock Text="{l:Loc common.remove}" Foreground="{DynamicResource Status.Critical}" />
-                  </StackPanel>
-                </Button>
-              </StackPanel>
-            </StackPanel>
+          <ContentControl Content="{Binding Cli}" ContentTemplate="{StaticResource CredentialBody}" Focusable="False" />
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0" Padding="16,16,16,0"
+                  Visibility="{Binding IsLinked, Converter={StaticResource Visible}}">
+            <views:SettingToggle Title="{l:Loc windows.cli.used_elsewhere.title}" Description="{l:Loc windows.cli.used_elsewhere.description}"
+                                 IsOn="{Binding UsedElsewhere, Mode=TwoWay}" />
           </Border>
           <Border Style="{StaticResource Card}" Margin="0,16,0,0">
             <StackPanel>
@@ -214,12 +337,23 @@
           </Border>
         </StackPanel>
 
+        <!-- Codex Account -->
+        <StackPanel x:Name="PageCodex">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc codex.title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc codex.subtitle}" />
+          <ContentControl Content="{Binding Codex}" ContentTemplate="{StaticResource CredentialBody}" Focusable="False" />
+        </StackPanel>
+
         <!-- Appearance -->
         <StackPanel x:Name="PageAppearance">
           <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc windows.appearance.title}" />
           <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc windows.appearance.subtitle}" />
           <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.settings.no_profile}" Margin="0,24,0,0"
                      Visibility="{Binding HasProfile, Converter={x:Static views:Converters.InverseVisible}}" />
+          <Border Background="{DynamicResource Banner.Info}" CornerRadius="6" Padding="12,8" Margin="0,16,0,0"
+                  Visibility="{Binding IsMultiProfile, Converter={StaticResource Visible}}">
+            <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc windows.appearance.multi_note}" />
+          </Border>
           <StackPanel IsEnabled="{Binding HasProfile}">
             <Border Style="{StaticResource Card}" Margin="0,24,0,0">
               <StackPanel>
@@ -261,7 +395,7 @@
                     </StackPanel>
                   </StackPanel>
                 </Border>
-                <Border Style="{StaticResource Card}" Padding="12">
+                <Border Style="{StaticResource Card}" Padding="12" Margin="0,0,0,8">
                   <StackPanel>
                     <Grid>
                       <StackPanel>
@@ -274,6 +408,24 @@
                     <StackPanel Visibility="{Binding WeekEnabled, Converter={StaticResource Visible}}" Margin="0,10,0,0">
                       <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc ui.icon_style}" FontWeight="Medium" Margin="0,0,0,6" />
                       <ListBox Style="{StaticResource StylePicker}" ItemsSource="{Binding IconStyles}" SelectedItem="{Binding WeekStyle, Mode=TwoWay}"
+                               AutomationProperties.Name="{l:Loc ui.icon_style}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+                <!-- The API credits metric appears once Console billing is set up for the profile. -->
+                <Border Style="{StaticResource Card}" Padding="12" Visibility="{Binding HasApiMetric, Converter={StaticResource Visible}}">
+                  <StackPanel>
+                    <Grid>
+                      <StackPanel>
+                        <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc menubar.api_credits}" FontSize="13" FontWeight="Medium" />
+                        <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.metric.api_description}" FontSize="10" />
+                      </StackPanel>
+                      <CheckBox Style="{StaticResource Switch}" HorizontalAlignment="Right" IsChecked="{Binding ApiEnabled, Mode=TwoWay}"
+                                AutomationProperties.Name="{l:Loc menubar.api_credits}" />
+                    </Grid>
+                    <StackPanel Visibility="{Binding ApiEnabled, Converter={StaticResource Visible}}" Margin="0,10,0,0">
+                      <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc ui.icon_style}" FontWeight="Medium" Margin="0,0,0,6" />
+                      <ListBox Style="{StaticResource StylePicker}" ItemsSource="{Binding IconStyles}" SelectedItem="{Binding ApiStyle, Mode=TwoWay}"
                                AutomationProperties.Name="{l:Loc ui.icon_style}" />
                     </StackPanel>
                   </StackPanel>
@@ -309,6 +461,214 @@
           </Border>
         </StackPanel>
 
+        <!-- History: upstream UsageHistoryView. -->
+        <StackPanel x:Name="PageHistory" DataContext="{Binding History}">
+          <Grid>
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc history.title}" />
+              <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc history.subtitle}" />
+            </StackPanel>
+            <Border Background="{DynamicResource Track}" CornerRadius="6" Padding="2" HorizontalAlignment="Right" VerticalAlignment="Top">
+              <StackPanel Orientation="Horizontal">
+                <RadioButton Style="{StaticResource Segment}" GroupName="HistoryScale" Content="5h" IsChecked="{Binding Scale5Hours, Mode=TwoWay}"
+                             AutomationProperties.Name="{l:Loc history.time_scale.5_hours}" />
+                <RadioButton Style="{StaticResource Segment}" GroupName="HistoryScale" Content="24h" IsChecked="{Binding Scale24Hours, Mode=TwoWay}"
+                             AutomationProperties.Name="{l:Loc history.time_scale.24_hours}" />
+                <RadioButton Style="{StaticResource Segment}" GroupName="HistoryScale" Content="7d" IsChecked="{Binding Scale7Days, Mode=TwoWay}"
+                             AutomationProperties.Name="{l:Loc history.time_scale.7_days}" />
+                <RadioButton Style="{StaticResource Segment}" GroupName="HistoryScale" Content="30d" IsChecked="{Binding Scale30Days, Mode=TwoWay}"
+                             AutomationProperties.Name="{l:Loc history.time_scale.30_days}" />
+              </StackPanel>
+            </Border>
+          </Grid>
+          <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc history.no_profile}" Margin="0,24,0,0"
+                     Visibility="{Binding HasProfile, Converter={x:Static views:Converters.InverseVisible}}" />
+          <Border Background="{DynamicResource Banner.Warning}" CornerRadius="6" Padding="12,8" Margin="0,16,0,0"
+                  Visibility="{Binding Problem, Converter={x:Static views:Converters.NotNullToVisible}}">
+            <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Problem}" />
+          </Border>
+          <StackPanel Visibility="{Binding HasProfile, Converter={StaticResource Visible}}">
+            <Border Style="{StaticResource Card}" Margin="0,20,0,0" Padding="12,10">
+              <StackPanel>
+                <Grid>
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE9D2;" FontSize="12" />
+                    <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc history.chart.usage_overview}" FontSize="12" FontWeight="Medium" Margin="6,0,0,0" />
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Rectangle Width="16" Height="2" Fill="{DynamicResource Accent}" VerticalAlignment="Center" />
+                    <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc history.chart.session_usage}" FontSize="9" Margin="4,0,12,0" VerticalAlignment="Center" />
+                    <Line X2="16" Stroke="{DynamicResource Chart.Weekly}" StrokeThickness="2" StrokeDashArray="2 1.5" VerticalAlignment="Center" />
+                    <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc history.chart.weekly_usage}" FontSize="9" Margin="4,0,0,0" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Grid>
+                <Grid Height="182" Margin="0,8,0,0">
+                  <views:HistoryChart Session="{Binding Session}" Weekly="{Binding Weekly}" Start="{Binding Start}" End="{Binding End}"
+                                      TimeFormat="{Binding TimeFormat}" ReadoutFormat="{Binding ReadoutFormat}"
+                                      SessionLabel="{l:Loc history.label.session}" WeeklyLabel="{l:Loc menubar.weekly}"
+                                      SessionBrush="{DynamicResource Accent}" WeeklyBrush="{DynamicResource Chart.Weekly}"
+                                      Foreground="{DynamicResource Foreground.Secondary}" Grid="{DynamicResource Line.Divider}"
+                                      ReadoutBackground="{DynamicResource Window.Background}"
+                                      AutomationProperties.Name="{l:Loc history.chart.usage_overview}" />
+                  <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc history.chart.no_data}" FontSize="12"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                             Visibility="{Binding HasData, Converter={x:Static views:Converters.InverseVisible}}" />
+                </Grid>
+                <Grid Margin="0,6,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <Button Style="{StaticResource HeaderIconButton}" Click="OnHistoryBack" IsEnabled="{Binding CanGoBack}"
+                          ToolTip="{l:Loc windows.history.earlier}" AutomationProperties.Name="{l:Loc windows.history.earlier}">
+                    <TextBlock Text="&#xE76B;" FontFamily="{StaticResource IconFont}" FontSize="10"
+                               Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                  </Button>
+                  <TextBlock Grid.Column="1" Style="{StaticResource Text.Secondary}" Text="{Binding RangeLabel}" FontSize="10"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Padding="8,2" MinHeight="22" FontSize="10" Margin="0,0,6,0"
+                          Content="{l:Loc history.chart.now}" Click="OnHistoryNow" IsEnabled="{Binding CanGoForward}" />
+                  <Button Grid.Column="3" Style="{StaticResource HeaderIconButton}" Click="OnHistoryForward" IsEnabled="{Binding CanGoForward}"
+                          ToolTip="{l:Loc windows.history.later}" AutomationProperties.Name="{l:Loc windows.history.later}">
+                    <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="10"
+                               Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                  </Button>
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <StackPanel Visibility="{Binding ShowBilling, Converter={StaticResource Visible}}" Margin="0,20,0,0">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE8C7;" FontSize="12" />
+                <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc history.chart.api_billing}" FontSize="13" FontWeight="Medium" Margin="6,0,0,0" />
+              </StackPanel>
+              <Border Style="{StaticResource Card}" Margin="0,8,0,0">
+                <Grid>
+                  <StackPanel Visibility="{Binding HasBilling, Converter={StaticResource Visible}}">
+                    <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc history.chart.billing_title}" FontSize="13" FontWeight="Medium" />
+                    <views:BarChart Height="160" Margin="0,8,0,0" Bars="{Binding Billing}" AxisLabel="{Binding BillingAxis}" MinimumScale="10" MaxBarWidth="28"
+                                    Fill="{DynamicResource Accent}" Foreground="{DynamicResource Foreground.Secondary}"
+                                    Grid="{DynamicResource Line.Divider}" ReadoutBackground="{DynamicResource Window.Background}"
+                                    AutomationProperties.Name="{l:Loc history.chart.billing_title}" />
+                  </StackPanel>
+                  <StackPanel Visibility="{Binding HasBilling, Converter={x:Static views:Converters.InverseVisible}}" Margin="0,20">
+                    <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc history.empty.billing_title}" FontSize="13" FontWeight="Medium" HorizontalAlignment="Center" />
+                    <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc history.empty.billing_description}" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </StackPanel>
+
+            <Grid Margin="0,16,0,0">
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding RecordsText}" VerticalAlignment="Center" />
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc history.export.json}" Click="OnExportHistoryJson" FontSize="12" />
+                <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc history.export.csv}" Click="OnExportHistoryCsv" FontSize="12" Margin="8,0,0,0" />
+              </StackPanel>
+            </Grid>
+            <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.history.about}" Margin="0,12,0,0" />
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Manage Profiles: upstream ManageProfilesView with its multi-profile display section. -->
+        <StackPanel x:Name="PageProfiles">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc profiles.title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc profiles.subtitle}" />
+          <Border Background="{DynamicResource Banner.Warning}" CornerRadius="6" Padding="12,8" Margin="0,16,0,0"
+                  Visibility="{Binding ProfileError, Converter={x:Static views:Converters.NotNullToVisible}}">
+            <TextBlock Style="{StaticResource Text.Body}" Text="{Binding ProfileError}" />
+          </Border>
+          <Border Style="{StaticResource Card}" Margin="0,24,0,0" Padding="16,10">
+            <ItemsControl ItemsSource="{Binding Profiles}" Focusable="False">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,6">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                      <TextBox Style="{StaticResource Input}" Text="{Binding Name, Mode=OneTime}" Tag="{Binding Id}" MaxLength="60"
+                               LostKeyboardFocus="OnProfileNameCommitted" KeyDown="OnProfileNameKeyDown"
+                               ToolTip="{l:Loc profiles.rename}" AutomationProperties.Name="{l:Loc profiles.rename}" />
+                      <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding ProviderName}" FontSize="10" Margin="2,3,0,0" />
+                    </StackPanel>
+                    <Border Grid.Column="1" Background="{DynamicResource Accent.Soft}" CornerRadius="7" Padding="6,1" Margin="8,5,0,0" VerticalAlignment="Top"
+                            Visibility="{Binding IsActive, Converter={StaticResource Visible}}">
+                      <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc profiles.active_badge}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" />
+                    </Border>
+                    <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="{l:Loc common.activate}" FontSize="11" Padding="8,2" MinHeight="24"
+                            Margin="8,0,0,0" VerticalAlignment="Top" Tag="{Binding Id}" Click="OnActivateProfile" ToolTip="{l:Loc profiles.activate}"
+                            Visibility="{Binding IsActive, Converter={x:Static views:Converters.InverseVisible}}" />
+                    <Button Grid.Column="3" Style="{StaticResource HeaderIconButton}" Margin="6,0,0,0" VerticalAlignment="Top" Tag="{Binding Id}" Click="OnDeleteProfile"
+                            ToolTip="{l:Loc profiles.delete}" AutomationProperties.Name="{l:Loc profiles.delete}"
+                            Visibility="{Binding CanDelete, Converter={StaticResource Visible}}">
+                      <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Status.Critical}" />
+                    </Button>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc profiles.create_title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc profiles.name_label}" Margin="0,12,0,4" />
+              <TextBox x:Name="NewProfileName" Style="{StaticResource Input}" MaxLength="60" AutomationProperties.Name="{l:Loc profiles.name_label}" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc profiles.name_hint}" FontSize="10" Margin="0,4,0,0" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc profiles.provider_label}" Margin="0,12,0,4" />
+              <Border Background="{DynamicResource Track}" CornerRadius="6" Padding="2" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton x:Name="NewProfileAnthropic" Style="{StaticResource Segment}" GroupName="NewProfileProvider" Content="Anthropic" IsChecked="True" />
+                  <RadioButton x:Name="NewProfileCodex" Style="{StaticResource Segment}" GroupName="NewProfileProvider" Content="OpenAI Codex" />
+                </StackPanel>
+              </Border>
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.profiles.provider_hint}" FontSize="10" Margin="0,4,0,0" />
+              <Button Style="{StaticResource PrimaryButton}" Content="{l:Loc profiles.create_new}" HorizontalAlignment="Left" Margin="0,12,0,0" Click="OnCreateProfile" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc multiprofile.title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.multiprofile.subtitle}" FontSize="12" Margin="0,4,0,16" />
+              <views:SettingToggle Title="{l:Loc multiprofile.enable_title}" Description="{l:Loc windows.multiprofile.enable_description}" IsOn="{Binding IsMultiProfile, Mode=TwoWay}" />
+              <StackPanel Visibility="{Binding IsMultiProfile, Converter={StaticResource Visible}}">
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc multiprofile.select_profiles}" FontWeight="Medium" Margin="0,0,0,6" />
+                <ItemsControl ItemsSource="{Binding Profiles}" Focusable="False" Margin="0,0,0,12">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,3">
+                        <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,50,0" />
+                        <CheckBox Style="{StaticResource Switch}" HorizontalAlignment="Right" IsChecked="{Binding IsDisplayed, Mode=OneWay}"
+                                  Tag="{Binding Id}" Click="OnToggleDisplayed" AutomationProperties.Name="{Binding Name}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc multiprofile.icon_style}" FontWeight="Medium" Margin="0,0,0,6" />
+                <ListBox Style="{StaticResource StylePicker}" ItemsSource="{Binding MultiStyles}" SelectedItem="{Binding MultiStyle, Mode=TwoWay}"
+                         AutomationProperties.Name="{l:Loc multiprofile.icon_style}" Margin="0,0,0,16" />
+                <views:SettingToggle Title="{l:Loc multiprofile.show_week}" Description="{l:Loc multiprofile.show_week_description}" IsOn="{Binding MultiShowWeek, Mode=TwoWay}" />
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.multiprofile.percent_note}" Margin="0,-8,0,16"
+                           Visibility="{Binding MultiWeekInTooltipOnly, Converter={StaticResource Visible}}" />
+                <views:SettingToggle Title="{l:Loc multiprofile.use_system_color}" Description="{l:Loc appearance.monochrome_description}" IsOn="{Binding MultiMonochrome, Mode=TwoWay}" />
+                <views:SettingToggle Title="{l:Loc appearance.show_remaining_title}" Description="{l:Loc windows.appearance.show_remaining_description}" IsOn="{Binding MultiShowRemaining, Mode=TwoWay}" />
+                <views:SettingToggle Title="{l:Loc appearance.show_time_marker_title}" Description="{l:Loc appearance.show_time_marker_description}" IsOn="{Binding MultiShowTimeMarker, Mode=TwoWay}" />
+                <views:SettingToggle Title="{l:Loc appearance.show_pace_marker_title}" Description="{l:Loc appearance.show_pace_marker_description}" IsOn="{Binding MultiShowPaceMarker, Mode=TwoWay}" />
+                <views:SettingToggle Title="{l:Loc appearance.pace_coloring_title}" Description="{l:Loc appearance.pace_coloring_description}" IsOn="{Binding MultiUsePaceColoring, Mode=TwoWay}" />
+                <views:SettingToggle Title="{l:Loc multiprofile.active_indicator_title}" Description="{l:Loc multiprofile.active_indicator_description}" IsOn="{Binding MultiActiveIndicator, Mode=TwoWay}" />
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.multiprofile.square_note}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
         <!-- Popover -->
         <StackPanel x:Name="PagePopover">
           <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc popover.title}" />
@@ -337,6 +697,54 @@
                   <RadioButton Style="{StaticResource Segment}" GroupName="TimeFormat" Content="{l:Loc popover.time_format_24h}" IsChecked="{Binding TimeFormat24, Mode=TwoWay}" />
                 </StackPanel>
               </Border>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- Debug Tools: the network log, upstream DebugNetworkLogView. -->
+        <StackPanel x:Name="PageDebug">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc debug.title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc windows.debug.subtitle}" />
+          <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc debug.network_logger}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.debug.note}" FontSize="12" Margin="0,4,0,12" />
+              <Grid>
+                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding LogCount}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                  <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc history.export_button}" Click="OnExportLog" FontSize="12" />
+                  <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc debug.clear_logs}" Click="OnClearLog" FontSize="12" Margin="8,0,0,0" />
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0" Padding="12">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc debug.captured_requests}" FontSize="13" FontWeight="Medium" Margin="0,0,0,8" />
+              <ItemsControl ItemsSource="{Binding LogRows}" Focusable="False">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,2">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="92" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="34" />
+                        <ColumnDefinition Width="58" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Time}" FontFamily="{StaticResource MonoFont}" FontSize="10" />
+                      <StackPanel Grid.Column="1" Margin="6,0">
+                        <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Operation}" FontSize="11" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Request}" FontFamily="{StaticResource MonoFont}" FontSize="9" TextWrapping="Wrap" />
+                        <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Error}" FontSize="10" Foreground="{DynamicResource Status.Moderate}"
+                                   Visibility="{Binding Error, Converter={x:Static views:Converters.NotNullToVisible}}" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="2" Style="{StaticResource Text.Base}" Text="{Binding Status}" FontFamily="{StaticResource MonoFont}" FontSize="10" />
+                      <TextBlock Grid.Column="3" Style="{StaticResource Text.Secondary}" Text="{Binding Duration}" FontFamily="{StaticResource MonoFont}" FontSize="10"
+                                 HorizontalAlignment="Right" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
             </StackPanel>
           </Border>
         </StackPanel>

@@ -1,7 +1,6 @@
 <!--
-  The tray popover: upstream PopoverContentView (SmartHeader, banner, SmartUsageDashboard) at 280 DIP.
-  Upstream's profile switcher menu appears with profile management in Milestone 3; with one profile it
-  would have nothing to switch to.
+  The tray popover: upstream PopoverContentView (SmartHeader with its profile switcher menu, banner,
+  SmartUsageDashboard with the API cards) at 280 DIP.
 -->
 <Window x:Class="ClaudeUsageTracker.App.Views.PopoverWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -18,6 +17,50 @@
         AutomationProperties.Name="{l:Loc app.name}">
   <Window.Resources>
     <BooleanToVisibilityConverter x:Key="Visible" />
+    <!-- Upstream's expandable key row: the whole header toggles, with a chevron that turns when open. -->
+    <Style x:Key="CostSource" TargetType="Expander">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Expander">
+            <StackPanel>
+              <ToggleButton IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                            FocusVisualStyle="{StaticResource FocusRing}" Cursor="Hand"
+                            AutomationProperties.Name="{TemplateBinding AutomationProperties.Name}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Chrome" Background="{DynamicResource Card.Background}" CornerRadius="6" Padding="6,4">
+                      <DockPanel>
+                        <TextBlock x:Name="Chevron" DockPanel.Dock="Right" Style="{StaticResource Text.Icon}" Text="&#xE76C;" FontSize="8"
+                                   Margin="6,0,0,0" RenderTransformOrigin="0.5,0.5" />
+                        <ContentPresenter Content="{Binding Header, RelativeSource={RelativeSource AncestorType=Expander}}" />
+                      </DockPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="Chevron" Property="RenderTransform">
+                          <Setter.Value>
+                            <RotateTransform Angle="90" />
+                          </Setter.Value>
+                        </Setter>
+                      </Trigger>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Hover}" />
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <ContentPresenter x:Name="Body" Visibility="Collapsed" />
+            </StackPanel>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsExpanded" Value="True">
+                <Setter TargetName="Body" Property="Visibility" Value="Visible" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
 
   <StackPanel Margin="0,0,0,8">
@@ -29,8 +72,15 @@
       </Grid.ColumnDefinitions>
       <StackPanel VerticalAlignment="Center">
         <StackPanel Orientation="Horizontal">
-          <TextBlock Style="{StaticResource Text.Base}" Text="{Binding ProfileName}" FontSize="13" FontWeight="Bold"
-                     TextTrimming="CharacterEllipsis" MaxWidth="150" />
+          <Button x:Name="ProfileButton" Style="{StaticResource PlainButton}" Click="OnProfileClick"
+                  ToolTip="{l:Loc windows.popover.switch_profile}" AutomationProperties.Name="{Binding ProfileName}"
+                  AutomationProperties.HelpText="{l:Loc windows.popover.switch_profile}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Text.Base}" Text="{Binding ProfileName}" FontSize="13" FontWeight="Bold"
+                         TextTrimming="CharacterEllipsis" MaxWidth="140" />
+              <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE70D;" FontSize="8" Margin="4,1,0,0" />
+            </StackPanel>
+          </Button>
           <Border Background="{DynamicResource Accent.Soft}" CornerRadius="7" Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center"
                   Visibility="{Binding FixtureLabel, Converter={x:Static views:Converters.NotNullToVisible}}">
             <TextBlock Style="{StaticResource Text.Base}" Text="{Binding FixtureLabel}" FontSize="9" FontWeight="SemiBold"
@@ -129,5 +179,115 @@
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
+
+    <!-- Upstream's balance line under the Extra Usage card. -->
+    <Grid Margin="16,0,16,6" Visibility="{Binding OverageBalance, Converter={x:Static views:Converters.NotNullToVisible}}">
+      <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc popover.overage_balance}" FontSize="11" FontWeight="Medium" />
+      <TextBlock Style="{StaticResource Text.Base}" Text="{Binding OverageBalance}" FontSize="11" FontWeight="SemiBold"
+                 Foreground="{DynamicResource Status.Safe}" HorizontalAlignment="Right" />
+    </Grid>
+
+    <!-- Plan and credits, for providers that report them (Codex). -->
+    <Grid Margin="16,0,16,6" Visibility="{Binding HasPlanRow, Converter={StaticResource Visible}}">
+      <Border Background="{DynamicResource Accent.Soft}" CornerRadius="8" Padding="6,2" HorizontalAlignment="Left"
+              Visibility="{Binding Plan, Converter={x:Static views:Converters.NotNullToVisible}}">
+        <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Plan}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" />
+      </Border>
+      <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Credits}" FontSize="10" FontWeight="Medium"
+                 HorizontalAlignment="Right" VerticalAlignment="Center" />
+    </Grid>
+
+    <!-- Upstream APIUsageCard. -->
+    <Border DataContext="{Binding ApiCredits}" BorderBrush="{DynamicResource Card.Border}" BorderThickness="1" CornerRadius="8"
+            Padding="10,8" Margin="14,0,14,6" AutomationProperties.Name="{l:Loc menubar.api_credits}">
+      <Border.Visibility>
+        <Binding Path="." Converter="{x:Static views:Converters.NotNullToVisible}" />
+      </Border.Visibility>
+      <StackPanel>
+        <Grid>
+          <StackPanel>
+            <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc menubar.api_credits}" FontSize="13" FontWeight="Medium" />
+            <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc menubar.anthropic_console}" FontSize="10" Margin="0,1,0,0" />
+          </StackPanel>
+          <TextBlock Style="{StaticResource Text.Base}" Text="{Binding PercentText}" FontSize="13" FontWeight="SemiBold"
+                     Foreground="{Binding Brush}" HorizontalAlignment="Right" VerticalAlignment="Top" />
+        </Grid>
+        <views:UsageBar Margin="0,5,0,0" Fraction="{Binding BarFraction}" Fill="{Binding Brush}" Track="{DynamicResource Track}" />
+        <Grid Margin="0,5,0,0">
+          <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding UsedText}" FontSize="10" />
+          <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding RemainingText}" FontSize="10" HorizontalAlignment="Right" />
+        </Grid>
+        <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding ResetText}" FontSize="9" Margin="0,5,0,0"
+                   Visibility="{Binding HasReset, Converter={StaticResource Visible}}" />
+        <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Note}" FontSize="9" Margin="0,5,0,0" TextWrapping="Wrap"
+                   Foreground="{DynamicResource Status.Moderate}" Visibility="{Binding HasNote, Converter={StaticResource Visible}}" />
+      </StackPanel>
+    </Border>
+
+    <!-- Upstream APICostCard: this month's cost, the cost per day, and the cost per API key or per model. -->
+    <Border DataContext="{Binding ApiCost}" BorderBrush="{DynamicResource Card.Border}" BorderThickness="1" CornerRadius="8"
+            Padding="10,8" Margin="14,0,14,6" AutomationProperties.Name="{l:Loc windows.api.cost_title}">
+      <Border.Visibility>
+        <Binding Path="." Converter="{x:Static views:Converters.NotNullToVisible}" />
+      </Border.Visibility>
+      <StackPanel>
+        <Grid>
+          <StackPanel>
+            <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc windows.api.cost_title}" FontSize="13" FontWeight="Medium" />
+            <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc windows.api.this_month}" FontSize="10" Margin="0,1,0,0" />
+          </StackPanel>
+          <TextBlock Style="{StaticResource Text.Base}" Text="{Binding TotalText}" FontSize="13" FontWeight="SemiBold"
+                     HorizontalAlignment="Right" VerticalAlignment="Top" />
+        </Grid>
+        <views:BarChart Height="80" Margin="0,6,0,0" Bars="{Binding Daily}" AxisLabel="{Binding AxisLabel}"
+                        Fill="{DynamicResource Status.Moderate}" Foreground="{DynamicResource Foreground.Secondary}"
+                        Grid="{DynamicResource Line.Divider}" ReadoutBackground="{DynamicResource Popover.Background}"
+                        Visibility="{Binding HasDaily, Converter={StaticResource Visible}}"
+                        AutomationProperties.Name="{l:Loc windows.api.daily_cost}" />
+        <ItemsControl ItemsSource="{Binding Sources}" Margin="0,4,0,0" Focusable="False">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Expander Style="{StaticResource CostSource}" Margin="0,2,0,0" AutomationProperties.Name="{Binding Name}">
+                <Expander.Header>
+                  <Grid>
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Style="{StaticResource Text.Icon}" Text="{Binding Glyph}" FontSize="9" Width="14" />
+                      <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Name}" FontSize="10" FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" MaxWidth="120" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Total}" FontSize="10" FontWeight="SemiBold"
+                               FontFamily="{StaticResource MonoFont}" HorizontalAlignment="Right" />
+                  </Grid>
+                </Expander.Header>
+                <ItemsControl ItemsSource="{Binding Models}" Margin="24,2,6,0" Focusable="False">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,1">
+                        <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Name}" FontSize="9" FontWeight="Medium"
+                                   TextTrimming="CharacterEllipsis" Margin="0,0,70,0" />
+                        <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Cost}" FontSize="9" FontWeight="SemiBold"
+                                   FontFamily="{StaticResource MonoFont}" HorizontalAlignment="Right" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Expander>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <ItemsControl ItemsSource="{Binding Models}" Margin="0,2,0,0" Focusable="False">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid Margin="0,2">
+                <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Name}" FontSize="10" FontWeight="Medium"
+                           TextTrimming="CharacterEllipsis" Margin="0,0,80,0" />
+                <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Cost}" FontSize="10" FontWeight="SemiBold"
+                           FontFamily="{StaticResource MonoFont}" HorizontalAlignment="Right" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
   </StackPanel>
 </Window>

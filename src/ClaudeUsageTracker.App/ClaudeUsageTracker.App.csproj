@@ -17,6 +17,14 @@
   </ItemGroup>
 
   <!--
+    claude.ai sign-in and requests go through per-profile WebView2 contexts (plan.md section 2). The
+    version is the one the Milestone 1 spike measured.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+  <!--
     Upstream's Localizable.strings files, unchanged and looked up by upstream key, plus Windows.strings
     for text the port adds (keys prefixed "windows.").
   -->

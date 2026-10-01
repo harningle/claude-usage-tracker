@@ -38,6 +38,9 @@
   <SolidColorBrush x:Key="Pace.Runaway" Color="#CB30E0" />
   <SolidColorBrush x:Key="Marker.Neutral" Color="#D9000000" />
 
+  <!-- Upstream draws the weekly series of the history chart in system indigo. -->
+  <SolidColorBrush x:Key="Chart.Weekly" Color="#5856D6" />
+
   <SolidColorBrush x:Key="Banner.Warning" Color="#1FFF8D28" />
   <SolidColorBrush x:Key="Banner.Caution" Color="#26FFCC00" />
   <SolidColorBrush x:Key="Banner.Info" Color="#1F0088FF" />

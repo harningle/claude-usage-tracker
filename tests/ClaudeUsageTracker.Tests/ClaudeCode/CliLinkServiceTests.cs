@@ -133,21 +133,24 @@ public sealed class CliLinkServiceTests : IDisposable
         Assert.Equal(written, File.GetLastWriteTimeUtc(path));
     }
 
-    private (CliLinkService Service, Guid ProfileId, CliLink Link) LinkDefault(string credentials, string? account)
+    private LinkHarness Harness() => new(_temp.Path, UserProfile, _time);
+
+    private async Task<(CliLinkService Service, Guid ProfileId, CliLink Link, LinkHarness Harness)> LinkDefault(string credentials, string? account)
     {
         WriteDefault(credentials, account);
-        var service = new CliLinkService(Secrets, _time, UserProfile);
+        var harness = Harness();
+        var service = harness.Service;
         var snapshot = service.Read(Default);
         var profileId = Guid.NewGuid();
         var link = service.CreateLink(snapshot);
-        service.WriteMirror(profileId, snapshot);
-        return (service, profileId, link);
+        await service.WriteMirrorAsync(profileId, snapshot, CancellationToken.None);
+        return (service, profileId, link, harness);
     }
 
     [Fact]
-    public void LinkRecordsTheAccountAndMirrorsOnlyTheClaudeLogin()
+    public async Task LinkRecordsTheAccountAndMirrorsOnlyTheClaudeLogin()
     {
-        var (_, profileId, link) = LinkDefault(
+        var (_, profileId, link, _) = await LinkDefault(
             Credentials("at-1", "rt-1", Now.AddHours(8), extra: ""","mcpOAuth":{"server":{"accessToken":"mcp-secret"}}"""),
             Account("acc-1", "user@example.com"));
 
@@ -163,7 +166,7 @@ public sealed class CliLinkServiceTests : IDisposable
     public void ExpiredLoginCannotBeLinked()
     {
         WriteDefault(Credentials("at-1", "rt-1", Now.AddMinutes(-5)), null);
-        var service = new CliLinkService(Secrets, _time, UserProfile);
+        var service = Harness().Service;
 
         Assert.Throws<InvalidOperationException>(() => service.CreateLink(service.Read(Default)));
     }
@@ -171,7 +174,7 @@ public sealed class CliLinkServiceTests : IDisposable
     [Fact]
     public async Task SameAccountIsReady()
     {
-        var (service, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        var (service, profileId, link, _) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
 
         var check = await service.CheckAsync(profileId, link, CancellationToken.None);
 
@@ -183,7 +186,7 @@ public sealed class CliLinkServiceTests : IDisposable
     [Fact]
     public async Task CliRotationOfTheSameAccountUpdatesTheMirror()
     {
-        var (service, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        var (service, profileId, link, _) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
         WriteDefault(Credentials("at-2", "rt-2", Now.AddHours(9)), null);
 
         var check = await service.CheckAsync(profileId, link, CancellationToken.None);
@@ -194,36 +197,41 @@ public sealed class CliLinkServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DifferentAccountIsReportedAndTheMirrorIsKept()
+    public async Task DifferentAccountIsReportedAndTheProfileKeepsFollowingItsAccount()
     {
-        var (service, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        var (service, profileId, link, harness) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        harness.ClaudeRunning();
         WriteDefault(Credentials("at-other", "rt-other", Now.AddHours(8)), Account("acc-2", "other@example.com"));
 
         var check = await service.CheckAsync(profileId, link, CancellationToken.None);
 
+        // The other account's login is never used; the profile's own copy still is, while it lasts.
         Assert.Equal(LinkStatus.AccountChanged, check.Status);
-        Assert.Null(check.Credentials);
+        Assert.Equal("at-1", check.Credentials?.AccessToken);
+        Assert.Equal(CredentialOwnership.CliLinked, check.Ownership);
         var mirror = Encoding.UTF8.GetString(Secrets.Read(profileId)!);
         Assert.Contains("at-1", mirror, StringComparison.Ordinal);
         Assert.DoesNotContain("at-other", mirror, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ExpiredSameAccountWaitsForClaudeCode()
+    public async Task ExpiredSameAccountWaitsWhileClaudeCodeRuns()
     {
-        var (service, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        var (service, profileId, link, harness) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        harness.ClaudeRunning();
         _time.Now = Now.AddHours(9);
 
         var check = await service.CheckAsync(profileId, link, CancellationToken.None);
 
         Assert.Equal(LinkStatus.WaitingForCliRefresh, check.Status);
         Assert.Null(check.Credentials);
+        Assert.Equal(0, harness.TokenRequests);
     }
 
     [Fact]
     public async Task WithoutIdentityOnlyAnUnchangedRefreshTokenProvesTheAccount()
     {
-        var (service, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), account: null);
+        var (service, profileId, link, _) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), account: null);
         Assert.Null(link.Identity);
 
         Assert.Equal(LinkStatus.Ready, (await service.CheckAsync(profileId, link, CancellationToken.None)).Status);
@@ -236,12 +244,12 @@ public sealed class CliLinkServiceTests : IDisposable
     [Fact]
     public async Task UnusableCopyIsReportedAndNeverOverwritten()
     {
-        var (_, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        var (_, profileId, link, _) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
         byte[] newerFormat = [(byte)'C', (byte)'U', (byte)'T', (byte)'S', 2, 1, 2, 3];
         File.WriteAllBytes(Secrets.PathFor(profileId), newerFormat);
         WriteDefault(Credentials("at-2", "rt-2", Now.AddHours(9)), null);
         // A fresh service, as after a restart: nothing cached in memory.
-        var service = new CliLinkService(Secrets, _time, UserProfile);
+        var service = Harness().Service;
 
         var check = await service.CheckAsync(profileId, link, CancellationToken.None);
 
@@ -253,8 +261,8 @@ public sealed class CliLinkServiceTests : IDisposable
     [Fact]
     public async Task CancelledCheckNeverWritesTheCopy()
     {
-        var (service, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
-        service.DeleteMirror(profileId);
+        var (service, profileId, link, _) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        await service.DeleteMirrorAsync(profileId, CancellationToken.None);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
 
@@ -264,20 +272,25 @@ public sealed class CliLinkServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SignedOutCliIsNotSignedIn()
+    public async Task SignedOutCliIsNotSignedInWhileClaudeCodeRuns()
     {
-        var (service, profileId, link) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        var (service, profileId, link, harness) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        harness.ClaudeRunning();
         File.Delete(Path.Combine(DefaultDirectory, ".credentials.json"));
 
-        Assert.Equal(LinkStatus.NotSignedIn, (await service.CheckAsync(profileId, link, CancellationToken.None)).Status);
+        var check = await service.CheckAsync(profileId, link, CancellationToken.None);
+
+        Assert.Equal(LinkStatus.NotSignedIn, check.Status);
+        Assert.Equal(CredentialOwnership.CliLinked, check.Ownership);
+        Assert.Equal(CredentialOwnership.CliLinked, harness.Secrets.Load(profileId).Cli?.Ownership);
     }
 
     [Fact]
-    public void DeleteMirrorRemovesTheSecretButNotTheCliLogin()
+    public async Task DeleteMirrorRemovesTheSecretButNotTheCliLogin()
     {
-        var (service, profileId, _) = LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
+        var (service, profileId, _, _) = await LinkDefault(Credentials("at-1", "rt-1", Now.AddHours(8)), Account("acc-1", "user@example.com"));
 
-        service.DeleteMirror(profileId);
+        await service.DeleteMirrorAsync(profileId, CancellationToken.None);
 
         Assert.False(Secrets.Exists(profileId));
         Assert.True(File.Exists(Path.Combine(DefaultDirectory, ".credentials.json")));

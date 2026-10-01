@@ -9,7 +9,7 @@ Evidence types, kept separate throughout:
 - **Live account**: exercised against a real account through the app.
 - **Source/image**: compared only against upstream source or media.
 
-Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based. Milestone 1 experiment results, including one live-account observation, are in [milestone-1.md](milestone-1.md); they come from spike harnesses, not app features. Milestone 2's app features are verified by automated tests, by manual checks with synthetic fixture data and by the user's live checks on 2026-10-01 ([milestone-2.md](milestone-2.md)); the overnight soak and the waiting-state check are still pending.
+Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based. Milestone 1 experiment results, including one live-account observation, are in [milestone-1.md](milestone-1.md); they come from spike harnesses, not app features. Milestone 2's app features are verified by automated tests, by manual checks with synthetic fixture data and by the user's live checks on 2026-10-01 ([milestone-2.md](milestone-2.md)); the overnight soak and the waiting-state check are still pending. Milestone 3's features are verified by automated tests, by manual checks with synthetic fixture data, by one signed-out WebView2 smoke check and by the user's first live checks on 2026-10-01 ([milestone-3.md](milestone-3.md)); the idle takeover and the Console have not been checked live yet.
 
 ## Environment and references
 
@@ -30,18 +30,18 @@ Recorded on 2026-09-30.
 | Session-key format validation | 0 | Core logic ported; no setup UI | Automated | Difference 6 |
 | Provider identity, names and capabilities | 0 | Core logic ported | Automated | Branding, status page and settings sections arrive with their UI |
 | Usage values model | 0 | Core model ported | Automated | Difference 1 |
-| History snapshots at resets | 0 | Snapshot creation ported | Automated | Persistence, retention, charts and export in Milestone 3 |
-| Codex auth.json, `wham/usage` decoding, window normalisation, mapping, base URL | 0 | Pure logic ported; no file access or network | Automated | Differences 1, 2, 3 and 10 |
-| Claude Code credential merge after refresh | 0 | Pure merge ported | Automated | Difference 3; write-back flow in Milestone 3 |
+| History snapshots at resets | 0 and 3 | Snapshot creation, upstream sampling and retention, per-profile files, charts, JSON/CSV export | Automated; manual with fixture data | Differences 34 and 35 |
+| Codex auth.json, `wham/usage` decoding, window normalisation, mapping, base URL | 0 and 3 | Pure logic ported; Milestone 3 adds reading the Codex CLI's `auth.json`, usage polling, pasted credentials and their renewal, and the wizard route | Automated; manual with fixture data; live pending | Differences 1, 2, 3, 10 and 32 |
+| Claude Code credential merge after refresh | 0 and 3 | Merge ported; Milestone 3 adds the guarded idle takeover and write-back | Automated; live pending (the refresh request is unverified) | Differences 3 and 13 |
 | Activity HUD events, tool mapping, session reducer | 0 | Core logic ported; no transport or window | Automated | Difference 5; transport gate in Milestone 1, stricter ordering in Milestone 5 |
 | Launcher slugs | 0 | Naming ported | Automated | Difference 9; executable aliases in Milestone 5 |
 | Supported languages | 0 | List ported | Automated | Explicit `zh-cn` to `zh-Hans` mapping; resources in Milestone 6; flag emoji rendering on Windows unverified |
 | UI text | 2 | Upstream English `Localizable.strings` embedded unchanged and looked up by key; port-only text in `Windows.strings`; other languages in Milestone 6 | Automated (every key used exists) | Differences 21 and 22 |
-| Tray, popover, settings window, setup wizard | 1 spike, then 2 | Implemented for the Claude Code route: single instance, tray icons and menu, popover, sidebar settings (CLI Account, Appearance, General, Popover, About), wizard with test and review. Checked live by the user on 2026-10-01, including hardware rendering, dark mode, mixed DPI, keyboard selection, Explorer restart, full screen and virtual desktops | Automated; manual with fixture data; live account (manual) | Differences 14-20 and 23; plan section 2 |
+| Tray, popover, settings window, setup wizard | 1 spike, then 2 and 3 | Milestone 2: single instance, tray icons and menu, popover, sidebar settings, the Claude Code wizard route; checked live by the user on 2026-10-01, including hardware rendering, dark mode, mixed DPI, keyboard selection, Explorer restart, full screen and virtual desktops. Milestone 3: profile switcher, API cards, multi-profile icons, every credential page, History, Manage Profiles, Debug Tools and the claude.ai, Console and Codex wizard routes; checked live by the user on 2026-10-01 except the Console | Automated (including a real-window placement test); manual with fixture data; live account (manual) | Differences 14-20, 23 and 28-37; plan section 2 |
 | CLI linking and read-only OAuth usage | 1 gate, then 2 | Implemented: file linking with account checks, encrypted mirror of the CLI-owned login, read-only polling with backoff and `Retry-After`. Live setup, polling, restart and an account change checked on 2026-10-01; the overnight soak (G3) and the waiting state are pending | Automated; manual with fixture data; live account (manual) | Differences 11-13, 16, 24 and 27 |
-| Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Gate decided: claude.ai uses same-origin WebView2 fetch (replay challenged, browser 200); Console uses `HttpClient` at `platform.claude.com` (replay 200). 30-minute renewal soak and two-account isolation passed | Live account (manual, spike harness) | Plan section 2 |
-| Profiles, secure storage, credential ownership | 2 and 3 | Milestone 2: versioned settings, per-profile usage cache and DPAPI secret files; one profile at a time. Profile lifecycle and ownership in Milestone 3 | Automated | DPAPI files replace Keychain; difference 17 |
-| History persistence, charts, CSV/JSON export, network log | 3 | Not started | None | Redacted log only |
+| Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Implemented on the decided transports: claude.ai through each profile's own WebView2 context (same-origin `fetch`), the Console through `HttpClient` at `platform.claude.com`. Sign-in, pasted keys, organisation choice, reconnect and expiry, monthly/daily/per-key/per-model costs. The gate's 30-minute renewal soak and two-account isolation passed in Milestone 1 (spike) | Automated; manual with fixture data; signed-out WebView2 smoke check; live: claude.ai passed on 2026-10-01, Console not yet checked | Differences 30, 31 and 37; plan section 2 |
+| Profiles, secure storage, credential ownership | 2 and 3 | Profile lifecycle, multi-profile display and simultaneous polling; one versioned DPAPI bundle per profile; CLI-linked, app-owned and unresolved ownership under one credential lock; parent-snapshot process guard; recoverable removal | Automated; manual with fixture data; live pending | DPAPI files replace Keychain; differences 13, 17, 28, 29 and 36 |
+| History persistence, charts, CSV/JSON export, network log | 3 | Implemented | Automated; manual with fixture data | Differences 33-35 |
 | Notifications, automation, safe CLI switching | 1 spike, then 4 | Spike: unpackaged self-contained registration and posting (one extracted runtime DLL), cold activation and running-instance clicks verified | Automated harness; manual | Plan section 2; after a move, notifications posted from the old path do nothing when clicked, and their registration stays until cleaned |
 | Launchers, statusline, hooks and HUD | 1 gate, then 5 | NativeAOT helper timing passed; hook transport decided: HTTP for all eight events as upstream; the SessionStart entry is inert on CLI 2.1.286, as it is for upstream | Automated harness (real CLI, fake Messages API); live account (40 Haiku tool calls, stopped listener) | Secret-free statusline; transport by measurement |
 | Localisation, accessibility, packaging | 6 and 7 | Not started | None | Plan section 3 |
@@ -60,13 +60,18 @@ Recorded on 2026-09-30.
 10. **Unreadable Codex credentials are never replaced.** Codex `auth.json` serialisation creates a new document only when there is no existing content. Existing content that is malformed or not a JSON object throws, rather than being silently replaced by a new document as upstream does.
 11. **CLI profiles poll the read-only usage endpoint.** Upstream's active CLI profile posts a one-token Haiku request to `/v1/messages` on every refresh and reads rate-limit headers (up to 2,880 generating requests a day at 30 seconds); its background profiles use `GET /api/oauth/usage`, which upstream's comment calls disabled. The port uses `/api/oauth/usage` for all CLI profiles and never falls back to `/v1/messages`. Verified with Claude Code 2.1.286 for a Pro account (7 of 7 requests, 2026-09-30) and a Team account (5 of 5, 2026-10-01). Both returned 200 with the claude.ai usage shape, and no throttling was seen at a 30-second cadence (spike probe; implementation in Milestone 2). Windows and fields vary by account and over time, so all are optional. Max and Enterprise accounts are unverified.
 12. **Account checks on every poll.** Upstream used whatever account the CLI was logged in as for the active profile, with no identity check, so it could show one account's usage under another profile. The port compares `accountUuid`, then email, or else an unchanged refresh token, before each request. A different account is reported ("Claude Code is now signed in to a different account.") and is neither polled nor shown. Cached usage records its account, and another account's cache is never shown.
-13. **CLI-owned tokens are never refreshed in Milestone 2.** Upstream either took over an expired token, rotating it without process or file checks, or silently skipped the refresh. The port shows "Waiting for Claude Code to refresh its login" (a new string), keeps the labelled stale usage and re-reads the file at each interval. The guarded takeover is Milestone 3. The encrypted mirror holds only the `claudeAiOauth` object, not other logins in the file such as MCP servers'.
+13. **Guarded takeover of Claude Code's login.** Upstream either took over an expired token, rotating it without process or file checks, or silently skipped the refresh (upstream issue #268). In Milestone 2 the port never refreshed and showed "Waiting for Claude Code to refresh its login". From Milestone 3 it renews an expired login of the linked account itself, but only when:
+    - no Claude Code process could be using any folder that holds the same token (until Milestone 5's launchers, any running `claude.exe` blocks it, and so does a process whose details cannot be read);
+    - every known Claude Code folder is readable and the file is unchanged when re-read under the credential lock;
+    - the login is not marked as used elsewhere (a new setting on the CLI Account page) and the profile's encrypted copy is usable.
+
+    The renewed login is saved before it is written back, then merged into every folder still holding the used token and read back. A folder that was signed out or now holds a newer login is never overwritten. A used or rejected refresh token is never sent again. A failed renewal waits five minutes, and a renewed login that cannot be saved blocks further renewals until it is saved. Otherwise the port keeps showing the waiting state. The encrypted copy holds only the `claudeAiOauth` object, not other logins in the file such as MCP servers'.
 14. **The wizard tests before saving.** Upstream's Claude Code route copied the login without a test, a review or the setup-completed flag. It fell back to the manual route silently on any failure, and re-read a possibly different login at save time. The port:
     - runs one read-only usage request, then shows a review (profile, account, organisation, plan, folder, usage)
     - re-reads the folder on Done and refuses a login whose account has changed since the test
     - saves nothing after a failed test, and offers Back and Retry
     - says an expired login is expired rather than "not found"
-    - labels browser sign-in, session keys, the Console and Codex as arriving later
+    - from Milestone 3, does the same for the claude.ai, Console and Codex routes (difference 37)
 
     Upstream's step-1 Cancel button, which did nothing, is not ported.
 15. **Honest popover states.** Upstream showed 0 % cards with made-up reset times when nothing was known, never labelled cached data from a previous run, and in multi-profile mode treated cached data as a success. The port:
@@ -92,12 +97,12 @@ Recorded on 2026-09-30.
     - The logo shown before setup is a drawn ring, not upstream's artwork.
     - Icon GUIDs include the profile ID, as the plan requires.
 19. **Popover.**
-    - There is no profile switcher menu until profiles can be managed (Milestone 3); with one profile it would have nothing to switch to.
-    - The status link opens status.claude.com, as upstream's does.
+    - The profile switcher (Milestone 3) is a native menu, so it follows the system theme. It activates the chosen profile, as upstream; it does not write Claude Code's files (difference 29).
+    - The status link opens status.claude.com, or status.openai.com for Codex profiles.
     - In light mode the background is a chosen neutral, because upstream has no light screenshot. Moderate, critical and caution text use darker shades than upstream's, for contrast.
     - Dragging the header detaches the popover, the same gesture as upstream; any tray click then closes it.
     - Opened from the keyboard, focus moves into the popover; upstream cleared focus.
-20. **Settings window.** Standard Windows chrome replaces upstream's borderless window and traffic-light buttons, and only the sections that work in this milestone are listed.
+20. **Settings window.** Standard Windows chrome replaces upstream's borderless window and traffic-light buttons, and only the sections whose features exist are listed (in Milestone 3: Claude.ai, API Console, CLI Account or Codex Account, Appearance, General, History, Manage Profiles, Popover, Debug Tools and About).
     - About identifies the Windows port and links the original project, this repository and its issues. It omits the GitHub star link, the feedback form, the contributors fetch and the update check.
     - Removing the CLI account asks for confirmation, which upstream did not.
     - Re-sync runs the wizard's test and review instead of copying the login immediately.
@@ -116,6 +121,17 @@ Recorded on 2026-09-30.
     - `extra_usage`, whose units are not stated, is not used.
     - As upstream, disabled extra usage hides the card even when a limit is set. The user's account reports `disabled_reason` `out_of_credits` with a positive limit, so the card has not been seen live ([milestone-2.md](milestone-2.md#open-questions)).
 
+28. **Profiles follow accounts.** Upstream tied a profile's CLI credentials to whatever the CLI was signed in to. The port's profile follows the account it was linked to. If Claude Code switches to another account, the profile keeps polling with its own copy while it lasts and says that Claude Code is now on another account. Once no known Claude Code folder holds the account and nothing is in doubt, the copy becomes the tracker's own ("app-owned") and the tracker renews it itself. The CLI Account page shows who renews it.
+29. **Activating a profile does not switch Claude Code.** Upstream's profile switch wrote the new profile's login into the CLI's storage. In the port, activating only changes which profile is viewed and configured; switching Claude Code's account is Milestone 4, where it reuses the takeover's guards.
+30. **claude.ai sessions stay in the browser.** Upstream kept the `sessionKey` in the Keychain and sent it with `URLSession`. The port keeps each profile's session in its own WebView2 user-data folder and sends usage requests as same-origin `fetch` calls there, because every replay was challenged (Milestone 1). A pasted session key is put into that browser as its cookie and tested there; a key that fails is taken out again, and one that is never saved is removed when the wizard closes. Sign-in windows close themselves once signed in and ask before reusing a session that is already signed in. Removing the link or the profile deletes the browser folder after its processes exit. Organisation IDs are checked before they reach a URL.
+31. **Console billing.** Upstream fetched billing with every refresh (four requests). The port fetches it at most every five minutes, or when refreshed by hand, with the session key from the encrypted bundle. A session cookie that the Console renews in an answer is saved at once. A failed billing fetch keeps the last values with a note and never affects usage polling. The Console sign-in uses a throw-away browser context whose data is deleted after the cookie is taken. Amounts are decimal, and a missing reset time stays missing (upstream substituted the current time).
+32. **Codex credentials.** The Codex CLI's `auth.json` is read for each check and never renewed or written by the tracker; a rejected token waits for the CLI ("Waiting for the Codex CLI to refresh its login"), as plan section 2 requires until a Codex takeover is verified. Credentials pasted in the wizard are the tracker's own, kept in the encrypted bundle and renewed as upstream does, with the same never-resend rule as difference 13. A profile whose `auth.json` is now signed in to another account says so instead of showing that account's usage.
+33. **Network log.** Upstream's logger recorded URLs and request and response bodies during timed logging sessions. The port logs every request, always, but only its operation, method, fixed route (organisation IDs replaced by `{org}`), status, duration, transport and error category. Debug Tools shows the newest 200 entries, clears them after a confirmation and exports them as JSON lines with the same fields only.
+34. **History.** A reset is detected when a window's reset time appears, disappears or moves by a minute or more against the previous usage, instead of upstream's in-memory per-profile maps compared to the minute. Each profile's history is its own file, loaded once; a damaged or newer-format file is reported on the History page and never overwritten. The weekly sample also records the design and Fable weekly values when present. Upstream's sampling intervals, retention limits, validity filter and JSON/CSV export formats are kept.
+35. **Charts.** Drawn by hand rather than with a charting library: the combined usage chart (5h/24h/7d/30d, half-window navigation, Now), the billing chart (last 12 cycles, scale of at least 10 units) and the popover's cost per day (this month to date). Moving the pointer shows the values at that point, which upstream's charts did not.
+36. **Removal is recoverable.** Upstream deleted a profile's data in place. The port saves the settings first with a pending-cleanup entry. Whatever cannot be deleted at once (a file in use, a browser still running) is deleted at the next start, and the app says so. The last profile cannot be deleted, as upstream.
+37. **Every setup route tests before it saves.** Upstream's claude.ai and Console routes saved after listing organisations, and its Codex route saved without a usage request. Each route in the port runs one read-only request and shows a review before Done. The claude.ai route retries a freshly issued session that is refused for a moment (after 1.5, 3 and 4.5 seconds), as upstream. An organisation the profile already tracks stays selected. Settings pages open the wizard at the matching route rather than embedding a second form, and each removal asks for confirmation.
+
 ## Upstream test inventory
 
 The pinned upstream has 16 test files containing 211 test cases. Dispositions:
@@ -128,7 +144,7 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 
 | Upstream file | Cases | Ported | Scheduled | Conditional | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| ClaudeUsageTests.swift | 18 | 11 | 2 | 0 | 5 |
+| ClaudeUsageTests.swift | 18 | 13 | 0 | 0 | 5 |
 | CodexProviderTests.swift | 28 | 28 | 0 | 0 | 0 |
 | DateExtensionsTests.swift | 10 | 10 | 0 | 0 | 0 |
 | LanguageManagerTests.swift | 3 | 3 | 0 | 0 | 0 |
@@ -136,15 +152,15 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 | NotchHUDCoreTests.swift | 23 | 14 | 0 | 9 | 0 |
 | NotchHookInstallerTests.swift | 6 | 0 | 5 | 0 | 1 |
 | NotchHookServerTests.swift | 6 | 0 | 0 | 6 | 0 |
-| ProfileKeychainMigrationTests.swift | 8 | 4 | 2 | 0 | 2 |
-| ProfileProviderTests.swift | 13 | 9 | 2 | 0 | 2 |
+| ProfileKeychainMigrationTests.swift | 8 | 6 | 0 | 0 | 2 |
+| ProfileProviderTests.swift | 13 | 11 | 0 | 0 | 2 |
 | SessionKeyValidatorTests.swift | 33 | 25 | 0 | 0 | 8 |
 | SharedDataStoreTests.swift | 16 | 1 | 8 | 0 | 7 |
 | SupportReminderServiceTests.swift | 4 | 0 | 0 | 0 | 4 |
 | TerminalLauncherServiceTests.swift | 8 | 3 | 4 | 0 | 1 |
 | URLBuilderTests.swift | 20 | 17 | 0 | 0 | 3 |
 | UsageStatusCalculatorTests.swift | 12 | 12 | 0 | 0 | 0 |
-| **Total** | **211** | **137** | **26** | **15** | **33** |
+| **Total** | **211** | **143** | **20** | **15** | **33** |
 
 ### ClaudeUsageTests.swift
 
@@ -157,8 +173,8 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 | `ClaudeUsageTests.testEncodeDecode` | Ported, changed | `UsageCacheStoreTests.EncodeDecode`: the Windows usage cache file |
 | `ClaudeUsageTests.testDecodeLegacyJSONWithoutDesignAndFableKeys` | Ported, changed | `UsageCacheStoreTests.OlderCacheWithoutNewerKeysLoadsWithThemMissing`: missing keys are null, not 0 (difference 1). macOS data is not imported. |
 | `ClaudeUsageTests.testEncodeDecodeFableFields` | Ported | `UsageCacheStoreTests.EncodeDecodeFableFields` |
-| `ProfileCustomKeychainTests.testDecodesOldPlistWithoutCustomKeychainField` | Scheduled M3 | Windows equivalent: a CLI-linked config-directory reference in profile settings |
-| `ProfileCustomKeychainTests.testHasAnyCredentialsRecognizesCustomKeychainPin` | Scheduled M3 | Windows equivalent: a CLI-linked store counts as a credential source |
+| `ProfileCustomKeychainTests.testDecodesOldPlistWithoutCustomKeychainField` | Ported, changed | `SettingsStoreTests.MilestoneTwoSettingsWithoutTheNewerLinksLoad`: settings from before the newer link fields load with them missing |
+| `ProfileCustomKeychainTests.testHasAnyCredentialsRecognizesCustomKeychainPin` | Ported, changed | `SettingsStoreTests.UsageSourceFollowsUpstreamPrecedence`: a linked Claude Code folder is a usage source |
 | `ClaudeCodeSyncServiceLogicTests.testSha256HexPrefixMatchesClaudeCodeKeychainHashAlgorithm` | Excluded | macOS Keychain naming; Windows Claude Code uses `<config dir>/.credentials.json` |
 | `ClaudeCodeSyncServiceLogicTests.testMergeRefreshedCredentialsUpdatesAccessTokenAndExpiresAt` | Ported | `ClaudeCliCredentialsTests.MergeRefreshedCredentialsUpdatesAccessTokenAndExpiresAt` |
 | `ClaudeCodeSyncServiceLogicTests.testMergeRefreshedCredentialsRotatesRefreshTokenWhenProvided` | Ported | `ClaudeCliCredentialsTests.MergeRefreshedCredentialsRotatesRefreshTokenWhenProvided` |
@@ -293,14 +309,14 @@ The reducer is upstream's. Milestone 5 adds the plan's stricter rules (tool-use 
 
 | Upstream case | Disposition | Windows milestone or reason |
 | --- | --- | --- |
-| `testEncodeExcludesSecretsByDefault` | Scheduled M3 | Windows equivalent: settings, history, cache and log files never contain secrets |
+| `testEncodeExcludesSecretsByDefault` | Ported, changed | `RefreshCoordinatorTests.NoSecretReachesSettingsHistoryCacheOrLogFiles`, `SettingsStoreTests.EveryLinkAndDisplayOptionRoundTripsWithoutSecrets` |
 | `testEncodeIncludesSecretsWithUserInfoFlag` | Excluded | The port has no plaintext fallback encoding (plan section 3, Milestone 2) |
 | `testDecodeLegacyPlistWithSecrets` | Excluded | macOS data is not imported |
 | `testV311ProfileWithPreDesignUsageCacheSurvivesUpgrade` | Ported, changed | `UsageCacheStoreTests.OlderCacheWithoutNewerKeysLoadsWithThemMissing` and `SettingsStoreTests.UnknownFieldsSurviveASave`: the cache is a separate file, and settings from other versions keep their members |
 | `testCorruptUsageCacheDegradesToNilNotProfileLoss` | Ported, changed | `UsageCacheStoreTests.UnusableCacheDegradesToNull`; corrupt settings are reported and left unchanged instead (`SettingsStoreTests.DamagedSettingsAreReportedAndLeftUnchanged`, difference 17) |
 | `testDecodeMinimalLegacyProfileAppliesDefaults` | Ported, changed | `SettingsStoreTests.DecodeMinimalLegacyProfileAppliesDefaults`: 30-second refresh, shown in the tray, session icon on; the overage-check flag arrives with extra usage |
 | `testProfileSecretRoundTrip` | Ported, changed | `SecretStoreTests.ProfileSecretRoundTrip`: the DPAPI per-profile file; deletion is `CliLinkServiceTests.DeleteMirrorRemovesTheSecretButNotTheCliLogin` |
-| `testFieldsAreIsolatedPerProfileAndField` | Scheduled M3 | Windows equivalent: per-profile secret isolation and deletion |
+| `testFieldsAreIsolatedPerProfileAndField` | Ported, changed | `ProfileSecretsTests.CredentialsAreIsolatedPerProfileAndField` |
 
 ### ProfileProviderTests.swift
 
@@ -310,11 +326,11 @@ The reducer is upstream's. Milestone 5 adds the plan's stricter rules (tool-use 
 | `testUnknownProviderRawValueDegradesToAnthropic` | Ported, changed | `SettingsStoreTests.UnknownProviderRawValueDegradesToAnthropicButIsKept`: behaves as Anthropic, but the raw value is kept on save (difference 17) |
 | `testNonStringProviderValueDegradesToAnthropic` | Ported | `SettingsStoreTests.NonStringProviderValueDegradesToAnthropic` |
 | `testCodexProviderRoundTrips` | Ported | `SettingsStoreTests.CodexProviderRoundTrips` (the persisted value; Codex usage arrives in M3) |
-| `testCodexCredentialsExcludedFromPlistEncoding` | Scheduled M3 | Codex credentials only in the DPAPI secret file |
+| `testCodexCredentialsExcludedFromPlistEncoding` | Ported, changed | `SetupServiceTests.PastedCodexCredentialsAreEncryptedAndRemovedWhenFollowingTheCliAgain` |
 | `testCodexCredentialsIncludedWithSecretsUserInfo` | Excluded | No plaintext fallback encoding |
 | `testClaudeUsageLegacyJSONDecodesWithNilPlanAndCredits` | Ported | `UsageCacheStoreTests.OlderCacheWithoutNewerKeysLoadsWithThemMissing` |
 | `testClaudeUsagePlanAndCreditsRoundTrip` | Ported | `UsageCacheStoreTests.PlanAndCreditsRoundTrip` |
-| `testLegacyUsageSnapshotDecodesWithNilProvider` | Scheduled M3 | History compatibility across Windows versions |
+| `testLegacyUsageSnapshotDecodesWithNilProvider` | Ported | `UsageHistoryTests.LegacyUsageSnapshotDecodesWithNilProvider` |
 | `testCodexSnapshotSuppressesTokenCounts` | Ported | `ProviderTests.CodexSnapshotSuppressesTokenCounts` |
 | `testAnthropicSnapshotKeepsTokenCounts` | Ported | `ProviderTests.AnthropicSnapshotKeepsTokenCounts` |
 | `testEveryProviderHasADescriptor` | Ported | `ProviderTests.EveryProviderHasADescriptor` |

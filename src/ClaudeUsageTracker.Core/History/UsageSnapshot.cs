@@ -1,3 +1,4 @@
+using ClaudeUsageTracker.Core.Billing;
 using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Core.Usage;
 
@@ -12,8 +13,8 @@ public enum ResetType
 }
 
 /// <summary>
-/// Usage recorded at the moment of a reset. Port of upstream <c>UsageSnapshot</c>; the API billing
-/// fields arrive with billing history.
+/// Usage recorded at a reset, or sampled periodically for the charts. Port of upstream
+/// <c>UsageSnapshot</c>.
 /// </summary>
 public sealed record UsageSnapshot
 {
@@ -36,6 +37,11 @@ public sealed record UsageSnapshot
     public double? DesignWeeklyPercentage { get; init; }
     public long? FableWeeklyTokensUsed { get; init; }
     public double? FableWeeklyPercentage { get; init; }
+
+    // API billing, captured before a billing-cycle reset
+    public long? ApiSpendCents { get; init; }
+    public long? ApiPrepaidCreditsCents { get; init; }
+    public string? ApiCurrency { get; init; }
 
     public required DateTimeOffset TriggeringResetTime { get; init; }
 
@@ -83,4 +89,16 @@ public sealed record UsageSnapshot
             TriggeringResetTime = resetTime,
         };
     }
+
+    /// <summary>Snapshot of Console billing before a billing-cycle reset. It has no provider, as upstream.</summary>
+    public static UsageSnapshot FromBillingCycleReset(ApiUsage usage, DateTimeOffset resetTime, DateTimeOffset recordedAt) =>
+        new()
+        {
+            Timestamp = recordedAt,
+            ResetType = ResetType.BillingCycle,
+            ApiSpendCents = usage.CurrentSpendCents,
+            ApiPrepaidCreditsCents = usage.PrepaidCreditsCents,
+            ApiCurrency = usage.Currency,
+            TriggeringResetTime = resetTime,
+        };
 }

@@ -3,27 +3,33 @@ using System.Text;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Setup;
 using ClaudeUsageTracker.App.Storage;
+using ClaudeUsageTracker.Core.Billing;
 using ClaudeUsageTracker.Core.Profiles;
+using ClaudeUsageTracker.Core.Providers;
+using ClaudeUsageTracker.Core.Providers.Codex;
 using ClaudeUsageTracker.Core.Usage;
 
 namespace ClaudeUsageTracker.Tests.Setup;
 
 /// <summary>
-/// Saving a tested CLI link: what is persisted, the re-check against the tested account and
-/// non-destructive failure. Logins and accounts are synthetic.
+/// Saving tested configurations: what is persisted for each route, the re-check against the tested
+/// account and non-destructive failure. Logins, keys and accounts are synthetic.
 /// </summary>
 public sealed class SetupServiceTests : IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+
+    private const string CodexAuth = """{"tokens":{"access_token":"codex-at","refresh_token":"codex-rt","account_id":"chatgpt-1"},"last_refresh":"2026-10-01T10:00:00Z"}""";
 
     private readonly TempDirectory _temp = new();
     private readonly FakeTimeProvider _time = new(Now);
 
     private string UserProfile => Path.Combine(_temp.Path, "home");
     private string ClaudeDirectory => Path.Combine(UserProfile, ".claude");
-    private string SettingsPath => Path.Combine(_temp.Path, "data", "settings.json");
-    private SecretStore Secrets => new(Path.Combine(_temp.Path, "data", "secrets"));
-    private UsageCacheStore Cache => new(Path.Combine(_temp.Path, "data", "cache"));
+    private string Data => Path.Combine(_temp.Path, "data");
+    private string SettingsPath => Path.Combine(Data, "settings.json");
+    private SecretStore Secrets => new(Path.Combine(Data, "secrets"));
+    private UsageCacheStore Cache => new(Path.Combine(Data, "cache"));
 
     public SetupServiceTests() => Directory.CreateDirectory(ClaudeDirectory);
 
@@ -37,22 +43,24 @@ public sealed class SetupServiceTests : IDisposable
             $$$"""{"oauthAccount":{"accountUuid":"{{{account}}}","emailAddress":"{{{account}}}@example.com"}}""");
     }
 
-    private (SetupService Service, AppSettings Settings, CliLinkService Links) Create(AppSettings? settings = null)
+    private (SetupService Service, AppSettings Settings, LinkHarness Links) Create(AppSettings? settings = null)
     {
         settings ??= new AppSettings();
-        var links = new CliLinkService(Secrets, _time, UserProfile);
-        return (new SetupService(new SettingsStore(SettingsPath), settings, links, Cache, _time), settings, links);
+        var links = new LinkHarness(Data, UserProfile, _time);
+        return (new SetupService(new SettingsStore(SettingsPath), settings, links.Service, links.Secrets, links.Lock, Cache, _time), settings, links);
     }
 
-    private CliSnapshot Snapshot(CliLinkService links) => links.Read(CliStore.Inventory(UserProfile, null, [])[0]);
+    private CliSnapshot Snapshot(LinkHarness links) => links.Service.Read(CliStore.Inventory(UserProfile, null, [])[0]);
+
+    private string Decrypted(Guid profileId) => Encoding.UTF8.GetString(Secrets.Read(profileId)!);
 
     [Fact]
-    public void FirstSaveCreatesANamedActiveProfile()
+    public async Task FirstSaveCreatesANamedActiveProfile()
     {
         WriteLogin("at-1", "acc-1");
         var (service, settings, links) = Create();
 
-        var profile = service.Save(Snapshot(links), new UsageData { SessionPercentage = 12 }, Now);
+        var profile = await service.SaveCliAsync(Snapshot(links), new UsageData { SessionPercentage = 12 }, Now, CancellationToken.None);
 
         Assert.Contains(profile.Name, FunnyNames.Names);
         Assert.Equal(profile.Id, settings.ActiveProfileId);
@@ -66,12 +74,12 @@ public sealed class SetupServiceTests : IDisposable
     }
 
     [Fact]
-    public void SettingsFileHoldsNoTokens()
+    public async Task SettingsFileHoldsNoTokens()
     {
         WriteLogin("sk-ant-oat01-synthetic-secret", "acc-1");
         var (service, _, links) = Create();
 
-        service.Save(Snapshot(links), new UsageData(), Now);
+        await service.SaveCliAsync(Snapshot(links), new UsageData(), Now, CancellationToken.None);
 
         var text = File.ReadAllText(SettingsPath);
         Assert.DoesNotContain("synthetic-secret", text, StringComparison.Ordinal);
@@ -80,13 +88,13 @@ public sealed class SetupServiceTests : IDisposable
     }
 
     [Fact]
-    public void RerunLinksTheExistingActiveProfile()
+    public async Task RerunLinksTheExistingActiveProfile()
     {
         var existing = new ProfileSettings { Name = "Work" };
         WriteLogin("at-1", "acc-1");
         var (service, settings, links) = Create(new AppSettings { Profiles = [existing], ActiveProfileId = existing.Id });
 
-        var profile = service.Save(Snapshot(links), new UsageData(), Now);
+        var profile = await service.SaveCliAsync(Snapshot(links), new UsageData(), Now, CancellationToken.None);
 
         Assert.Same(existing, profile);
         Assert.Single(settings.Profiles);
@@ -94,37 +102,53 @@ public sealed class SetupServiceTests : IDisposable
     }
 
     [Fact]
-    public void LoginThatChangedAccountSinceTheTestIsRefusedAndNothingChanges()
+    public async Task UsedElsewhereSurvivesARelinkOfTheSameAccountOnly()
+    {
+        var existing = new ProfileSettings
+        {
+            Name = "Work",
+            CliLink = new CliLink { ConfigDirectory = ClaudeDirectory, AccountUuid = "acc-1", UsedElsewhere = true },
+        };
+        WriteLogin("at-1", "acc-1");
+        var (service, _, links) = Create(new AppSettings { Profiles = [existing], ActiveProfileId = existing.Id });
+
+        Assert.True((await service.SaveCliAsync(Snapshot(links), new UsageData(), Now, CancellationToken.None)).CliLink?.UsedElsewhere);
+
+        WriteLogin("at-2", "acc-2");
+        Assert.False((await service.SaveCliAsync(Snapshot(links), new UsageData(), Now, CancellationToken.None)).CliLink?.UsedElsewhere);
+    }
+
+    [Fact]
+    public async Task LoginThatChangedAccountSinceTheTestIsRefusedAndNothingChanges()
     {
         WriteLogin("at-1", "acc-1");
         var (service, settings, links) = Create();
         var tested = Snapshot(links);
         WriteLogin("at-2", "acc-2");
 
-        Assert.Throws<SetupException>(() => service.Save(tested, new UsageData(), Now));
+        await Assert.ThrowsAsync<SetupException>(() => service.SaveCliAsync(tested, new UsageData(), Now, CancellationToken.None));
 
         Assert.Empty(settings.Profiles);
         Assert.False(settings.HasCompletedSetup);
         Assert.False(File.Exists(SettingsPath));
-        Assert.Empty(Directory.Exists(Path.Combine(_temp.Path, "data", "secrets"))
-            ? Directory.GetFiles(Path.Combine(_temp.Path, "data", "secrets")) : []);
+        Assert.Empty(Directory.Exists(Path.Combine(Data, "secrets")) ? Directory.GetFiles(Path.Combine(Data, "secrets")) : []);
     }
 
     [Fact]
-    public void RotationOfTheSameAccountSavesTheNewerLogin()
+    public async Task RotationOfTheSameAccountSavesTheNewerLogin()
     {
         WriteLogin("at-1", "acc-1");
         var (service, _, links) = Create();
         var tested = Snapshot(links);
         WriteLogin("at-2", "acc-1");
 
-        var profile = service.Save(tested, new UsageData(), Now);
+        var profile = await service.SaveCliAsync(tested, new UsageData(), Now, CancellationToken.None);
 
-        Assert.Contains("at-2", Encoding.UTF8.GetString(Secrets.Read(profile.Id)!), StringComparison.Ordinal);
+        Assert.Contains("at-2", Decrypted(profile.Id), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void CopyFailureRestoresTheSettings()
+    public async Task CopyFailureRestoresTheSettings()
     {
         var existing = new ProfileSettings { Name = "Work" };
         WriteLogin("at-1", "acc-1");
@@ -132,7 +156,7 @@ public sealed class SetupServiceTests : IDisposable
         // A directory where the secret file belongs makes the encrypted write fail.
         Directory.CreateDirectory(Secrets.PathFor(existing.Id));
 
-        Assert.Throws<SetupException>(() => service.Save(Snapshot(links), new UsageData(), Now));
+        await Assert.ThrowsAsync<SetupException>(() => service.SaveCliAsync(Snapshot(links), new UsageData(), Now, CancellationToken.None));
 
         Assert.Null(existing.CliLink);
         Assert.False(settings.HasCompletedSetup);
@@ -140,34 +164,82 @@ public sealed class SetupServiceTests : IDisposable
     }
 
     [Fact]
-    public void SignedOutBeforeSavingIsRefused()
+    public async Task SignedOutBeforeSavingIsRefused()
     {
         WriteLogin("at-1", "acc-1");
         var (service, settings, links) = Create();
         var tested = Snapshot(links);
         File.Delete(Path.Combine(ClaudeDirectory, ".credentials.json"));
 
-        Assert.Throws<SetupException>(() => service.Save(tested, new UsageData(), Now));
+        await Assert.ThrowsAsync<SetupException>(() => service.SaveCliAsync(tested, new UsageData(), Now, CancellationToken.None));
         Assert.Empty(settings.Profiles);
     }
 
     [Fact]
-    public void UnlinkRemovesTheLinkCopyAndCacheButNotClaudeCodesLogin()
+    public async Task ClaudeAiSaveKeepsOnlyTheOrganizationAndCachesUsage()
+    {
+        var (service, settings, _) = Create();
+
+        var profile = await service.SaveClaudeAiAsync(new ClaudeOrganization("org-1", "Example Team"), new UsageData { SessionPercentage = 7 }, Now);
+
+        Assert.Equal("org-1", profile.ClaudeAi?.OrganizationId);
+        Assert.Equal("Example Team", profile.ClaudeAi?.OrganizationName);
+        Assert.Equal(Provider.Anthropic, profile.ProviderKind);
+        Assert.Equal(UsageSourceKind.ClaudeAi, profile.UsageSource);
+        Assert.Equal(profile.Id, settings.ActiveProfileId);
+        // The session stays in the browser; nothing secret is written.
+        Assert.False(Secrets.Exists(profile.Id));
+        Assert.Equal("org-1", Cache.Load(profile.Id)?.AccountIdentity);
+    }
+
+    [Fact]
+    public async Task ConsoleSaveEncryptsTheKeyAndKeepsTheOtherSecrets()
     {
         WriteLogin("at-1", "acc-1");
-        var (service, settings, links) = Create();
-        var profile = service.Save(Snapshot(links), new UsageData { SessionPercentage = 1 }, Now);
+        var (service, _, links) = Create();
+        var profile = await service.SaveCliAsync(Snapshot(links), new UsageData(), Now, CancellationToken.None);
 
-        var copyKeptUntilChecksStop = false;
-        service.Unlink(profile, () => copyKeptUntilChecksStop = Secrets.Exists(profile.Id));
+        await service.SaveConsoleAsync(new ConsoleOrganization("org-api", "API Org"),
+            new ConsoleSecret("sk-ant-sid01-synthetic-console", Now.AddDays(28)), CancellationToken.None);
 
-        Assert.True(copyKeptUntilChecksStop);
+        var bundle = links.Secrets.Load(profile.Id);
+        Assert.Equal("sk-ant-sid01-synthetic-console", bundle.Console?.SessionKey);
+        Assert.NotNull(bundle.Cli);
+        Assert.Equal("org-api", profile.Console?.OrganizationId);
+        Assert.Equal(Now.AddDays(28), profile.Console?.SessionKeyExpiry);
+        Assert.DoesNotContain("synthetic-console", File.ReadAllText(SettingsPath), StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-console", File.ReadAllText(Secrets.PathFor(profile.Id), Encoding.Latin1), StringComparison.Ordinal);
+    }
 
-        Assert.Null(profile.CliLink);
-        Assert.Null(new SettingsStore(SettingsPath).Load().ActiveProfile?.CliLink);
+    [Fact]
+    public async Task CodexAuthFileSaveSwitchesTheProviderAndStoresNoSecret()
+    {
+        var (service, _, _) = Create();
+        var credentials = CodexAuthJson.Parse(CodexAuth)!;
+
+        var profile = await service.SaveCodexAsync(Path.Combine(UserProfile, ".codex"), null, credentials, new UsageData(), Now, CancellationToken.None);
+
+        Assert.Equal(Provider.Codex, profile.ProviderKind);
+        Assert.Equal(CodexLink.AuthFileSource, profile.Codex?.Source);
+        Assert.Equal("chatgpt-1", profile.Codex?.AccountId);
+        Assert.Equal(UsageSourceKind.Codex, profile.UsageSource);
         Assert.False(Secrets.Exists(profile.Id));
-        Assert.Null(Cache.Load(profile.Id));
-        Assert.Single(settings.Profiles);
-        Assert.True(File.Exists(Path.Combine(ClaudeDirectory, ".credentials.json")));
+    }
+
+    [Fact]
+    public async Task PastedCodexCredentialsAreEncryptedAndRemovedWhenFollowingTheCliAgain()
+    {
+        var (service, _, links) = Create();
+        var credentials = CodexAuthJson.Parse(CodexAuth)!;
+
+        var profile = await service.SaveCodexAsync(Path.Combine(UserProfile, ".codex"), CodexAuth, credentials, new UsageData(), Now, CancellationToken.None);
+
+        Assert.True(profile.Codex?.IsManual);
+        Assert.Equal(CodexAuth, links.Secrets.Load(profile.Id).CodexAuthJson);
+        Assert.DoesNotContain("codex-rt", File.ReadAllText(SettingsPath), StringComparison.Ordinal);
+
+        await service.SaveCodexAsync(Path.Combine(UserProfile, ".codex"), null, credentials, new UsageData(), Now, CancellationToken.None);
+
+        Assert.False(Secrets.Exists(profile.Id));
     }
 }

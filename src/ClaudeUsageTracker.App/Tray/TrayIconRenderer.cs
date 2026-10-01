@@ -12,6 +12,12 @@ public enum TrayIconStyle
     PercentageOnly,
     Ring,
     Dot,
+
+    /// <summary>Multi-profile "Circles": the week as an outer ring around the session ring.</summary>
+    Concentric,
+
+    /// <summary>Multi-profile "Bars": the session bar above the week bar.</summary>
+    DualBar,
 }
 
 /// <summary>What one tray icon shows. A null <see cref="Fraction"/> means the value is unavailable.</summary>
@@ -28,7 +34,18 @@ public sealed record TrayIconSpec(
     PaceStatus? Pace,
     bool Monochrome,
     string? Label,
-    bool Dimmed);
+    bool Dimmed)
+{
+    /// <summary>The icon also shows the week (multi-profile mode); its fraction is null when unavailable.</summary>
+    public bool HasSecondary { get; init; }
+
+    public double? SecondaryFraction { get; init; }
+
+    public UsageStatusLevel? SecondaryLevel { get; init; }
+
+    /// <summary>Upstream's underline under the active profile's icon in multi-profile mode.</summary>
+    public bool ActiveIndicator { get; init; }
+}
 
 /// <summary>
 /// Square renderings of upstream's <c>MenuBarIconRenderer</c> styles. macOS status items are wide images;
@@ -43,6 +60,7 @@ public static class TrayIconRenderer
         var foreground = taskbarDark ? Colors.White : Colors.Black;
         var fill = spec.Monochrome || spec.Level is null ? foreground : StatusColour(spec.Level.Value, taskbarDark);
         var marker = spec.Pace is { } pace ? PaceColour(pace, taskbarDark) : foreground;
+        var secondary = spec.Monochrome || spec.SecondaryLevel is null ? foreground : StatusColour(spec.SecondaryLevel.Value, taskbarDark);
         if (spec.Dimmed)
         {
             context.PushOpacity(0.55);
@@ -63,9 +81,20 @@ public static class TrayIconRenderer
             case TrayIconStyle.Ring:
                 Ring(context, size, s, spec, foreground, fill, marker);
                 break;
-            default:
-                Dot(context, size, s, spec, foreground, fill, marker);
+            case TrayIconStyle.Concentric:
+                Concentric(context, size, s, spec, foreground, fill, secondary, marker);
                 break;
+            case TrayIconStyle.DualBar:
+                DualBar(context, size, s, spec, foreground, fill, secondary, marker);
+                break;
+            default:
+                Dot(context, size, s, spec, foreground, fill, secondary, marker);
+                break;
+        }
+
+        if (spec.ActiveIndicator)
+        {
+            context.DrawRectangle(Brush(StatusColour(UsageStatusLevel.Safe, taskbarDark), 1), null, new Rect(size * 0.25, size - 1.4 * s, size * 0.5, 1.4 * s));
         }
 
         if (spec.Dimmed)
@@ -171,8 +200,73 @@ public static class TrayIconRenderer
         }
     }
 
-    private static void Dot(DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color marker)
+    private static void Concentric(
+        DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker)
     {
+        var stroke = 2 * s;
+        var outer = size / 2.0 - stroke / 2 - 0.3 * s;
+        var inner = outer - stroke - 0.9 * s;
+        var centre = new Point(size / 2.0, size / 2.0);
+        foreach (var (radius, fraction, colour) in new[] { (outer, spec.SecondaryFraction, secondary), (inner, spec.Fraction, fill) })
+        {
+            context.DrawEllipse(null, Pen(foreground, 0.25, stroke), centre, radius, radius);
+            if (fraction is { } value && value > 0)
+            {
+                context.DrawGeometry(null, Pen(colour, 1, stroke, PenLineCap.Round), Arc(centre, radius, Math.Clamp(value, 0, 1)));
+            }
+        }
+
+        if (spec.MarkerFraction is { } m)
+        {
+            var angle = Math.Clamp(m, 0, 1) * 2 * Math.PI;
+            var direction = new Vector(Math.Sin(angle), -Math.Cos(angle));
+            context.DrawLine(Pen(marker, 1, 1.3 * s), centre + direction * (inner - stroke), centre + direction * (inner + stroke / 2));
+        }
+    }
+
+    private static void DualBar(
+        DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker)
+    {
+        var height = size * 0.22;
+        foreach (var (top, fraction, colour, primary) in new[] { (size * 0.2, spec.Fraction, fill, true), (size * 0.58, spec.SecondaryFraction, secondary, false) })
+        {
+            var track = new Rect(0.8 * s, top, size - 1.6 * s, height);
+            context.DrawRoundedRectangle(Brush(foreground, 0.25), null, track, height / 2, height / 2);
+            if (fraction is { } value && track.Width * value > 1)
+            {
+                context.DrawRoundedRectangle(Brush(colour, 1), null,
+                    new Rect(track.X, track.Y, track.Width * Math.Clamp(value, 0, 1), track.Height), height / 2, height / 2);
+                if (primary && spec.MarkerFraction is { } m)
+                {
+                    var x = Math.Round(track.X + track.Width * Math.Clamp(m, 0, 1));
+                    context.DrawLine(Pen(marker, 1, 1.4 * s), new Point(x, track.Top - 1 * s), new Point(x, track.Bottom + 1 * s));
+                }
+            }
+        }
+    }
+
+    private static void Dot(DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker)
+    {
+        if (spec.HasSecondary)
+        {
+            // Upstream's two dots: the session on the left, the week on the right.
+            var small = size * 0.2;
+            foreach (var (x, fraction, colour) in new[] { (size * 0.26, spec.Fraction, fill), (size * 0.74, spec.SecondaryFraction, secondary) })
+            {
+                var at = new Point(x, size / 2.0);
+                if (fraction is null)
+                {
+                    context.DrawEllipse(null, Pen(foreground, 0.6, 1.2 * s), at, small, small);
+                }
+                else
+                {
+                    context.DrawEllipse(Brush(colour, 1), null, at, small, small);
+                }
+            }
+
+            return;
+        }
+
         var centre = new Point(size / 2.0, size / 2.0);
         var radius = size * 0.31;
         if (spec.Fraction is null)

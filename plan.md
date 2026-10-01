@@ -12,7 +12,7 @@ Use upstream commit [`588775e4540757443691fa1bcb33457315e05f86`](https://github.
 - Preserve upstream translations, licence notices and attribution. Omit telemetry and promotional prompts in both personal and public builds; document these intentional differences.
 - Personal delivery includes a self-contained build, local registration needed by notifications/startup, manual upgrade and integration cleanup. Installer, signing and automatic updates belong to the later public-release milestone; they are not abandoned or claimed complete.
 - No import of macOS Keychain or macOS app data. Existing native Windows CLI accounts can be linked through setup.
-- The repository has the Milestone 0 scaffold and ported pure logic, the Milestone 1 experiment harnesses in `spikes/`, and the Milestone 2 tray app for the Claude Code route ([Milestone 2 log](docs/milestone-2.md)). .NET SDK **10.0.401** and native Claude Code **2.1.286** (auto-updated from 2.1.285) are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools 2026 with the MSVC x64/x86 tools and Windows SDK 10.0.26100 is present, and NativeAOT publishing is verified ([Milestone 1 log](docs/milestone-1.md)).
+- The repository has the Milestone 0 scaffold and ported pure logic, the Milestone 1 experiment harnesses in `spikes/`, the Milestone 2 tray app for the Claude Code route ([Milestone 2 log](docs/milestone-2.md)) and the Milestone 3 browser, Console, Codex, profile, ownership, billing and history features, which await their live checks ([Milestone 3 log](docs/milestone-3.md)). .NET SDK **10.0.401** and native Claude Code **2.1.286** (auto-updated from 2.1.285) are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools 2026 with the MSVC x64/x86 tools and Windows SDK 10.0.26100 is present, and NativeAOT publishing is verified ([Milestone 1 log](docs/milestone-1.md)).
 
 ### Evidence limits
 
@@ -213,6 +213,8 @@ Status (2026-10-01): implemented; acceptance met with a real account, and the D1
 - Close the Milestone 1 follow-ups assigned here: G4 (three browser profiles polling at once); see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** two accounts and mixed providers remain isolated through switching, refresh failure and restart. Verify live routes separately from fixtures, export values match expectations, and no secrets appear in settings/history/cache/log files.
+
+Status (2026-10-01): implemented, with 788 automated tests, manual checks in fixture mode and a signed-out WebView2 smoke check; the guarded takeover is enabled. The first live checks passed on 2026-10-01: claude.ai, Codex, two Claude profiles plus a Codex profile with switching and restart (after one popover-position fix), export, removal and no secrets in plain files; G4 measured about 180 MB for three browser profiles. Acceptance is not yet met: the waiting message and the first idle takeover (which also tests upstream's unverified refresh request), refresh failure across accounts and the Console (skipped for now) remain; see [the Milestone 3 log](docs/milestone-3.md#live-checks-to-do). CLI-owned Codex logins are read through and never renewed, as decided above.
 
 ### Milestone 4 - Windows automation and safe CLI synchronisation
 

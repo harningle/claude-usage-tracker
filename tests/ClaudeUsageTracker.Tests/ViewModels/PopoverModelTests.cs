@@ -22,6 +22,7 @@ public class PopoverModelTests
     {
         ProfileId = ProfileId,
         IsLinked = true,
+        Source = UsageSourceKind.ClaudeCode,
         Link = LinkStatus.Ready,
         LastAttemptAt = Now,
         Usage = usage is null ? null : new CachedUsage
@@ -56,7 +57,7 @@ public class PopoverModelTests
     [Fact]
     public void FirstCheckShowsLoadingNotZeroCards()
     {
-        var model = Build(new ProfileUsageState { ProfileId = ProfileId, IsLinked = true });
+        var model = Build(new ProfileUsageState { ProfileId = ProfileId, IsLinked = true, Source = UsageSourceKind.ClaudeCode });
 
         Assert.Empty(model.Rows);
         Assert.Equal("Loading usage…", model.Placeholder);
@@ -67,7 +68,8 @@ public class PopoverModelTests
     {
         var model = Build(new ProfileUsageState
         {
-            ProfileId = ProfileId, IsLinked = true, LastAttemptAt = Now, LastFailure = FetchFailure.Network, ConsecutiveFailures = 1,
+            ProfileId = ProfileId, IsLinked = true, Source = UsageSourceKind.ClaudeCode, LastAttemptAt = Now, LastFailure = FetchFailure.Network,
+            ConsecutiveFailures = 1,
         });
 
         Assert.Empty(model.Rows);

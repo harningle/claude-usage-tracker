@@ -1,5 +1,6 @@
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Storage;
+using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Core.Refresh;
 using ClaudeUsageTracker.Core.Status;
 
@@ -8,28 +9,42 @@ namespace ClaudeUsageTracker.App.Usage;
 /// <summary>
 /// One sequential polling loop per watched profile. Upstream has no equivalent: its refreshes overlap,
 /// are never cancelled and can land on whichever profile is active when they finish. Here each profile's
-/// checks run one at a time, a link change cancels the in-flight check and bumps the generation so its
-/// result is dropped, and failures back off while honouring <c>Retry-After</c> (plan.md section 3,
-/// Milestone 2). Rejected credentials are not resent automatically until Claude Code's token changes;
-/// a manual refresh may retry them. An unexpected exception is shown as a failure and polling continues.
+/// checks run one at a time and use only that profile's own credentials, a link change cancels the
+/// in-flight check and bumps the generation so its result is dropped, and failures back off while
+/// honouring <c>Retry-After</c> (plan.md section 3). Rejected credentials are not resent automatically
+/// until they change; a manual refresh may retry them. An unexpected exception is shown as a failure and
+/// polling continues.
 /// </summary>
 public sealed class RefreshCoordinator : IAsyncDisposable
 {
-    private readonly CliLinkService _links;
+    /// <summary>
+    /// Console billing is fetched at most this often unless refreshed by hand. Upstream fetched it on every
+    /// refresh, four requests each; costs do not move at that pace (docs/parity.md).
+    /// </summary>
+    public static readonly TimeSpan BillingInterval = TimeSpan.FromMinutes(5);
+
+    private readonly Func<UsageSourceKind, IUsageSource> _sources;
     private readonly UsageClient _client;
+    private readonly ConsoleBillingSource _billing;
     private readonly UsageCacheStore _cache;
+    private readonly UsageHistoryService _history;
     private readonly TimeProvider _time;
     private readonly Action<Action> _post;
     private readonly Dictionary<Guid, Worker> _workers = [];
     private readonly Lock _gate = new();
     private Guid? _statusProfileId;
 
+    /// <param name="client">Fetches the service status.</param>
     /// <param name="post">Runs a state notification on the UI thread.</param>
-    public RefreshCoordinator(CliLinkService links, UsageClient client, UsageCacheStore cache, TimeProvider time, Action<Action> post)
+    public RefreshCoordinator(
+        Func<UsageSourceKind, IUsageSource> sources, UsageClient client, ConsoleBillingSource billing, UsageCacheStore cache,
+        UsageHistoryService history, TimeProvider time, Action<Action> post)
     {
-        _links = links;
+        _sources = sources;
         _client = client;
+        _billing = billing;
         _cache = cache;
+        _history = history;
         _time = time;
         _post = post;
     }
@@ -40,19 +55,20 @@ public sealed class RefreshCoordinator : IAsyncDisposable
     /// <summary>Raised on the UI thread after each service-status check; null when it could not be read.</summary>
     public event Action<ServiceStatus?>? StatusChanged;
 
-    /// <summary>Starts polling a profile, or applies its changed link or interval.</summary>
+    /// <summary>Starts polling a profile, or applies its changed links or interval.</summary>
     public void Watch(ProfileSettings profile)
     {
+        var watch = ProfileWatch.From(profile);
         Worker? started = null;
         lock (_gate)
         {
             if (_workers.TryGetValue(profile.Id, out var worker))
             {
-                worker.Update(profile.CliLink, TimeSpan.FromSeconds(profile.RefreshInterval));
+                worker.Update(watch);
                 return;
             }
 
-            started = new Worker(this, profile.Id, profile.CliLink, TimeSpan.FromSeconds(profile.RefreshInterval));
+            started = new Worker(this, watch);
             _workers.Add(profile.Id, started);
         }
 
@@ -71,6 +87,18 @@ public sealed class RefreshCoordinator : IAsyncDisposable
         }
 
         await worker.StopAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>The profiles being polled.</summary>
+    public IReadOnlyList<Guid> Watched
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _workers.Keys];
+            }
+        }
     }
 
     /// <summary>The profile whose checks also refresh the service status (the active profile).</summary>
@@ -128,22 +156,22 @@ public sealed class RefreshCoordinator : IAsyncDisposable
         private readonly Guid _profileId;
         private readonly CancellationTokenSource _lifetime = new();
         private readonly Lock _gate = new();
-        private CliLink? _link;
-        private TimeSpan _interval;
+        private ProfileWatch _watch;
         private long _generation;
         private CancellationTokenSource _cycle = new();
         private TaskCompletionSource _wake = NewSignal();
         private bool _manualPending;
-        private string? _rejectedAccessToken;
+        private string? _rejectedStamp;
+        private DateTimeOffset? _billingLast;
+        private DateTimeOffset _billingNotBefore;
         private Task _loop = Task.CompletedTask;
 
-        public Worker(RefreshCoordinator owner, Guid profileId, CliLink? link, TimeSpan interval)
+        public Worker(RefreshCoordinator owner, ProfileWatch watch)
         {
             _owner = owner;
-            _profileId = profileId;
-            _link = link;
-            _interval = RefreshPolicy.ClampInterval(interval);
-            State = InitialState(link, 0);
+            _profileId = watch.ProfileId;
+            _watch = watch with { Interval = RefreshPolicy.ClampInterval(watch.Interval) };
+            State = InitialState(watch, 0);
         }
 
         public ProfileUsageState State { get; private set; }
@@ -154,28 +182,29 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             _loop = Task.Run(RunAsync);
         }
 
-        public void Update(CliLink? link, TimeSpan interval)
+        public void Update(ProfileWatch watch)
         {
+            watch = watch with { Interval = RefreshPolicy.ClampInterval(watch.Interval) };
             long generation;
             ProfileUsageState state;
             lock (_gate)
             {
-                _interval = RefreshPolicy.ClampInterval(interval);
-                if (SameLink(_link, link))
+                if (_watch.LinkKey == watch.LinkKey)
                 {
-                    _link = link;
+                    _watch = watch;
                     SignalLocked(manual: false);
                     return;
                 }
 
-                // A new link is a new credential generation: cancel the in-flight check and drop its result.
+                // Changed links are a new credential generation: cancel the in-flight check and drop its result.
                 // A wait the server asked for still applies.
-                _link = link;
+                _watch = watch;
                 _generation++;
-                _rejectedAccessToken = null;
+                _rejectedStamp = null;
+                _billingLast = null;
                 _cycle.Cancel();
                 _cycle = new CancellationTokenSource();
-                State = InitialState(link, _generation) with { RetryNotBefore = State.RetryNotBefore };
+                State = InitialState(watch, _generation) with { RetryNotBefore = State.RetryNotBefore };
                 SignalLocked(manual: true);
                 generation = _generation;
                 state = State;
@@ -209,29 +238,33 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             }
         }
 
-        private ProfileUsageState InitialState(CliLink? link, long generation)
+        private ProfileUsageState InitialState(ProfileWatch watch, long generation)
         {
-            var cached = link is null ? null : _owner._cache.Load(_profileId);
+            var cached = watch.Source is null ? null : _owner._cache.Load(_profileId);
             // Another account's cache is never shown under this link.
-            if (cached is not null && cached.AccountIdentity != link?.Identity)
+            if (cached is not null && cached.AccountIdentity != watch.AccountIdentity)
             {
                 cached = null;
+            }
+
+            var api = watch.TracksBilling ? _owner._cache.LoadApi(_profileId) : null;
+            if (api is not null && api.OrganizationId != watch.Console!.OrganizationId)
+            {
+                api = null;
             }
 
             return new ProfileUsageState
             {
                 ProfileId = _profileId,
                 Generation = generation,
-                IsLinked = link is not null,
+                IsLinked = watch.Source is not null || watch.TracksBilling,
+                Source = watch.Source,
                 Usage = cached,
                 UsageFromCache = cached is not null,
+                Api = api,
+                ApiFromCache = api is not null,
             };
         }
-
-        private static bool SameLink(CliLink? a, CliLink? b) =>
-            a is null ? b is null
-            : b is not null && string.Equals(a.ConfigDirectory, b.ConfigDirectory, StringComparison.OrdinalIgnoreCase)
-                            && a.Identity == b.Identity && a.LinkedAt == b.LinkedAt;
 
         private void SignalLocked(bool manual)
         {
@@ -247,16 +280,14 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             var manual = true; // the first check runs at once
             while (!lifetime.IsCancellationRequested)
             {
-                CliLink? link;
+                ProfileWatch watch;
                 long generation;
                 CancellationTokenSource cycle;
-                TimeSpan interval;
                 lock (_gate)
                 {
-                    link = _link;
+                    watch = _watch;
                     generation = _generation;
                     cycle = CancellationTokenSource.CreateLinkedTokenSource(lifetime, _cycle.Token);
-                    interval = _interval;
                     _manualPending = false;
                     _wake = NewSignal();
                 }
@@ -266,7 +297,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                 {
                     try
                     {
-                        delay = await RunCycleAsync(link, generation, manual, interval, cycle.Token).ConfigureAwait(false);
+                        delay = await RunCycleAsync(watch, generation, manual, cycle.Token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (cycle.IsCancellationRequested)
                     {
@@ -275,7 +306,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                             return;
                         }
 
-                        // The link changed mid-check; the new generation checks straight away.
+                        // The links changed mid-check; the new generation checks straight away.
                         manual = true;
                         continue;
                     }
@@ -283,7 +314,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                     {
                         // Fail loud without stopping: show what went wrong (type and message only) and keep polling.
                         var failures = State.ConsecutiveFailures + 1;
-                        delay = RefreshPolicy.NextDelay(interval, failures, FetchFailure.Network, null);
+                        delay = RefreshPolicy.NextDelay(watch.Interval, failures, FetchFailure.Network, null);
                         var now = _owner._time.GetUtcNow();
                         Commit(generation, State with
                         {
@@ -296,7 +327,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                     }
                 }
 
-                manual = await WaitAsync(delay, delay == interval, lifetime).ConfigureAwait(false);
+                manual = await WaitAsync(delay, delay == watch.Interval, lifetime).ConfigureAwait(false);
             }
         }
 
@@ -320,7 +351,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
 
                     if (delayIsInterval)
                     {
-                        due = started + _interval;
+                        due = started + _watch.Interval;
                     }
 
                     wake = _wake.Task;
@@ -358,45 +389,70 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             }
         }
 
-        private async Task<TimeSpan> RunCycleAsync(CliLink? link, long generation, bool manual, TimeSpan interval, CancellationToken cycle)
+        private async Task<TimeSpan> RunCycleAsync(ProfileWatch watch, long generation, bool manual, CancellationToken cycle)
         {
             var time = _owner._time;
-            if (link is null)
+            var interval = watch.Interval;
+            if (watch.Source is null && !watch.TracksBilling)
             {
                 return interval;
             }
 
             var now = time.GetUtcNow();
-            if (State.RetryNotBefore is { } notBefore && now < notBefore)
+            var heldUntil = State.RetryNotBefore is { } notBefore && now < notBefore ? notBefore : (DateTimeOffset?)null;
+            if (heldUntil is { } until && !watch.TracksBilling)
             {
                 // A manual refresh never overrides the server's requested wait.
-                Commit(generation, State with { NextCheckAt = notBefore });
-                return notBefore - now;
+                Commit(generation, State with { NextCheckAt = until });
+                return until - now;
             }
 
             Commit(generation, State with { IsRefreshing = true });
-            var check = await _owner._links.CheckAsync(_profileId, link, cycle).ConfigureAwait(false);
-            now = time.GetUtcNow();
-            var withLink = State with { Link = check.Status, MirrorError = check.MirrorError, LastAttemptAt = now, InternalError = null };
-
-            if (check.Status != LinkStatus.Ready)
+            var delay = heldUntil is { } wait ? wait - now : interval;
+            if (watch.Source is { } kind && heldUntil is null)
             {
-                // Nothing to send: re-read Claude Code's file at the normal interval.
-                Commit(generation, withLink with { IsRefreshing = false, NextCheckAt = now + interval });
+                delay = await UsageAsync(watch, kind, generation, manual, cycle).ConfigureAwait(false);
+            }
+
+            if (watch.TracksBilling)
+            {
+                await BillingAsync(watch, generation, manual, cycle).ConfigureAwait(false);
+            }
+
+            Commit(generation, State with { IsRefreshing = false, NextCheckAt = time.GetUtcNow() + delay });
+            return delay;
+        }
+
+        /// <summary>One usage check. Returns how long to wait before the next one.</summary>
+        private async Task<TimeSpan> UsageAsync(ProfileWatch watch, UsageSourceKind kind, long generation, bool manual, CancellationToken cycle)
+        {
+            var time = _owner._time;
+            var interval = watch.Interval;
+            var source = _owner._sources(kind);
+            var credentials = await source.ResolveAsync(watch, cycle).ConfigureAwait(false);
+            var now = time.GetUtcNow();
+            var checkedState = State with
+            {
+                Link = credentials.Status,
+                MirrorError = credentials.StorageError,
+                Ownership = credentials.Ownership,
+                Notice = credentials.Notice,
+                LastAttemptAt = now,
+                InternalError = null,
+            };
+
+            if (!credentials.CanFetch || (!manual && credentials.Stamp == RejectedStamp()))
+            {
+                // Nothing to send: look at the login again at the normal interval.
+                Commit(generation, checkedState);
                 return interval;
             }
 
-            var token = check.Credentials!.AccessToken;
-            if (!manual && token == RejectedToken())
-            {
-                Commit(generation, withLink with { IsRefreshing = false, NextCheckAt = now + interval });
-                return interval;
-            }
-
-            var result = await _owner._client.FetchUsageAsync(token, cycle).ConfigureAwait(false);
+            var fetch = await source.FetchAsync(watch, credentials, State.Usage?.Usage, cycle).ConfigureAwait(false);
             if (_owner.IsStatusProfile(_profileId))
             {
-                var status = await _owner._client.FetchStatusAsync(cycle).ConfigureAwait(false);
+                var statusUrl = watch.Provider == Provider.Codex ? ServiceStatus.OpenAiStatusUrl : ServiceStatus.ClaudeStatusUrl;
+                var status = await _owner._client.FetchStatusAsync(cycle, statusUrl).ConfigureAwait(false);
                 if (IsCurrent(generation))
                 {
                     _owner._post(() => _owner.StatusChanged?.Invoke(status));
@@ -404,7 +460,8 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             }
 
             now = time.GetUtcNow();
-            switch (result)
+            checkedState = checkedState with { Link = fetch.Status ?? credentials.Status };
+            switch (fetch.Result)
             {
                 case FetchSucceeded success:
                 {
@@ -412,8 +469,8 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                     {
                         ProfileId = _profileId,
                         ObservedAt = success.At,
-                        Source = "oauthUsage",
-                        AccountIdentity = link.Identity,
+                        Source = SourceName(kind),
+                        AccountIdentity = watch.AccountIdentity,
                         Usage = success.Usage,
                     };
                     if (!IsCurrent(generation))
@@ -430,8 +487,9 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                         // The cache only shortens the next start; live values are still shown.
                     }
 
-                    SetRejectedToken(generation, null);
-                    Commit(generation, withLink with
+                    var historyError = _owner._history.RecordUsage(_profileId, watch.Provider, State.Usage?.Usage, success.Usage);
+                    SetRejectedStamp(generation, null);
+                    Commit(generation, checkedState with
                     {
                         Usage = cached,
                         UsageFromCache = false,
@@ -440,8 +498,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                         ConsecutiveFailures = 0,
                         LastSuccessAt = success.At,
                         RetryNotBefore = null,
-                        IsRefreshing = false,
-                        NextCheckAt = now + interval,
+                        HistoryError = historyError,
                     });
                     return interval;
                 }
@@ -452,43 +509,120 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                     var delay = RefreshPolicy.NextDelay(interval, failures, failed.Failure, failed.RetryAfter);
                     if (failed.Failure == FetchFailure.CredentialsRejected)
                     {
-                        SetRejectedToken(generation, token);
+                        SetRejectedStamp(generation, credentials.Stamp);
                         delay = interval;
                     }
 
-                    Commit(generation, withLink with
+                    Commit(generation, checkedState with
                     {
                         LastFailure = failed.Failure,
                         LastFailureStatus = failed.Status,
                         ConsecutiveFailures = failures,
                         RetryNotBefore = failed.Failure == FetchFailure.RateLimited || failed.RetryAfter is not null ? now + delay : null,
-                        IsRefreshing = false,
-                        NextCheckAt = now + delay,
                     });
                     return delay;
                 }
 
                 default:
-                    throw new InvalidOperationException($"Unexpected fetch result {result.GetType().Name}.");
+                    throw new InvalidOperationException($"Unexpected fetch result {fetch.Result.GetType().Name}.");
             }
         }
 
-        private string? RejectedToken()
+        /// <summary>
+        /// Console billing, at most every <see cref="BillingInterval"/> unless refreshed by hand. A failure
+        /// keeps the last billing and never affects usage polling.
+        /// </summary>
+        private async Task BillingAsync(ProfileWatch watch, long generation, bool manual, CancellationToken cycle)
         {
+            var now = _owner._time.GetUtcNow();
+            DateTimeOffset? last;
+            DateTimeOffset notBefore;
             lock (_gate)
             {
-                return _rejectedAccessToken;
+                last = _billingLast;
+                notBefore = _billingNotBefore;
             }
-        }
 
-        private void SetRejectedToken(long generation, string? token)
-        {
+            // A server-requested wait holds even a manual refresh; a manual refresh otherwise only skips the spacing.
+            if (now < notBefore || (last is { } previous && now < previous + (manual ? RefreshPolicy.MinimumInterval : BillingInterval)))
+            {
+                return;
+            }
+
+            var fetch = await _owner._billing.FetchAsync(watch, cycle).ConfigureAwait(false);
+            now = _owner._time.GetUtcNow();
+            if (!IsCurrent(generation))
+            {
+                return;
+            }
+
             lock (_gate)
             {
-                // A result of a superseded link must not mark the new link's token.
                 if (generation == _generation)
                 {
-                    _rejectedAccessToken = token;
+                    _billingLast = now;
+                    if (fetch.RetryAfter is not null || fetch.Failure == FetchFailure.RateLimited)
+                    {
+                        _billingNotBefore = now + (fetch.RetryAfter ?? RefreshPolicy.DefaultRateLimitWait);
+                    }
+                }
+            }
+
+            if (fetch.Usage is not { } usage)
+            {
+                Commit(generation, State with { ApiFailure = fetch.Failure ?? FetchFailure.InvalidResponse, MirrorError = fetch.StorageError ?? State.MirrorError });
+                return;
+            }
+
+            var cached = new CachedApiUsage
+            {
+                ProfileId = _profileId,
+                ObservedAt = now,
+                OrganizationId = watch.Console!.OrganizationId,
+                Usage = usage,
+            };
+            try
+            {
+                _owner._cache.SaveApi(cached);
+            }
+            catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
+            {
+            }
+
+            var historyError = _owner._history.RecordBilling(_profileId, State.Api?.Usage, usage);
+            Commit(generation, State with
+            {
+                Api = cached,
+                ApiFromCache = false,
+                ApiFailure = null,
+                HistoryError = historyError ?? State.HistoryError,
+                MirrorError = fetch.StorageError ?? State.MirrorError,
+            });
+        }
+
+        private static string SourceName(UsageSourceKind kind) => kind switch
+        {
+            UsageSourceKind.ClaudeAi => "claudeAi",
+            UsageSourceKind.Codex => "codex",
+            _ => "oauthUsage",
+        };
+
+        private string? RejectedStamp()
+        {
+            lock (_gate)
+            {
+                return _rejectedStamp;
+            }
+        }
+
+        private void SetRejectedStamp(long generation, string? stamp)
+        {
+            lock (_gate)
+            {
+                // A result of superseded links must not mark the new links' credential.
+                if (generation == _generation)
+                {
+                    _rejectedStamp = stamp;
                 }
             }
         }
