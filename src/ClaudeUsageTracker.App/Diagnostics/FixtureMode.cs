@@ -21,10 +21,29 @@ public sealed class FixtureMode
     public string DataRoot => Path.Combine(Root, "data");
     public string Responses => Path.Combine(Root, "responses");
 
+    /// <summary>
+    /// The fixture folder from <c>--fixture &lt;folder&gt;</c>, or null when no fixture argument is given. A malformed
+    /// fixture argument throws, because falling through would start live mode with the real login.
+    /// </summary>
     public static FixtureMode? FromArguments(IReadOnlyList<string> args)
     {
-        var index = args.ToList().IndexOf("--fixture");
-        return index >= 0 && index + 1 < args.Count ? new FixtureMode(args[index + 1]) : null;
+        var flags = Enumerable.Range(0, args.Count)
+            .Where(i => args[i].StartsWith("--fixture", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (flags.Count == 0)
+        {
+            return null;
+        }
+
+        if (flags is not [var index] || args[index] != "--fixture" || index + 1 >= args.Count || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Fixture mode needs exactly one \"--fixture <folder>\".");
+        }
+
+        var folder = args[index + 1];
+        return Directory.Exists(folder)
+            ? new FixtureMode(folder)
+            : throw new ArgumentException($"The fixture folder does not exist: {folder}");
     }
 
     /// <summary>Serves <c>usage.json</c> and <c>status.json</c> (optional <c>usage.status</c> holds an HTTP status code).</summary>

@@ -73,11 +73,11 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         return Create(handler);
     }
 
-    private (RefreshCoordinator Coordinator, ScriptedHandler Handler) Create(ScriptedHandler handler)
+    private (RefreshCoordinator Coordinator, ScriptedHandler Handler) Create(ScriptedHandler handler, Action<Action>? post = null)
     {
         var links = new CliLinkService(new SecretStore(Path.Combine(_temp.Path, "secrets")), _time, UserProfile);
         var client = new UsageClient(new HttpClient(handler), _time, new RequestLog(Path.Combine(_temp.Path, "diagnostics")));
-        _coordinator = new RefreshCoordinator(links, client, Cache, _time, action => action());
+        _coordinator = new RefreshCoordinator(links, client, Cache, _time, post ?? (action => action()));
         _coordinator.StateChanged += _states.Enqueue;
         _coordinator.StatusChanged += _statuses.Enqueue;
         return (_coordinator, handler);
@@ -314,6 +314,30 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         var state = await UntilAsync(s => s.Usage?.Usage.SessionPercentage == 22);
         Assert.Equal(1, state.Generation);
         Assert.DoesNotContain(_states, s => s.Usage?.Usage.SessionPercentage == 11);
+    }
+
+    [Fact]
+    public async Task NotificationOfASupersededLinkIsDroppedWhenItRuns()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var posted = new ConcurrentQueue<Action>();
+        var (coordinator, _) = Create(ScriptedHandler.Returning(HttpStatusCode.OK, """{"five_hour":{"utilization":12}}"""), posted.Enqueue);
+        coordinator.Watch(Profile());
+        await UntilAsync(s => s.LastSuccessAt is not null);
+        var beforeUnlink = posted.ToArray();
+        posted.Clear();
+
+        // The unlink's notification runs first, then the older ones, as when a result was committed before the
+        // unlink but posted after it.
+        coordinator.Watch(new ProfileSettings { Id = _profileId, Name = "Test" });
+        foreach (var notify in posted.Concat(beforeUnlink))
+        {
+            notify();
+        }
+
+        var shown = Assert.Single(_states);
+        Assert.False(shown.IsLinked);
+        Assert.Null(shown.Usage);
     }
 
     [Fact]

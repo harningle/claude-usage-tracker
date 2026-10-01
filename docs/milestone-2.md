@@ -42,7 +42,7 @@ The app is a tray application (`ShutdownMode.OnExplicitShutdown`) in `src/Claude
 
 ## Automated tests
 
-513 pass (191 before this milestone), with no build warnings. New suites: `StringsTableTests`, `AppStringsTests`, `SecretStoreTests`, `SettingsStoreTests`, `UsageCacheStoreTests`, `CliLoginTests`, `CliLinkServiceTests`, `ClaudeUsageResponseTests`, `UsageDisplayTests`, `RefreshPolicyTests`, `ServiceStatusTests`, `UsageClientTests`, `RefreshCoordinatorTests`, `PopoverModelTests`, `PopoverToggleTests`, `TrayIdentityTests`, `PopoverPlacementTests`, `FunnyNamesTests`, `SetupServiceTests` and `SetupWizardViewModelTests`. The upstream cases scheduled for this milestone are mapped in [parity.md](parity.md#upstream-test-inventory). The coordinator tests use simulated time (`Microsoft.Extensions.TimeProvider.Testing`); they and the other timing-sensitive suites passed in five consecutive runs.
+526 pass (191 before this milestone), with no build warnings. New suites: `StringsTableTests`, `AppStringsTests`, `SecretStoreTests`, `SettingsStoreTests`, `UsageCacheStoreTests`, `CliLoginTests`, `CliLinkServiceTests`, `ClaudeUsageResponseTests`, `UsageDisplayTests`, `RefreshPolicyTests`, `ServiceStatusTests`, `UsageClientTests`, `RefreshCoordinatorTests`, `PopoverModelTests`, `PopoverToggleTests`, `TrayIdentityTests`, `PopoverPlacementTests`, `FunnyNamesTests`, `SetupServiceTests`, `SetupWizardViewModelTests` and `FixtureModeTests`. The upstream cases scheduled for this milestone are mapped in [parity.md](parity.md#upstream-test-inventory). The coordinator tests use simulated time (`Microsoft.Extensions.TimeProvider.Testing`); they and the other timing-sensitive suites passed in five consecutive runs.
 
 ## Code review
 
@@ -58,6 +58,12 @@ An independent read-only review of the Milestone 2 code found ten defects. Each 
 8. A check of a superseded link could recreate the encrypted copy just after it was removed. Writes and deletes of the copy are now serialised and re-check cancellation, and removal stops in-flight checks first. Separately, when the token lineage changes, both Claude Code files are read twice and must agree, which avoids attributing a half-written `/login` to the old account.
 9. A failure to delete the copy while removing a link crashed the app. It is now reported.
 10. `.claude.json` larger than 16 MB read as "account unknown", and it was re-parsed on every poll. It now has a 64 MB limit and is parsed again only when its size or write time changes, once the file is a few seconds old.
+
+A second review, by the user on 2026-10-01, found three more. Each fix has a regression test that failed before it:
+
+11. A state notification checked the link generation only when it was posted to the UI thread. If a link was removed between a check committing its result and posting it, the old usage could replace the disconnected display. The generation is now checked again when the notification runs.
+12. `--fixture` without a folder was ignored, so the app started in live mode with the real login and, if linked, polled the real account. A missing, repeated or misspelt fixture argument, or a folder that does not exist, now stops startup with a message.
+13. The wizard showed the server's `Retry-After` but kept no hold, so Retry sent another request at once. The hold now lives in the shared usage client and binds every usage request: polling, a manual refresh and setup tests, including a wizard reopened during the wait. A 429 without guidance holds for the same 5 minutes as polling. The hold is app-wide; whether it should be per account is a Milestone 3 question, once several profiles poll.
 
 ## Manual checks in fixture mode
 

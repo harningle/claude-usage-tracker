@@ -137,6 +137,39 @@ public sealed class UsageClientTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(120), failed.RetryAfter);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests, "120", 120)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "120", 120)]
+    [InlineData(HttpStatusCode.TooManyRequests, null, 300)]
+    public async Task ServerWaitHoldsEveryLaterRequest(HttpStatusCode status, string? retryAfter, int holdSeconds)
+    {
+        var calls = 0;
+        var (client, handler) = Client(new ScriptedHandler((_, _) =>
+        {
+            var response = Interlocked.Increment(ref calls) == 1
+                ? new HttpResponseMessage(status) { Content = new StringContent("{}") }
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"five_hour":{"utilization":12}}""") };
+            if (calls == 1 && retryAfter is not null)
+            {
+                response.Headers.TryAddWithoutValidation("Retry-After", retryAfter);
+            }
+
+            return Task.FromResult(response);
+        }));
+        await client.FetchUsageAsync(Token, CancellationToken.None);
+
+        _time.Now += TimeSpan.FromSeconds(holdSeconds - 10);
+        var held = Assert.IsType<FetchFailed>(await client.FetchUsageAsync(Token, CancellationToken.None));
+        Assert.Equal(FetchFailure.RateLimited, held.Failure);
+        Assert.Null(held.Status);
+        Assert.Equal(TimeSpan.FromSeconds(10), held.RetryAfter);
+        Assert.Single(handler.Requests);
+
+        _time.Now += TimeSpan.FromSeconds(10);
+        Assert.IsType<FetchSucceeded>(await client.FetchUsageAsync(Token, CancellationToken.None));
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
     [Fact]
     public async Task CloudflareHeaderIsAChallengeNotRejectedCredentials()
     {

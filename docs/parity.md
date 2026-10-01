@@ -80,7 +80,7 @@ Recorded on 2026-09-30.
 16. **Polling coordinator.** Upstream's refreshes could overlap, were never cancelled and ignored `Retry-After`; a late result could be saved to whichever profile was then active. The port:
     - polls each profile in one sequential loop and drops results from a superseded link
     - backs off exponentially to 15 minutes after failures
-    - waits at least the server's `Retry-After` after a 429 or a 5xx, which a manual refresh does not override
+    - waits at least the server's `Retry-After` after a 429 or a 5xx, which neither a manual refresh nor a setup test overrides
     - does not resend a rejected token until it changes
     - applies a changed interval at once, where upstream waited for a profile switch or relaunch
 17. **Storage.** Upstream silently replaced an undecodable profile list with a new default profile. The port reports damaged or newer-format settings and leaves the file untouched. It keeps unknown members, so an older build does not drop a newer one's settings. An unknown provider value is kept as written while it behaves as Anthropic. The usage cache is a separate, re-fetchable file per profile, so polling never rewrites settings or secrets.

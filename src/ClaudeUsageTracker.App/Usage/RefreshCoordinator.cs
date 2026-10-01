@@ -150,12 +150,14 @@ public sealed class RefreshCoordinator : IAsyncDisposable
 
         public void Start()
         {
-            Publish(State);
+            Publish(0, State);
             _loop = Task.Run(RunAsync);
         }
 
         public void Update(CliLink? link, TimeSpan interval)
         {
+            long generation;
+            ProfileUsageState state;
             lock (_gate)
             {
                 _interval = RefreshPolicy.ClampInterval(interval);
@@ -175,9 +177,11 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                 _cycle = new CancellationTokenSource();
                 State = InitialState(link, _generation) with { RetryNotBefore = State.RetryNotBefore };
                 SignalLocked(manual: true);
+                generation = _generation;
+                state = State;
             }
 
-            Publish(State);
+            Publish(generation, state);
         }
 
         public void Wake(bool manual)
@@ -510,9 +514,19 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                 State = state;
             }
 
-            Publish(state);
+            Publish(generation, state);
         }
 
-        private void Publish(ProfileUsageState state) => _owner._post(() => _owner.StateChanged?.Invoke(state));
+        /// <summary>
+        /// Notifies on the UI thread, checking the generation again when the notification runs: a link change
+        /// between committing and posting would otherwise let an old result overwrite the newer display.
+        /// </summary>
+        private void Publish(long generation, ProfileUsageState state) => _owner._post(() =>
+        {
+            if (IsCurrent(generation))
+            {
+                _owner.StateChanged?.Invoke(state);
+            }
+        });
     }
 }

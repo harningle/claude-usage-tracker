@@ -42,8 +42,23 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
     /// <summary>Usage bodies are a few kilobytes; anything far larger is not the API's answer.</summary>
     private const int MaxBodyBytes = 1024 * 1024;
 
+    // The server's requested wait binds every usage request from this client: polling, a manual refresh
+    // and a setup test alike.
+    private readonly Lock _holdGate = new();
+    private DateTimeOffset _notBefore;
+
     public async Task<FetchResult> FetchUsageAsync(string accessToken, CancellationToken cancellation)
     {
+        var now = time.GetUtcNow();
+        lock (_holdGate)
+        {
+            if (now < _notBefore)
+            {
+                // Nothing is sent until the wait is over; the caller learns how long remains.
+                return new FetchFailed(FetchFailure.RateLimited, null, _notBefore - now) { At = now };
+            }
+        }
+
         using var request = new HttpRequestMessage(HttpMethod.Get, OAuthUsageUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         request.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
@@ -202,7 +217,21 @@ public sealed class UsageClient(HttpClient http, TimeProvider time, RequestLog l
     private FetchFailed Fail(FetchFailure failure, int? status, TimeSpan? retryAfter, long started)
     {
         Log(status, started, failure);
-        return new FetchFailed(failure, status, retryAfter) { At = time.GetUtcNow() };
+        var now = time.GetUtcNow();
+        if (retryAfter is not null || failure == FetchFailure.RateLimited)
+        {
+            // A 429 without guidance waits as long as polling would (RefreshPolicy.DefaultRateLimitWait).
+            var until = now + (retryAfter ?? RefreshPolicy.DefaultRateLimitWait);
+            lock (_holdGate)
+            {
+                if (until > _notBefore)
+                {
+                    _notBefore = until;
+                }
+            }
+        }
+
+        return new FetchFailed(failure, status, retryAfter) { At = now };
     }
 
     private void Log(int? status, long started, FetchFailure? failure) =>

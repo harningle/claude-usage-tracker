@@ -41,9 +41,9 @@ public sealed class SetupWizardViewModelTests : IDisposable
 
     private (SetupWizardViewModel Wizard, ScriptedHandler Handler, AppSettings Settings) Create(
         HttpStatusCode status = HttpStatusCode.OK, string body = """{"five_hour":{"utilization":39},"seven_day":{"utilization":60}}""",
-        string? configDirOverride = null)
+        string? configDirOverride = null, Action<HttpResponseMessage>? configure = null)
     {
-        var handler = ScriptedHandler.Returning(status, body);
+        var handler = ScriptedHandler.Returning(status, body, configure: configure);
         var settings = new AppSettings();
         var links = new CliLinkService(new SecretStore(Path.Combine(_temp.Path, "data", "secrets")), _time, UserProfile);
         var client = new UsageClient(new HttpClient(handler), _time, new RequestLog(Path.Combine(_temp.Path, "data", "diagnostics")));
@@ -161,6 +161,26 @@ public sealed class SetupWizardViewModelTests : IDisposable
         wizard.Back();
         Assert.Equal(WizardStep.Detected, wizard.Step);
         Assert.Null(wizard.Message);
+    }
+
+    [Fact]
+    public async Task RetryDuringTheServersWaitSendsNothing()
+    {
+        WriteLogin(ClaudeDirectory, Now.AddHours(8));
+        var (wizard, handler, _) = Create(HttpStatusCode.TooManyRequests, "{}",
+            configure: r => r.Headers.TryAddWithoutValidation("Retry-After", "120"));
+        wizard.ChooseAnthropic();
+        await wizard.TestAsync(CancellationToken.None);
+        var firstMessage = wizard.Message;
+
+        wizard.Back();
+        _time.Now += TimeSpan.FromSeconds(60);
+        await wizard.TestAsync(CancellationToken.None);
+
+        Assert.Single(handler.Requests);
+        Assert.Equal(WizardStep.TestFailed, wizard.Step);
+        Assert.Contains("Try again after", wizard.Message, StringComparison.Ordinal);
+        Assert.Equal(firstMessage, wizard.Message);
     }
 
     [Fact]

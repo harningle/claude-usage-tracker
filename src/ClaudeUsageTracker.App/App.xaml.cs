@@ -63,7 +63,19 @@ public partial class App : Application
             System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         }
 
-        var fixture = FixtureMode.FromArguments(e.Args);
+        FixtureMode? fixture;
+        try
+        {
+            fixture = FixtureMode.FromArguments(e.Args);
+        }
+        catch (ArgumentException error)
+        {
+            // Never fall back to the real login when fixture mode was asked for.
+            MessageBox.Show(error.Message, Strings.Get("app.name"), MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(2);
+            return;
+        }
+
         var user = WindowsIdentity.GetCurrent().User?.Value ?? "user";
         var instanceName = $@"Local\ClaudeUsageTracker.{user}{(fixture is null ? "" : ".Fixture")}";
         _instance = new Mutex(true, instanceName, out var first);
