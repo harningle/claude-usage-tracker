@@ -126,6 +126,49 @@ public class PopoverModelTests
     }
 
     [Fact]
+    public void ExtraUsageCardFollowsUpstream()
+    {
+        var model = Build(Linked(Typical with
+        {
+            SonnetWeeklyPercentage = 30,
+            CostUsed = 1.86m,
+            CostLimit = 5.00m,
+            CostCurrency = "USD",
+        }));
+
+        var extra = model.Rows[^1];
+        Assert.Equal("Extra Usage", extra.Title);
+        Assert.Equal("1.86 / 5.00 USD", extra.Subtitle);
+        Assert.Null(extra.Tag);
+        Assert.Equal("37%", extra.PercentText);
+        Assert.Equal(UsageStatusLevel.Safe, extra.Level);
+        Assert.Null(extra.MarkerFraction);
+        Assert.Null(extra.Pace);
+        Assert.Null(extra.ResetText);
+        Assert.Equal("Sonnet", model.Rows[^2].Title);
+    }
+
+    [Fact]
+    public void ZeroExtraUsageIsShownAsZero()
+    {
+        var extra = Build(Linked(Typical with { CostUsed = 0.00m, CostLimit = 5.00m, CostCurrency = "USD" })).Rows[^1];
+
+        Assert.Equal("0.00 / 5.00 USD", extra.Subtitle);
+        Assert.Equal("0%", extra.PercentText);
+    }
+
+    [Theory]
+    [InlineData(null, "USD")]
+    [InlineData(0.0, "USD")]
+    [InlineData(5.0, null)]
+    public void ExtraUsageCardNeedsAPositiveLimitAndCurrency(double? limit, string? currency)
+    {
+        var model = Build(Linked(Typical with { CostUsed = 0m, CostLimit = (decimal?)limit, CostCurrency = currency }));
+
+        Assert.DoesNotContain(model.Rows, r => r.Title == "Extra Usage");
+    }
+
+    [Fact]
     public void MissingValuesAreShownAsUnavailable()
     {
         var model = Build(Linked(new UsageData { SessionPercentage = 12 }));

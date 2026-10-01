@@ -201,6 +201,16 @@ public sealed class UsageCacheStoreTests : IDisposable
     }
 
     [Fact]
+    public void ExtraUsageKeepsItsDecimalPlacesAcrossARestart()
+    {
+        Store.Save(Cache(new UsageData { CostUsed = 0.00m, CostLimit = 5.00m, CostCurrency = "USD" }));
+
+        var loaded = Store.Load(_profileId)!.Usage;
+        Assert.Equal("0.00", loaded.CostUsed!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal("5.00", loaded.CostLimit!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public void EncodeDecodeFableFields()
     {
         var usage = new UsageData

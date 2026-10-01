@@ -122,6 +122,14 @@ public static class PopoverModelBuilder
             rows.Add(context.Row(Strings.Get("menubar.sonnet_usage"), null, null, sonnet, usage.SonnetWeeklyResetTime, null));
         }
 
+        // Upstream's Extra Usage card: shown when spent, limit and currency are known and the limit is positive.
+        // Amounts keep the currency's own decimal places (upstream always printed two).
+        if (usage is { CostUsed: { } used, CostLimit: { } limit, CostCurrency: { } currency } && limit > 0)
+        {
+            var subtitle = $"{used.ToString(CultureInfo.InvariantCulture)} / {limit.ToString(CultureInfo.InvariantCulture)} {currency}";
+            rows.Add(context.Row(Strings.Get("menubar.extra_usage"), null, subtitle, (double)(used / limit * 100), null, null));
+        }
+
         return new PopoverModel(rows, banner, null);
     }
 

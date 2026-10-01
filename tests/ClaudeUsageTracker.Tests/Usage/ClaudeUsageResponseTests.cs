@@ -151,6 +151,56 @@ public class ClaudeUsageResponseTests
         Assert.Null(usage.FableWeeklyPercentage);
     }
 
+    private static string SpendBody(string enabled, string used, string limit) =>
+        $$$"""{"five_hour": {"utilization": 1}, "spend": {"used": {{{used}}}, "limit": {{{limit}}}, "percent": 0, "severity": "normal", "enabled": {{{enabled}}}, "disabled_reason": "x", "cap": {"money": null, "credits": {"amount_minor": 0, "exponent": 2}}, "balance": null, "auto_reload": null, "disclaimer": "x", "can_purchase_credits": true, "can_toggle": true}}""";
+
+    private const string UsdZero = """{"amount_minor": 0, "currency": "USD", "exponent": 2}""";
+    private const string UsdFive = """{"amount_minor": 500, "currency": "USD", "exponent": 2}""";
+
+    [Fact]
+    public void ExtraUsageComesFromSpendInExactMinorUnits()
+    {
+        var usage = ClaudeUsageResponse.Parse(SpendBody("true", """{"amount_minor": 186, "currency": "USD", "exponent": 2}""", UsdFive));
+
+        Assert.Equal(1.86m, usage.CostUsed);
+        Assert.Equal(5.00m, usage.CostLimit);
+        Assert.Equal("USD", usage.CostCurrency);
+        Assert.Equal("5.00", usage.CostLimit!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void ZeroSpendKeepsItsDecimalPlaces()
+    {
+        var usage = ClaudeUsageResponse.Parse(SpendBody("true", UsdZero, UsdFive));
+
+        Assert.Equal("0.00", usage.CostUsed!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void CurrencyWithoutMinorUnitsHasNoDecimals()
+    {
+        var usage = ClaudeUsageResponse.Parse(SpendBody("true",
+            """{"amount_minor": 120, "currency": "JPY", "exponent": 0}""", """{"amount_minor": 3000, "currency": "JPY", "exponent": 0}"""));
+
+        Assert.Equal("3000", usage.CostLimit!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Theory]
+    [InlineData("false", UsdZero, UsdFive)]
+    [InlineData("null", UsdZero, UsdFive)]
+    [InlineData("true", UsdZero, "null")]
+    [InlineData("true", UsdZero, """{"amount_minor": 500, "currency": "EUR", "exponent": 2}""")]
+    [InlineData("true", """{"amount_minor": 1.5, "currency": "USD", "exponent": 2}""", UsdFive)]
+    [InlineData("true", """{"amount_minor": 1, "currency": "USD"}""", UsdFive)]
+    public void DisabledOrIncompleteSpendLeavesExtraUsageMissing(string enabled, string used, string limit)
+    {
+        var usage = ClaudeUsageResponse.Parse(SpendBody(enabled, used, limit));
+
+        Assert.Null(usage.CostUsed);
+        Assert.Null(usage.CostLimit);
+        Assert.Null(usage.CostCurrency);
+    }
+
     [Fact]
     public void CodeNamedWindowsCanComeAndGo()
     {

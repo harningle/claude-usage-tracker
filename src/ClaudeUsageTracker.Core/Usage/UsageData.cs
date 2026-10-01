@@ -31,7 +31,8 @@ public sealed record UsageData
     public double? FableWeeklyPercentage { get; init; }
     public DateTimeOffset? FableWeeklyResetTime { get; init; }
 
-    // Extra usage and overage credit grant
+    // Extra usage and overage credit grant, in currency units with the currency's decimal places (upstream
+    // kept minor units and divided by 100 for display)
     public decimal? CostUsed { get; init; }
     public decimal? CostLimit { get; init; }
     public string? CostCurrency { get; init; }

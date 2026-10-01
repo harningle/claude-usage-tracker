@@ -79,8 +79,15 @@ public static class ClaudeUsageResponse
             }
         }
 
+        // Extra usage: upstream read it only from claude.ai's overage endpoint, and only when enabled. Here
+        // it comes from this endpoint's spend object (shape recorded live, docs/milestone-2.md).
+        var (costUsed, costLimit, currency) = Spend(root);
+
         return new UsageData
         {
+            CostUsed = costUsed,
+            CostLimit = costLimit,
+            CostCurrency = currency,
             SessionPercentage = session.Percentage,
             SessionResetTime = session.Reset,
             WeeklyPercentage = weekly.Percentage,
@@ -93,6 +100,42 @@ public static class ClaudeUsageResponse
             FableWeeklyPercentage = fable.Percentage,
             FableWeeklyResetTime = fable.Reset,
         };
+    }
+
+    /// <summary>
+    /// Extra usage spent and its limit, when <c>spend.enabled</c> is true and both amounts are given in the same
+    /// currency. Amounts are exact: <c>amount_minor</c> scaled by <c>exponent</c>, keeping that many decimal places.
+    /// </summary>
+    private static (decimal? Used, decimal? Limit, string? Currency) Spend(JsonObject root)
+    {
+        if (root["spend"] is not JsonObject spend
+            || spend["enabled"] is not JsonValue enabledValue || !enabledValue.TryGetValue(out bool enabled) || !enabled
+            || Money(spend["used"]) is not { } used
+            || Money(spend["limit"]) is not { } limit
+            || used.Currency != limit.Currency)
+        {
+            return (null, null, null);
+        }
+
+        return (used.Amount, limit.Amount, used.Currency);
+    }
+
+    /// <summary>A <c>{amount_minor, exponent, currency}</c> object as an exact decimal, or null when malformed.</summary>
+    private static (decimal Amount, string Currency)? Money(JsonNode? node)
+    {
+        if (node is not JsonObject money
+            || money["amount_minor"] is not JsonValue amountValue || !amountValue.TryGetValue(out long minor)
+            || money["exponent"] is not JsonValue exponentValue || !exponentValue.TryGetValue(out int exponent)
+            || exponent is < 0 or > 18
+            || String(money, "currency") is not { Length: 3 } currency)
+        {
+            return null;
+        }
+
+        // new decimal(lo, mid, hi, negative, scale) keeps the scale, so 0 with exponent 2 is 0.00.
+        var magnitude = minor == long.MinValue ? (ulong)long.MaxValue + 1 : (ulong)Math.Abs(minor);
+        var amount = new decimal((int)(uint)magnitude, (int)(uint)(magnitude >> 32), 0, minor < 0, (byte)exponent);
+        return (amount, currency);
     }
 
     /// <summary>

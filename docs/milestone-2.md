@@ -12,7 +12,7 @@ Recorded 2026-10-01 on the development machine (Windows 11 26200, two 3840 × 21
 | Setup wizard: provider choice, CLI discovery/linking, connection test, review, save; edit/cancel/retry; non-destructive failures | Implemented for the Claude Code route. Browser sign-in, session keys, the Console and Codex are shown as not yet available | Automated (`SetupWizardViewModelTests`, `SetupServiceTests`); manual in fixture mode; live setup with the default Claude Code login |
 | CLI file linking plus read-only OAuth route | Implemented | Automated (`CliLinkServiceTests`, `UsageClientTests`); live: setup, polling, restart and an account change checked by the user on 2026-10-01 |
 | Secure persistence, no plaintext shortcut; mirror CLI-owned credentials; waiting-for-refresh state | Implemented (DPAPI per-profile file holding only `claudeAiOauth`; never refreshes) | Automated (`SecretStoreTests`, `CliLinkServiceTests`, `PopoverModelTests`); the live waiting-state check is scheduled for the night of 2026-10-01 |
-| Session/weekly/model usage, reset times, pace, service status, disconnected/stale/error states | Implemented; **extra usage is not shown** for CLI profiles; the endpoint's shape is now recorded (see "Usage response shape") | Automated (`ClaudeUsageResponseTests`, `PopoverModelTests`, `UsageDisplayTests`); manual in fixture mode; live: matches Claude Code's `/usage` |
+| Session/weekly/model usage, reset times, pace, service status, disconnected/stale/error states | Implemented, including the Extra Usage card from the endpoint's `spend` object (parity difference 27) | Automated (`ClaudeUsageResponseTests`, `PopoverModelTests`, `UsageDisplayTests`); manual in fixture mode; live: matches Claude Code's `/usage`. **The Extra Usage card has not yet been compared with claude.ai** |
 | Polling, manual refresh, cancellation, backoff, per-profile coordinator, 30 s default, server retry guidance, late results dropped | Implemented | Automated (`RefreshCoordinatorTests`, `RefreshPolicyTests`), run five times without a flake |
 | G2: read-only usage for other account types | Pro and Team verified in Milestone 1; Max and Enterprise still need such accounts | — |
 | G3: rate limits and sustained 30-second polling | 429 and 5xx `Retry-After` handling implemented and tested with fixtures; **overnight live soak scheduled for the night of 2026-10-01** | Automated |
@@ -42,7 +42,7 @@ The app is a tray application (`ShutdownMode.OnExplicitShutdown`) in `src/Claude
 
 ## Automated tests
 
-498 pass (191 before this milestone), with no build warnings. New suites: `StringsTableTests`, `AppStringsTests`, `SecretStoreTests`, `SettingsStoreTests`, `UsageCacheStoreTests`, `CliLoginTests`, `CliLinkServiceTests`, `ClaudeUsageResponseTests`, `UsageDisplayTests`, `RefreshPolicyTests`, `ServiceStatusTests`, `UsageClientTests`, `RefreshCoordinatorTests`, `PopoverModelTests`, `PopoverToggleTests`, `TrayIdentityTests`, `PopoverPlacementTests`, `FunnyNamesTests`, `SetupServiceTests` and `SetupWizardViewModelTests`. The upstream cases scheduled for this milestone are mapped in [parity.md](parity.md#upstream-test-inventory). The coordinator tests use simulated time (`Microsoft.Extensions.TimeProvider.Testing`); they and the other timing-sensitive suites passed in five consecutive runs.
+513 pass (191 before this milestone), with no build warnings. New suites: `StringsTableTests`, `AppStringsTests`, `SecretStoreTests`, `SettingsStoreTests`, `UsageCacheStoreTests`, `CliLoginTests`, `CliLinkServiceTests`, `ClaudeUsageResponseTests`, `UsageDisplayTests`, `RefreshPolicyTests`, `ServiceStatusTests`, `UsageClientTests`, `RefreshCoordinatorTests`, `PopoverModelTests`, `PopoverToggleTests`, `TrayIdentityTests`, `PopoverPlacementTests`, `FunnyNamesTests`, `SetupServiceTests` and `SetupWizardViewModelTests`. The upstream cases scheduled for this milestone are mapped in [parity.md](parity.md#upstream-test-inventory). The coordinator tests use simulated time (`Microsoft.Extensions.TimeProvider.Testing`); they and the other timing-sensitive suites passed in five consecutive runs.
 
 ## Code review
 
@@ -66,6 +66,7 @@ All data is synthetic: a `fixture@example.com` account, a token that is not a re
 - The wizard opened on first launch, detected the synthetic login as "fixture@example.com — Fixture Org · default", ran the read-only test, showed the review (profile, account, organisation, subscription, folder, usage now) and saved. A new profile got an upstream random name.
 - The popover then showed the profile name with the "Fixture data" tag, "All Systems Operational", Session 39 % (red with a purple runaway marker, as pace colouring gives at 17 % elapsed), All models 60 % with the Weekly tag, and Sonnet 12 % from `limits[]`, with reset texts. Screenshot: [media/popover-fixture-light.png](media/popover-fixture-light.png).
 - Settings showed the CLI Account page (linked state, account, folder, status, masked token prefix, subscription, scopes), Appearance with its six toggles and metric cards, General with the 10-300 s slider, Popover with both segmented pickers, and About.
+- With a synthetic `spend` object of 1.86 of 5.00 USD, the Extra Usage card appeared below Sonnet as "1.86 / 5.00 USD" at 37 %, with no reset line.
 - Tray icons were rendered at 16, 24 and 40 px for every style, available, critical and unavailable, on dark and light taskbars.
 - Two defects found and fixed this way: a resource-key clash (a brush and a style both named `Text.Secondary`) that crashed the first launch, and dates mixing the regional month name ("10月") into English text. Composite buttons also lacked accessible names; they now have them.
 
@@ -140,9 +141,11 @@ The parser ignores everything it does not use, as its tests require.
 
 For extra usage, `spend.used` and `spend.limit` are the precise source: each gives an integer amount in minor units with its own `exponent` and `currency`, so no cents-versus-dollars assumption is needed. `extra_usage` reports `used_credits` (decimal) and `monthly_limit` (integer) in units it does not state, beside `decimal_places`.
 
+The user's account has extra usage enabled, with 0.00 USD spent so far this month. On that basis the Extra Usage card was added from `spend` (parity difference 27). It needs one comparison by eye with claude.ai's usage page; the account should show "0.00 / <limit> USD".
+
 ## Open questions
 
-- **Extra usage for CLI profiles.** Upstream shows Extra Usage only from claude.ai's overage endpoints (the Milestone 3 browser route) and ignores this endpoint's `extra_usage` and `spend`. Their shape is now recorded (see "Usage response shape"), and `spend.used` / `spend.limit` give exact amounts. Field names and types alone do not prove which spending they describe, though. Showing an Extra Usage card from them needs one comparison by eye against claude.ai's usage page, ideally on an account with extra usage enabled.
+- **Extra usage for CLI profiles.** The card now comes from `spend` (parity difference 27). Field names and types alone do not prove that `spend` describes the same spending as claude.ai's usage page. Until the card has been compared by eye with that page, it is unverified. A non-zero amount would make that comparison stronger.
 - **Tray identity per profile.** The plan derives each icon's GUID from the profile ID plus metric, so each profile gets its own Explorer placement preference. Upstream's single-profile items are keyed by metric only. This matters once profiles can be switched (Milestone 3).
 
 ## Reproducing
