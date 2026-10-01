@@ -12,7 +12,7 @@ Use upstream commit [`588775e4540757443691fa1bcb33457315e05f86`](https://github.
 - Preserve upstream translations, licence notices and attribution. Omit telemetry and promotional prompts in both personal and public builds; document these intentional differences.
 - Personal delivery includes a self-contained build, local registration needed by notifications/startup, manual upgrade and integration cleanup. Installer, signing and automatic updates belong to the later public-release milestone; they are not abandoned or claimed complete.
 - No import of macOS Keychain or macOS app data. Existing native Windows CLI accounts can be linked through setup.
-- The repository has the Milestone 0 scaffold and ported pure logic, plus Milestone 1 experiment harnesses in `spikes/`, but no application behaviour yet. .NET SDK **10.0.401** and native Claude Code **2.1.286** (auto-updated from 2.1.285) are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools 2026 with the MSVC x64/x86 tools and Windows SDK 10.0.26100 is present, and NativeAOT publishing is verified ([Milestone 1 log](docs/milestone-1.md)).
+- The repository has the Milestone 0 scaffold and ported pure logic, the Milestone 1 experiment harnesses in `spikes/`, and the Milestone 2 tray app for the Claude Code route ([Milestone 2 log](docs/milestone-2.md)). .NET SDK **10.0.401** and native Claude Code **2.1.286** (auto-updated from 2.1.285) are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools 2026 with the MSVC x64/x86 tools and Windows SDK 10.0.26100 is present, and NativeAOT publishing is verified ([Milestone 1 log](docs/milestone-1.md)).
 
 ### Evidence limits
 
@@ -199,6 +199,8 @@ Keep build outputs outside Dropbox and outside the app's data root `%LOCALAPPDAT
 - Close the Milestone 1 follow-ups assigned here: G2 (read-only usage for other account types, as accounts allow), G3 (rate limit and sustained polling of the read-only route) and D1 (mixed DPI, keyboard selection, popover anchoring); see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** one real Claude account completes setup, refreshes to the UI and survives restart. Routine polling generates no model requests. Tests cover error/challenge states; screenshots use clearly labelled fixtures, not fabricated production account data.
+
+Status (2026-10-01): implemented and covered by automated tests and fixture-mode checks; the live-account acceptance, the G3 soak, the D1 manual checks and confirmation of hardware rendering are pending. Extra usage for CLI profiles awaits a shape-only observation of the endpoint's `extra_usage` and `spend` objects. See [the Milestone 2 log](docs/milestone-2.md#live-checks-still-to-do).
 
 ### Milestone 3 - Browser setup, profiles, Codex, billing and history
 

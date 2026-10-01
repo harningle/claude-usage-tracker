@@ -5,10 +5,24 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ClaudeUsageTracker.Core\ClaudeUsageTracker.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ClaudeUsageTracker.Tests" />
+  </ItemGroup>
+
+  <!--
+    Upstream's Localizable.strings files, unchanged and looked up by upstream key, plus Windows.strings
+    for text the port adds (keys prefixed "windows.").
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Localisation\**\*.strings"
+                      LogicalName="Localisation.%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

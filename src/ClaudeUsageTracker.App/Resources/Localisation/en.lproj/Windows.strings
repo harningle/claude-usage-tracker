@@ -1,0 +1,110 @@
+/*
+   Windows.strings
+   Claude Usage Tracker for Windows
+
+   Text the Windows port adds, in upstream's Localizable.strings format. Keys start with "windows."
+   so they never collide with upstream keys.
+*/
+
+/* MARK: - Popover states upstream did not distinguish */
+"windows.banner.not_set_up" = "Not set up yet. Link your Claude Code login to start tracking.";
+"windows.banner.waiting_for_cli" = "Waiting for Claude Code to refresh its login";
+"windows.banner.account_changed" = "Claude Code is now signed in to a different account.";
+"windows.banner.account_unverified" = "Can't confirm which account Claude Code is signed in to.";
+"windows.banner.cli_signed_out" = "Claude Code is signed out.";
+"windows.banner.cli_unreadable" = "Can't read Claude Code's login file.";
+"windows.banner.credentials_rejected" = "Claude Code's login was rejected. Sign in again in Claude Code.";
+"windows.banner.rate_limited" = "Rate limited. Next check at %@.";
+"windows.banner.challenge" = "The usage request was blocked by a security check.";
+"windows.popover.loading" = "Loading usage…";
+"windows.popover.no_data" = "No usage data yet.";
+"windows.popover.window_reset" = "Window reset, waiting for new data";
+
+/* MARK: - Time words upstream hard-coded in English */
+"windows.time.today" = "Today";
+"windows.time.tomorrow" = "Tomorrow";
+
+/* MARK: - Tray */
+"windows.tray.not_set_up" = "Not set up. Click to start.";
+
+/* MARK: - Service status (upstream hard-coded these in English) */
+"windows.status.unknown" = "Status Unknown";
+
+/* MARK: - Setup */
+"windows.setup.error.changed_since_test" = "The Claude Code login changed after the test. Test again before saving.";
+"windows.setup.error.save_failed" = "Couldn't save the configuration: %@";
+"windows.setup.window_title" = "Claude Usage Tracker Setup";
+"windows.setup.later_routes" = "Browser sign-in, session keys and the Console arrive in a later version of the Windows port.";
+"windows.setup.codex_later" = "Available in a later version";
+"windows.setup.not_found.title" = "No usable Claude Code login";
+"windows.setup.not_found.none" = "No Claude Code login was found. Sign in with the claude command (/login), then check again.";
+"windows.setup.not_found.expired" = "Claude Code's login has expired. Claude Code renews it the next time you use it: run any claude command, then check again. The tracker never renews Claude Code's login itself.";
+"windows.setup.not_found.unreadable" = "Claude Code's login file could not be read. Check again in a moment.";
+"windows.setup.check_again" = "Check Again";
+"windows.setup.choose_folder" = "Use Another Claude Code Folder…";
+"windows.setup.choose_folder.title" = "Choose a Claude Code folder (CLAUDE_CONFIG_DIR)";
+"windows.setup.detail.usable" = "%@ · login valid until %@";
+"windows.setup.detail.expired" = "%@ · login expired";
+"windows.setup.detail.not_signed_in" = "%@ · not signed in";
+"windows.setup.detail.unreadable" = "%@ · login file unreadable";
+"windows.setup.test.description" = "Start Tracking checks your usage once with a read-only request. Nothing is saved until you review it.";
+"windows.setup.test.rejected" = "The usage service rejected this login (HTTP %d). Sign in again in Claude Code, then retry.";
+"windows.setup.test.rate_limited" = "The usage service is limiting requests. Try again in a few minutes.";
+"windows.setup.test.rate_limited_until" = "The usage service is limiting requests. Try again after %@.";
+"windows.setup.test.challenge" = "The request was blocked by a security check. Try again later.";
+"windows.setup.test.network" = "Couldn't reach the usage service. Check your connection and retry.";
+"windows.setup.test.server" = "The usage service returned an error (HTTP %d). Try again later.";
+"windows.setup.test.invalid" = "The usage service sent an unexpected response (HTTP %d).";
+"windows.setup.test.failed_title" = "Connection test failed";
+"windows.setup.review.profile" = "Profile";
+"windows.setup.review.new_profile" = "New profile";
+"windows.setup.review.account" = "Account";
+"windows.setup.review.account_unknown" = "Not reported by Claude Code";
+"windows.setup.review.folder" = "Claude Code folder";
+"windows.setup.review.usage_now" = "Usage now";
+"windows.setup.review.switch_warning" = "This profile follows %@ now. Saving switches it to this account.";
+"windows.setup.review.no_identity" = "Claude Code did not report which account this is. If its login changes to another account, the tracker can't tell; set up again after switching.";
+
+/* MARK: - Settings: names upstream hard-coded, and Windows wording for macOS terms */
+"windows.icon_style.battery" = "Battery (Classic)";
+"windows.icon_style.progress_bar" = "Progress Bar";
+"windows.icon_style.percentage" = "Percentage";
+"windows.icon_style.icon" = "Icon with Bar";
+"windows.icon_style.compact" = "Compact";
+"windows.metric.session" = "Session Usage";
+"windows.metric.session_description" = "5-hour rolling window usage";
+"windows.metric.week" = "Week Usage";
+"windows.metric.week_description" = "Weekly usage (all models)";
+"windows.appearance.title" = "Tray Icon Appearance";
+"windows.appearance.subtitle" = "Customize your notification-area icons and metrics";
+"windows.appearance.global_subtitle" = "Customize tray icon behavior";
+"windows.appearance.metrics" = "Tray Metrics";
+"windows.appearance.metrics_subtitle" = "Select which metrics to show in the notification area";
+"windows.appearance.show_labels_description" = "Show S or W in the centre of the ring style";
+"windows.appearance.show_remaining_description" = "Display remaining capacity instead of used percentage (like a battery)";
+"windows.appearance.all_metrics_off" = "All metrics are off. The app logo is shown in the notification area instead. Click it to open the popover and settings.";
+"windows.appearance.square_note" = "Windows tray icons are square, so each style is drawn in a compact form without text labels. The tooltip and popover show the details.";
+"windows.general.subtitle" = "Refresh interval for this profile";
+"windows.settings.no_profile" = "Set up a profile to change these settings.";
+"windows.cli.linked_at" = "Linked %@";
+"windows.cli.current_state" = "Status";
+"windows.cli.state.ready" = "Signed in and readable";
+"windows.cli.state.not_checked" = "Not checked yet";
+"windows.cli.about" = "The tracker reads Claude Code's login without changing it and keeps an encrypted copy for this profile. It does not renew, switch or replace Claude Code's login in this version.";
+"windows.cli.remove_confirm.title" = "Remove CLI Account?";
+"windows.cli.remove_confirm.message" = "This removes the link and the encrypted copy from this profile. Claude Code stays signed in.";
+"windows.about.subtitle" = "for Windows";
+"windows.about.port_note" = "A Windows port of Claude Usage Tracker by Hamed Elfayome. It is maintained separately and is not signed or endorsed by the original author.";
+"windows.about.original" = "Original project";
+"windows.about.port_repo" = "Windows port";
+"windows.about.copyright" = "© 2025 Claude Usage Tracker Contributors";
+
+/* MARK: - Development fixture mode */
+"windows.fixture.label" = "Fixture data";
+
+/* MARK: - Review follow-ups */
+"windows.banner.forbidden" = "The usage service refused this account's request (HTTP 403).";
+"windows.banner.internal_error" = "Refreshing failed unexpectedly: %@";
+"windows.setup.test.forbidden" = "The usage service refused this account's request (HTTP %d). This account type may not support it yet.";
+"windows.setup.error.copy_not_deleted" = "The link was removed, but the encrypted copy could not be deleted: %@";
+"windows.cli.mirror" = "Encrypted copy";

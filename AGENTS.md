@@ -36,6 +36,8 @@ dotnet test --solution ClaudeUsageTracker.slnx
 
 NativeAOT publishing of the helper was validated on 2026-10-01 with `dotnet publish src/ClaudeUsageTracker.Helper/ClaudeUsageTracker.Helper.csproj -c Release -r win-x64`. If `NoDefaultCurrentDirectoryInExePath` is set in the shell (some agent shells set it), unset it first; otherwise `VsDevCmd.bat` cannot run `vswhere.exe` and linking fails with MSB3073. App publishing is not yet validated; do not advertise it as a passing check.
 
+To see the app without touching a real account, run it in fixture mode, `dotnet run --project src/ClaudeUsageTracker.App -- --fixture <folder>`, with synthetic Claude Code files and canned responses ([docs/milestone-2.md](docs/milestone-2.md)). Screenshots for documentation come only from fixture mode, which labels them. Launching the app normally reads the real Claude Code login and polls with it, so do that only when the user asks for a live check.
+
 `spikes/` holds Milestone 1 experiment harnesses. They are outside the solution and are not production code; [docs/milestone-1.md](docs/milestone-1.md) records how they were run and what they showed.
 
 This checkout is in Dropbox. `Directory.Build.props` sends all restore/build/test/publish output, including IDE builds and test results, to `%LOCALAPPDATA%\ClaudeUsageTracker.Build\<checkout-id>`, outside both the sync tree and the app's data root. Keep it that way. `.gitignore` does not exclude files from Dropbox sync, so check that no `bin`, `obj`, `TestResults` or similar folder appears in the checkout. `.vs\` is marked ignored by Dropbox; if it is recreated, mark it again with `Set-Content -Path .vs -Stream com.dropbox.ignored -Value 1`. Do not create repository-local Python environments.

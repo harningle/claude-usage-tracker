@@ -9,7 +9,7 @@ Evidence types, kept separate throughout:
 - **Live account**: exercised against a real account through the app.
 - **Source/image**: compared only against upstream source or media.
 
-Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based. Milestone 1 experiment results, including one live-account observation, are in [milestone-1.md](milestone-1.md); they come from spike harnesses, not app features.
+Nothing here claims live authentication, Mac runtime parity or full feature parity. At Milestone 0 all evidence is automated or source-based. Milestone 1 experiment results, including one live-account observation, are in [milestone-1.md](milestone-1.md); they come from spike harnesses, not app features. Milestone 2's app features are verified by automated tests and by manual checks with synthetic fixture data ([milestone-2.md](milestone-2.md)); their live-account acceptance is still pending.
 
 ## Environment and references
 
@@ -36,10 +36,11 @@ Recorded on 2026-09-30.
 | Activity HUD events, tool mapping, session reducer | 0 | Core logic ported; no transport or window | Automated | Difference 5; transport gate in Milestone 1, stricter ordering in Milestone 5 |
 | Launcher slugs | 0 | Naming ported | Automated | Difference 9; executable aliases in Milestone 5 |
 | Supported languages | 0 | List ported | Automated | Explicit `zh-cn` to `zh-Hans` mapping; resources in Milestone 6; flag emoji rendering on Windows unverified |
-| Tray, popover, settings window, setup wizard | 1 spike, then 2 | Spike: path-derived tray GUIDs, overflow and taskbar clicks, icon rectangles, Explorer-restart re-add and a move (new identity; placement reset) verified; no app UI | Automated harness; manual | Plan section 2; unsigned GUID reuse re-binds rather than fails on Windows 11 26200 |
-| CLI linking and read-only OAuth usage | 1 gate, then 2 | Gate passed: `/api/oauth/usage` returned usage for a Pro and a Team account (2026-09-30/10-01); linking not started | Live account (spike probe) | Difference 11 |
+| UI text | 2 | Upstream English `Localizable.strings` embedded unchanged and looked up by key; port-only text in `Windows.strings`; other languages in Milestone 6 | Automated (every key used exists) | Differences 21 and 22 |
+| Tray, popover, settings window, setup wizard | 1 spike, then 2 | Implemented for the Claude Code route: single instance, tray icons and menu, popover, sidebar settings (CLI Account, Appearance, General, Popover, About), wizard with test and review. Live use, hardware rendering, mixed DPI and keyboard selection not yet checked by hand | Automated; manual with fixture data | Differences 14-20 and 23; plan section 2 |
+| CLI linking and read-only OAuth usage | 1 gate, then 2 | Implemented: file linking with account checks, encrypted mirror of the CLI-owned login, read-only polling with backoff and `Retry-After`. Live acceptance and the multi-hour soak (G3) pending | Automated; manual with fixture data; live gate from Milestone 1 | Differences 11-13, 16 and 24 |
 | Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Gate decided: claude.ai uses same-origin WebView2 fetch (replay challenged, browser 200); Console uses `HttpClient` at `platform.claude.com` (replay 200). 30-minute renewal soak and two-account isolation passed | Live account (manual, spike harness) | Plan section 2 |
-| Profiles, secure storage, credential ownership | 2 and 3 | Not started | None | DPAPI files replace Keychain |
+| Profiles, secure storage, credential ownership | 2 and 3 | Milestone 2: versioned settings, per-profile usage cache and DPAPI secret files; one profile at a time. Profile lifecycle and ownership in Milestone 3 | Automated | DPAPI files replace Keychain; difference 17 |
 | History persistence, charts, CSV/JSON export, network log | 3 | Not started | None | Redacted log only |
 | Notifications, automation, safe CLI switching | 1 spike, then 4 | Spike: unpackaged self-contained registration and posting (one extracted runtime DLL), cold activation and running-instance clicks verified | Automated harness; manual | Plan section 2; after a move, notifications posted from the old path do nothing when clicked, and their registration stays until cleaned |
 | Launchers, statusline, hooks and HUD | 1 gate, then 5 | NativeAOT helper timing passed; hook transport decided: HTTP for all eight events as upstream; the SessionStart entry is inert on CLI 2.1.286, as it is for upstream | Automated harness (real CLI, fake Messages API); live account (40 Haiku tool calls, stopped listener) | Secret-free statusline; transport by measurement |
@@ -58,6 +59,57 @@ Recorded on 2026-09-30.
 9. **Launcher ownership from a manifest.** Slug collisions are checked against an owner map, which the Milestone 5 install manifest will provide, instead of a marker line in a shell script.
 10. **Unreadable Codex credentials are never replaced.** Codex `auth.json` serialisation creates a new document only when there is no existing content. Existing content that is malformed or not a JSON object throws, rather than being silently replaced by a new document as upstream does.
 11. **CLI profiles poll the read-only usage endpoint.** Upstream's active CLI profile posts a one-token Haiku request to `/v1/messages` on every refresh and reads rate-limit headers (up to 2,880 generating requests a day at 30 seconds); its background profiles use `GET /api/oauth/usage`, which upstream's comment calls disabled. The port uses `/api/oauth/usage` for all CLI profiles and never falls back to `/v1/messages`. Verified with Claude Code 2.1.286 for a Pro account (7 of 7 requests, 2026-09-30) and a Team account (5 of 5, 2026-10-01). Both returned 200 with the claude.ai usage shape, and no throttling was seen at a 30-second cadence (spike probe; implementation in Milestone 2). Windows and fields vary by account and over time, so all are optional. Max and Enterprise accounts are unverified.
+12. **Account checks on every poll.** Upstream used whatever account the CLI was logged in as for the active profile, with no identity check, so it could show one account's usage under another profile. The port compares `accountUuid`, then email, or else an unchanged refresh token, before each request. A different account is reported ("Claude Code is now signed in to a different account.") and is neither polled nor shown. Cached usage records its account, and another account's cache is never shown.
+13. **CLI-owned tokens are never refreshed in Milestone 2.** Upstream either took over an expired token, rotating it without process or file checks, or silently skipped the refresh. The port shows "Waiting for Claude Code to refresh its login" (a new string), keeps the labelled stale usage and re-reads the file at each interval. The guarded takeover is Milestone 3. The encrypted mirror holds only the `claudeAiOauth` object, not other logins in the file such as MCP servers'.
+14. **The wizard tests before saving.** Upstream's Claude Code route copied the login without a test, a review or the setup-completed flag. It fell back to the manual route silently on any failure, and re-read a possibly different login at save time. The port:
+    - runs one read-only usage request, then shows a review (profile, account, organisation, plan, folder, usage)
+    - re-reads the folder on Done and refuses a login whose account has changed since the test
+    - saves nothing after a failed test, and offers Back and Retry
+    - says an expired login is expired rather than "not found"
+    - labels browser sign-in, session keys, the Console and Codex as arriving later
+
+    Upstream's step-1 Cancel button, which did nothing, is not ported.
+15. **Honest popover states.** Upstream showed 0 % cards with made-up reset times when nothing was known, never labelled cached data from a previous run, and in multi-profile mode treated cached data as a success. The port:
+    - shows "Loading usage…" or "No usage data yet." instead of zero cards, and an unavailable value as "—"
+    - shows a per-model card whenever the model is reported, including at 0 %
+    - says "Window reset, waiting for new data" instead of "Resets in Reset now"
+    - bases the stale banner on the data's own observation time, so a previous run's cache counts as stale
+    - adds banners for not set up, waiting for Claude Code, a changed or unverifiable account, a signed-out or unreadable CLI, rate limits (with the next check time) and challenges
+    - says "Claude Code's login was rejected. Sign in again in Claude Code." for rejected credentials, rather than upstream's "Credentials expired."
+    - spins the refresh icon for the real request (upstream spun it for a fixed second), and re-renders countdowns every 30 seconds
+16. **Polling coordinator.** Upstream's refreshes could overlap, were never cancelled and ignored `Retry-After`; a late result could be saved to whichever profile was then active. The port:
+    - polls each profile in one sequential loop and drops results from a superseded link
+    - backs off exponentially to 15 minutes after failures
+    - waits at least the server's `Retry-After` after a 429 or a 5xx, which a manual refresh does not override
+    - does not resend a rejected token until it changes
+    - applies a changed interval at once, where upstream waited for a profile switch or relaunch
+17. **Storage.** Upstream silently replaced an undecodable profile list with a new default profile. The port reports damaged or newer-format settings and leaves the file untouched. It keeps unknown members, so an older build does not drop a newer one's settings. An unknown provider value is kept as written while it behaves as Anthropic. The usage cache is a separate, re-fetchable file per profile, so polling never rewrites settings or secrets.
+18. **Tray icons.** macOS status items are wide images; Windows tray icons are square.
+    - Each of upstream's five styles (battery, progress bar, percentage, ring, dot) is drawn in a square form without its text labels; only the ring keeps its centre letter, from 20 px. The "time until next session" option is therefore not offered.
+    - Icons are dimmed when their data is stale or failed.
+    - Tooltips, which upstream did not have, give the profile, metric, value, reset time and any banner within 127 characters.
+    - Right-click opens a native Refresh / Settings / Quit menu.
+    - The logo shown before setup is a drawn ring, not upstream's artwork.
+    - Icon GUIDs include the profile ID, as the plan requires.
+19. **Popover.**
+    - There is no profile switcher menu until profiles can be managed (Milestone 3); with one profile it would have nothing to switch to.
+    - The status link opens status.claude.com, as upstream's does.
+    - In light mode the background is a chosen neutral, because upstream has no light screenshot. Moderate, critical and caution text use darker shades than upstream's, for contrast.
+    - Dragging the header detaches the popover, the same gesture as upstream; any tray click then closes it.
+    - Opened from the keyboard, focus moves into the popover; upstream cleared focus.
+20. **Settings window.** Standard Windows chrome replaces upstream's borderless window and traffic-light buttons, and only the sections that work in this milestone are listed.
+    - About identifies the Windows port and links the original project, this repository and its issues. It omits the GitHub star link, the feedback form, the contributors fetch and the update check.
+    - Removing the CLI account asks for confirmation, which upstream did not.
+    - Re-sync runs the wizard's test and review instead of copying the login immediately.
+21. **Upstream strings, Windows wording.** Upstream's English strings are used unchanged, by key. Where they describe macOS ("menu bar", "like macOS battery"), the port uses its own `windows.*` strings. Text that upstream hard-coded in English ("Today", "Tomorrow", "Status Unknown", the icon style names) is also in `Windows.strings`, ready for Milestone 6.
+22. **Dates in the UI language.** Upstream formatted month names in the system locale inside English sentences. The port formats them in the UI language (English, `en-GB`, for now), while the 12/24-hour choice still follows the user's regional format.
+23. **Single instance.** Upstream relied on macOS for this. The port uses a per-user mutex, and a second launch opens the running instance's popover.
+24. **Account metadata per directory.** Upstream read `oauthAccount` from the first `.claude.json` that existed, so a `CLAUDE_CONFIG_DIR` without its own file was labelled with the default login's account. The port reads `%USERPROFILE%\.claude.json` for the default directory and `<dir>\.claude.json` for any other, as Claude Code 2.1.286 does on Windows ([milestone-2.md](milestone-2.md#verified-facts)).
+25. **Usage parsing.** In addition to difference 1:
+    - Timestamps parse with or without fractional seconds. Upstream's parser required them and replaced whole-second times with placeholders.
+    - A `limits[]` entry with no percentage does not override a reported value; upstream wrote 0.
+    - No token counts are derived from percentages; upstream fabricated them from a 1,000,000 limit.
+26. **Which responses count as rejected credentials.** Upstream treated every 401 and 403 from the usage endpoint as unauthorised and showed "Credentials expired". The port treats only a 401 or a 403 `authentication_error` as a rejected login. An HTML 403 is reported as a block in front of the API, and other API 403s, such as a permission error for an account type, are reported as refusals without marking the token rejected.
 
 ## Upstream test inventory
 
@@ -71,7 +123,7 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 
 | Upstream file | Cases | Ported | Scheduled | Conditional | Excluded |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| ClaudeUsageTests.swift | 18 | 3 | 10 | 0 | 5 |
+| ClaudeUsageTests.swift | 18 | 11 | 2 | 0 | 5 |
 | CodexProviderTests.swift | 28 | 28 | 0 | 0 | 0 |
 | DateExtensionsTests.swift | 10 | 10 | 0 | 0 | 0 |
 | LanguageManagerTests.swift | 3 | 3 | 0 | 0 | 0 |
@@ -79,15 +131,15 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 | NotchHUDCoreTests.swift | 23 | 14 | 0 | 9 | 0 |
 | NotchHookInstallerTests.swift | 6 | 0 | 5 | 0 | 1 |
 | NotchHookServerTests.swift | 6 | 0 | 0 | 6 | 0 |
-| ProfileKeychainMigrationTests.swift | 8 | 0 | 6 | 0 | 2 |
-| ProfileProviderTests.swift | 13 | 4 | 7 | 0 | 2 |
+| ProfileKeychainMigrationTests.swift | 8 | 4 | 2 | 0 | 2 |
+| ProfileProviderTests.swift | 13 | 9 | 2 | 0 | 2 |
 | SessionKeyValidatorTests.swift | 33 | 25 | 0 | 0 | 8 |
-| SharedDataStoreTests.swift | 16 | 0 | 9 | 0 | 7 |
+| SharedDataStoreTests.swift | 16 | 1 | 8 | 0 | 7 |
 | SupportReminderServiceTests.swift | 4 | 0 | 0 | 0 | 4 |
 | TerminalLauncherServiceTests.swift | 8 | 3 | 4 | 0 | 1 |
 | URLBuilderTests.swift | 20 | 17 | 0 | 0 | 3 |
 | UsageStatusCalculatorTests.swift | 12 | 12 | 0 | 0 | 0 |
-| **Total** | **211** | **119** | **44** | **15** | **33** |
+| **Total** | **211** | **137** | **26** | **15** | **33** |
 
 ### ClaudeUsageTests.swift
 
@@ -97,20 +149,20 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 | `ClaudeUsageTests.testStatusLevelModerate` | Excluded | As above |
 | `ClaudeUsageTests.testStatusLevelCritical` | Excluded | As above |
 | `ClaudeUsageTests.testEmptyUsage` | Excluded | No zero-filled placeholder usage (difference 1) |
-| `ClaudeUsageTests.testEncodeDecode` | Scheduled M2 | Round trip of the Windows usage cache format |
-| `ClaudeUsageTests.testDecodeLegacyJSONWithoutDesignAndFableKeys` | Scheduled M2 | Older Windows cache versions load. macOS data is not imported. |
-| `ClaudeUsageTests.testEncodeDecodeFableFields` | Scheduled M2 | Round trip of per-model fields |
+| `ClaudeUsageTests.testEncodeDecode` | Ported, changed | `UsageCacheStoreTests.EncodeDecode`: the Windows usage cache file |
+| `ClaudeUsageTests.testDecodeLegacyJSONWithoutDesignAndFableKeys` | Ported, changed | `UsageCacheStoreTests.OlderCacheWithoutNewerKeysLoadsWithThemMissing`: missing keys are null, not 0 (difference 1). macOS data is not imported. |
+| `ClaudeUsageTests.testEncodeDecodeFableFields` | Ported | `UsageCacheStoreTests.EncodeDecodeFableFields` |
 | `ProfileCustomKeychainTests.testDecodesOldPlistWithoutCustomKeychainField` | Scheduled M3 | Windows equivalent: a CLI-linked config-directory reference in profile settings |
 | `ProfileCustomKeychainTests.testHasAnyCredentialsRecognizesCustomKeychainPin` | Scheduled M3 | Windows equivalent: a CLI-linked store counts as a credential source |
 | `ClaudeCodeSyncServiceLogicTests.testSha256HexPrefixMatchesClaudeCodeKeychainHashAlgorithm` | Excluded | macOS Keychain naming; Windows Claude Code uses `<config dir>/.credentials.json` |
 | `ClaudeCodeSyncServiceLogicTests.testMergeRefreshedCredentialsUpdatesAccessTokenAndExpiresAt` | Ported | `ClaudeCliCredentialsTests.MergeRefreshedCredentialsUpdatesAccessTokenAndExpiresAt` |
 | `ClaudeCodeSyncServiceLogicTests.testMergeRefreshedCredentialsRotatesRefreshTokenWhenProvided` | Ported | `ClaudeCliCredentialsTests.MergeRefreshedCredentialsRotatesRefreshTokenWhenProvided` |
 | `ClaudeCodeSyncServiceLogicTests.testMergeRefreshedCredentialsRejectsInputWithoutClaudeAiOauth` | Ported | `ClaudeCliCredentialsTests.MergeRefreshedCredentialsRejectsInputWithoutClaudeAiOauth` |
-| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelEmailAndOrg` | Scheduled M2 | Windows equivalent: labels for discovered CLI config directories in setup |
-| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelEmailOnly` | Scheduled M2 | As above |
-| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelDefaultShorthand` | Scheduled M2 | As above |
-| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelSubscriptionFallback` | Scheduled M2 | As above |
-| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelRawSvcFallback` | Scheduled M2 | As above |
+| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelEmailAndOrg` | Ported, changed | `CliLoginTests.DisplayLabelEmailAndOrg`: a config folder name replaces the keychain service suffix |
+| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelEmailOnly` | Ported, changed | `CliLoginTests.DisplayLabelEmailOnly` |
+| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelDefaultShorthand` | Ported | `CliLoginTests.DisplayLabelDefaultShorthand`: "default" names the default config directory |
+| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelSubscriptionFallback` | Ported, changed | `CliLoginTests.DisplayLabelSubscriptionFallback` |
+| `ClaudeCodeSyncServiceLogicTests.testDisplayLabelRawSvcFallback` | Ported, changed | `CliLoginTests.DisplayLabelRawFallback`: the full directory path replaces the full service name |
 
 ### CodexProviderTests.swift
 
@@ -176,7 +228,7 @@ Ported to `ResetTimeExtensionsTests`, using fixed time zones (difference 4).
 
 | Upstream case | Disposition | Windows milestone |
 | --- | --- | --- |
-| `testEnableDisplayJoinsAllSpacesAndFullScreenSpaces` | Scheduled M2 and M5 | Windows equivalent: the popover and HUD stay available over full-screen apps and across virtual desktops (manual acceptance) |
+| `testEnableDisplayJoinsAllSpacesAndFullScreenSpaces` | Scheduled M2 and M5 | Windows equivalent: the popover and HUD stay available over full-screen apps and across virtual desktops (manual acceptance; the popover is topmost, the check is pending, [milestone-2.md](milestone-2.md#live-checks-still-to-do)) |
 | `testEnableDisplayClearsMoveToActiveSpace` | Scheduled M2 and M5 | As above |
 | `testEnableDisplayPreservesUnrelatedCollectionBehavior` | Scheduled M2 and M5 | As above; window style changes preserve unrelated flags |
 
@@ -239,10 +291,10 @@ The reducer is upstream's. Milestone 5 adds the plan's stricter rules (tool-use 
 | `testEncodeExcludesSecretsByDefault` | Scheduled M3 | Windows equivalent: settings, history, cache and log files never contain secrets |
 | `testEncodeIncludesSecretsWithUserInfoFlag` | Excluded | The port has no plaintext fallback encoding (plan section 3, Milestone 2) |
 | `testDecodeLegacyPlistWithSecrets` | Excluded | macOS data is not imported |
-| `testV311ProfileWithPreDesignUsageCacheSurvivesUpgrade` | Scheduled M2 | Windows equivalent: older Windows settings versions load without losing profiles |
-| `testCorruptUsageCacheDegradesToNilNotProfileLoss` | Scheduled M2 | Windows equivalent: a corrupt, re-fetchable cache never loses profiles; corrupt settings are reported, not silently reset |
-| `testDecodeMinimalLegacyProfileAppliesDefaults` | Scheduled M2 | Windows profile defaults: 30-second refresh, overage check on, shown in the tray |
-| `testProfileSecretRoundTrip` | Scheduled M2 | Windows equivalent: DPAPI per-profile secret file round trip |
+| `testV311ProfileWithPreDesignUsageCacheSurvivesUpgrade` | Ported, changed | `UsageCacheStoreTests.OlderCacheWithoutNewerKeysLoadsWithThemMissing` and `SettingsStoreTests.UnknownFieldsSurviveASave`: the cache is a separate file, and settings from other versions keep their members |
+| `testCorruptUsageCacheDegradesToNilNotProfileLoss` | Ported, changed | `UsageCacheStoreTests.UnusableCacheDegradesToNull`; corrupt settings are reported and left unchanged instead (`SettingsStoreTests.DamagedSettingsAreReportedAndLeftUnchanged`, difference 17) |
+| `testDecodeMinimalLegacyProfileAppliesDefaults` | Ported, changed | `SettingsStoreTests.DecodeMinimalLegacyProfileAppliesDefaults`: 30-second refresh, shown in the tray, session icon on; the overage-check flag arrives with extra usage |
+| `testProfileSecretRoundTrip` | Ported, changed | `SecretStoreTests.ProfileSecretRoundTrip`: the DPAPI per-profile file; deletion is `CliLinkServiceTests.DeleteMirrorRemovesTheSecretButNotTheCliLogin` |
 | `testFieldsAreIsolatedPerProfileAndField` | Scheduled M3 | Windows equivalent: per-profile secret isolation and deletion |
 
 ### ProfileProviderTests.swift
@@ -250,13 +302,13 @@ The reducer is upstream's. Milestone 5 adds the plan's stricter rules (tool-use 
 | Upstream case | Disposition | Windows test, milestone or reason |
 | --- | --- | --- |
 | `testLegacyProfileWithoutProviderDecodesAsAnthropic` | Excluded | Pre-provider profiles exist only in upstream macOS storage |
-| `testUnknownProviderRawValueDegradesToAnthropic` | Scheduled M2 | Profile settings from a newer version load without losing the list. Whether an unknown provider should degrade to Anthropic is an open decision. |
-| `testNonStringProviderValueDegradesToAnthropic` | Scheduled M2 | As above |
-| `testCodexProviderRoundTrips` | Scheduled M3 | Codex profile persistence |
+| `testUnknownProviderRawValueDegradesToAnthropic` | Ported, changed | `SettingsStoreTests.UnknownProviderRawValueDegradesToAnthropicButIsKept`: behaves as Anthropic, but the raw value is kept on save (difference 17) |
+| `testNonStringProviderValueDegradesToAnthropic` | Ported | `SettingsStoreTests.NonStringProviderValueDegradesToAnthropic` |
+| `testCodexProviderRoundTrips` | Ported | `SettingsStoreTests.CodexProviderRoundTrips` (the persisted value; Codex usage arrives in M3) |
 | `testCodexCredentialsExcludedFromPlistEncoding` | Scheduled M3 | Codex credentials only in the DPAPI secret file |
 | `testCodexCredentialsIncludedWithSecretsUserInfo` | Excluded | No plaintext fallback encoding |
-| `testClaudeUsageLegacyJSONDecodesWithNilPlanAndCredits` | Scheduled M2 | Usage cache compatibility across Windows versions |
-| `testClaudeUsagePlanAndCreditsRoundTrip` | Scheduled M2 | Usage cache round trip |
+| `testClaudeUsageLegacyJSONDecodesWithNilPlanAndCredits` | Ported | `UsageCacheStoreTests.OlderCacheWithoutNewerKeysLoadsWithThemMissing` |
+| `testClaudeUsagePlanAndCreditsRoundTrip` | Ported | `UsageCacheStoreTests.PlanAndCreditsRoundTrip` |
 | `testLegacyUsageSnapshotDecodesWithNilProvider` | Scheduled M3 | History compatibility across Windows versions |
 | `testCodexSnapshotSuppressesTokenCounts` | Ported | `ProviderTests.CodexSnapshotSuppressesTokenCounts` |
 | `testAnthropicSnapshotKeepsTokenCounts` | Ported | `ProviderTests.AnthropicSnapshotKeepsTokenCounts` |
@@ -315,7 +367,7 @@ Ported cases keep their names in `SessionKeyValidatorTests`.
 | `testStatuslineShowProgressBar` | Scheduled M5 | As above |
 | `testStatuslineShowResetTime` | Scheduled M5 | As above |
 | `testStatuslineShowModel` | Scheduled M5 | As above, including the default of shown |
-| `testHasCompletedSetup` | Scheduled M2 | Setup wizard completion state |
+| `testHasCompletedSetup` | Ported, changed | `SettingsStoreTests.HasCompletedSetup`: an isolated settings file, without upstream's legacy `~/.claude-session-key` check; set by every successful setup route |
 | `testFirstLaunchDate` | Excluded | Used only by the GitHub-star and feedback prompts (difference 7) |
 | `testLastGitHubStarPromptDate` | Excluded | Difference 7 |
 | `testHasStarredGitHub` | Excluded | Difference 7 |

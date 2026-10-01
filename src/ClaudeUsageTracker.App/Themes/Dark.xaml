@@ -1,0 +1,45 @@
+<!--
+  Dark design tokens. Colours follow upstream's popover (docs/parity.md): measured #131414 background,
+  label colours as white at 85 % / 55 %, hairlines as the primary colour at 8-15 %, adaptiveGreen and the
+  Apple HIG system palette as a baseline. Apple's colours are values, not redistributed assets.
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="Popover.Background" Color="#131414" />
+  <SolidColorBrush x:Key="Popover.Border" Color="#33FFFFFF" />
+  <SolidColorBrush x:Key="Window.Background" Color="#1C1C1E" />
+  <SolidColorBrush x:Key="Sidebar.Background" Color="#141415" />
+  <SolidColorBrush x:Key="Foreground.Primary" Color="#D9FFFFFF" />
+  <SolidColorBrush x:Key="Foreground.Secondary" Color="#8CFFFFFF" />
+  <SolidColorBrush x:Key="Line.Divider" Color="#26FFFFFF" />
+  <SolidColorBrush x:Key="Card.Border" Color="#1AFFFFFF" />
+  <SolidColorBrush x:Key="Card.Background" Color="#0AFFFFFF" />
+  <SolidColorBrush x:Key="Track" Color="#14FFFFFF" />
+  <SolidColorBrush x:Key="Hover" Color="#14FFFFFF" />
+  <SolidColorBrush x:Key="Pressed" Color="#24FFFFFF" />
+  <SolidColorBrush x:Key="Tag.Background" Color="#14FFFFFF" />
+  <SolidColorBrush x:Key="Input.Background" Color="#0FFFFFFF" />
+
+  <SolidColorBrush x:Key="Accent" Color="#FF6B35" />
+  <SolidColorBrush x:Key="Accent.Foreground" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="Accent.Soft" Color="#1FFF6B35" />
+
+  <SolidColorBrush x:Key="Status.Safe" Color="#3CC75F" />
+  <SolidColorBrush x:Key="Status.Moderate" Color="#FF9230" />
+  <SolidColorBrush x:Key="Status.Critical" Color="#FF4245" />
+  <SolidColorBrush x:Key="Status.Caution" Color="#FFD600" />
+  <SolidColorBrush x:Key="Status.Info" Color="#0091FF" />
+  <SolidColorBrush x:Key="Status.Unknown" Color="#8E8E93" />
+
+  <SolidColorBrush x:Key="Pace.Comfortable" Color="#30D158" />
+  <SolidColorBrush x:Key="Pace.OnTrack" Color="#00D2E0" />
+  <SolidColorBrush x:Key="Pace.Warming" Color="#FFD600" />
+  <SolidColorBrush x:Key="Pace.Pressing" Color="#FF9230" />
+  <SolidColorBrush x:Key="Pace.Critical" Color="#FF4245" />
+  <SolidColorBrush x:Key="Pace.Runaway" Color="#DB34F2" />
+  <SolidColorBrush x:Key="Marker.Neutral" Color="#D9FFFFFF" />
+
+  <SolidColorBrush x:Key="Banner.Warning" Color="#1FFF9230" />
+  <SolidColorBrush x:Key="Banner.Caution" Color="#1FFFD600" />
+  <SolidColorBrush x:Key="Banner.Info" Color="#1F0091FF" />
+</ResourceDictionary>

@@ -1,0 +1,44 @@
+<!--
+  Light design tokens. Upstream has no light screenshot, so the backgrounds are a chosen neutral
+  (docs/parity.md); the other colours are upstream's light variants.
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="Popover.Background" Color="#F7F7F7" />
+  <SolidColorBrush x:Key="Popover.Border" Color="#26000000" />
+  <SolidColorBrush x:Key="Window.Background" Color="#F3F3F3" />
+  <SolidColorBrush x:Key="Sidebar.Background" Color="#EAEAEA" />
+  <SolidColorBrush x:Key="Foreground.Primary" Color="#D9000000" />
+  <SolidColorBrush x:Key="Foreground.Secondary" Color="#80000000" />
+  <SolidColorBrush x:Key="Line.Divider" Color="#1A000000" />
+  <SolidColorBrush x:Key="Card.Border" Color="#1A000000" />
+  <SolidColorBrush x:Key="Card.Background" Color="#0A000000" />
+  <SolidColorBrush x:Key="Track" Color="#14000000" />
+  <SolidColorBrush x:Key="Hover" Color="#14000000" />
+  <SolidColorBrush x:Key="Pressed" Color="#24000000" />
+  <SolidColorBrush x:Key="Tag.Background" Color="#14000000" />
+  <SolidColorBrush x:Key="Input.Background" Color="#0F000000" />
+
+  <SolidColorBrush x:Key="Accent" Color="#FF6B35" />
+  <SolidColorBrush x:Key="Accent.Foreground" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="Accent.Soft" Color="#1FFF6B35" />
+
+  <SolidColorBrush x:Key="Status.Safe" Color="#1B6B34" />
+  <SolidColorBrush x:Key="Status.Moderate" Color="#C76A00" />
+  <SolidColorBrush x:Key="Status.Critical" Color="#E0262B" />
+  <SolidColorBrush x:Key="Status.Caution" Color="#9A7B00" />
+  <SolidColorBrush x:Key="Status.Info" Color="#0070D6" />
+  <SolidColorBrush x:Key="Status.Unknown" Color="#8E8E93" />
+
+  <SolidColorBrush x:Key="Pace.Comfortable" Color="#34C759" />
+  <SolidColorBrush x:Key="Pace.OnTrack" Color="#00C3D0" />
+  <SolidColorBrush x:Key="Pace.Warming" Color="#FFCC00" />
+  <SolidColorBrush x:Key="Pace.Pressing" Color="#FF8D28" />
+  <SolidColorBrush x:Key="Pace.Critical" Color="#FF383C" />
+  <SolidColorBrush x:Key="Pace.Runaway" Color="#CB30E0" />
+  <SolidColorBrush x:Key="Marker.Neutral" Color="#D9000000" />
+
+  <SolidColorBrush x:Key="Banner.Warning" Color="#1FFF8D28" />
+  <SolidColorBrush x:Key="Banner.Caution" Color="#26FFCC00" />
+  <SolidColorBrush x:Key="Banner.Info" Color="#1F0088FF" />
+</ResourceDictionary>
