@@ -37,6 +37,9 @@ public enum BannerAction
     Refresh,
     OpenSettings,
     OpenSetup,
+
+    /// <summary>Open the Claude CLI page, where an installed integration is repaired.</summary>
+    OpenIntegration,
 }
 
 /// <param name="Glyph">A Segoe Fluent Icons glyph standing in for upstream's SF Symbol.</param>

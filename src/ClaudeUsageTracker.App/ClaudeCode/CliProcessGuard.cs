@@ -29,16 +29,22 @@ public sealed record CliProcess(int Pid, string? ConfigDirectory, bool Unknown);
 /// image from the install manifest and that parent was created before it, which rules out a reused parent
 /// PID. Every other <c>claude.exe</c> counts as using the default folder, and also any folder that no
 /// launcher owns, because it may have been started with <c>CLAUDE_CONFIG_DIR</c> set. Nothing here reads a
-/// process's environment. Until launchers exist (Milestone 5) the manifest is empty, so any running
-/// Claude Code blocks every takeover.
+/// process's environment. The launcher images come from the install manifest, retained ones included; with
+/// no launcher installed, any running Claude Code blocks every takeover.
 /// </summary>
-public sealed class CliProcessGuard(Func<IReadOnlyList<ProcessEntry>> capture, Func<IReadOnlyDictionary<string, string>> launcherImages)
+/// <param name="sessionObserved">
+/// Whether the activity HUD has a live session that uses, or may use, a folder. It can only add to what the
+/// processes show: a folder the processes leave idle counts as in use while a session is observed there. An
+/// empty HUD proves nothing, so it never makes a folder idle.
+/// </param>
+public sealed class CliProcessGuard(
+    Func<IReadOnlyList<ProcessEntry>> capture, Func<IReadOnlyDictionary<string, string>> launcherImages, Func<string, bool>? sessionObserved = null)
 {
     public const string ImageName = "claude.exe";
 
     /// <summary>The guard over real processes and an install manifest of launcher image path to config directory.</summary>
-    public static CliProcessGuard ForThisPc(Func<IReadOnlyDictionary<string, string>> launcherImages) =>
-        new(() => ProcessTable.Capture(ImageName), launcherImages);
+    public static CliProcessGuard ForThisPc(Func<IReadOnlyDictionary<string, string>> launcherImages, Func<string, bool>? sessionObserved = null) =>
+        new(() => ProcessTable.Capture(ImageName), launcherImages, sessionObserved);
 
     /// <summary>Takes a fresh process snapshot and judges one config directory.</summary>
     public StoreActivity ActivityFor(CliConfigDirectory directory)
@@ -55,7 +61,8 @@ public sealed class CliProcessGuard(Func<IReadOnlyList<ProcessEntry>> capture, F
             return StoreActivity.Unknown;
         }
 
-        return ActivityFor(Classify(table, launchers), directory, launchers);
+        var activity = ActivityFor(Classify(table, launchers), directory, launchers);
+        return activity == StoreActivity.Idle && sessionObserved?.Invoke(directory.Path) == true ? StoreActivity.InUse : activity;
     }
 
     /// <summary>Attributes each current-user <c>claude.exe</c> in a snapshot.</summary>

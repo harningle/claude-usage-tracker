@@ -18,12 +18,14 @@ Nothing here claims live authentication, Mac runtime parity or full feature pari
 
 The session auto-start passed live on 2026-10-03. An auto-switch at a real 100 % and remote desktop remain.
 
+Milestone 5's launchers, status line, hooks and HUD are verified by automated tests (including real NativeAOT processes under three shells), by manual checks with synthetic fixture data, and by runs of the real Claude Code against a local fake Messages API, which use no account ([milestone-5.md](milestone-5.md)). The user's live checks on 2026-10-03 also passed: the status line in the real Claude Code folders, the HUD with real sessions (over full-screen windows and virtual desktops too), and a launcher under PowerShell, Command Prompt and Git Bash.
+
 ## Environment and references
 
 Recorded on 2026-09-30.
 
 - Upstream licence: MIT, "Copyright (c) 2025 Claude Usage Tracker Contributors", preserved in [LICENSE](../LICENSE).
-- Claude Code 2.1.285, native install at `%USERPROFILE%\.local\bin\claude.exe`, from `claude --version`. No credential or configuration files were read. By Milestone 1 (2026-09-30) it had auto-updated to 2.1.286, the version all Milestone 1 measurements use.
+- Claude Code 2.1.285, native install at `%USERPROFILE%\.local\bin\claude.exe`, from `claude --version`. No credential or configuration files were read. By Milestone 1 (2026-09-30) it had auto-updated to 2.1.286, the version all Milestone 1 measurements use, and by Milestone 5 (2026-10-03) to 2.1.288, which its measurements use.
 - .NET SDK 10.0.401, pinned in [global.json](../global.json) with patch roll-forward. Tests use xUnit v3 4.0.1 on Microsoft.Testing.Platform.
 - Public references: [Claude Code statusline](https://code.claude.com/docs/en/statusline), [Claude Code hooks](https://code.claude.com/docs/en/hooks), [.NET artifacts output layout](https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output), [Microsoft.Testing.Platform configuration](https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-config). Further references are in plan.md.
 
@@ -40,8 +42,8 @@ Recorded on 2026-09-30.
 | History snapshots at resets | 0 and 3 | Snapshot creation, upstream sampling and retention, per-profile files, charts, JSON/CSV export | Automated; manual with fixture data | Differences 34 and 35 |
 | Codex auth.json, `wham/usage` decoding, window normalisation, mapping, base URL | 0 and 3 | Pure logic ported; Milestone 3 adds reading the Codex CLI's `auth.json`, usage polling, pasted credentials and their renewal, and the wizard route | Automated; manual with fixture data; live pending | Differences 1, 2, 3, 10 and 32 |
 | Claude Code credential merge after refresh | 0 and 3 | Merge ported; Milestone 3 adds the guarded idle takeover and write-back | Automated; live pending (the refresh request is unverified) | Differences 3 and 13 |
-| Activity HUD events, tool mapping, session reducer | 0 | Core logic ported; no transport or window | Automated | Difference 5; transport gate in Milestone 1, stricter ordering in Milestone 5 |
-| Launcher slugs | 0 | Naming ported | Automated | Difference 9; executable aliases in Milestone 5 |
+| Activity HUD events, tool mapping, session reducer | 0 and 5 | Core logic ported; Milestone 5 adds the plan's ordering rules and the session's folder | Automated | Differences 5 and 50 |
+| Launcher slugs | 0 and 5 | Naming ported; Milestone 5 installs the launchers | Automated | Differences 9 and 46 |
 | Supported languages | 0 | List ported | Automated | Explicit `zh-cn` to `zh-Hans` mapping; resources in Milestone 6; flag emoji rendering on Windows unverified |
 | UI text | 2 | Upstream English `Localizable.strings` embedded unchanged and looked up by key; port-only text in `Windows.strings`; other languages in Milestone 6 | Automated (every key used exists) | Differences 21 and 22 |
 | Tray, popover, settings window, setup wizard | 1 spike, then 2 and 3 | Milestone 2: single instance, tray icons and menu, popover, sidebar settings, the Claude Code wizard route; checked live by the user on 2026-10-01, including hardware rendering, dark mode, mixed DPI, keyboard selection, Explorer restart, full screen and virtual desktops. Milestone 3: profile switcher, API cards, multi-profile icons, every credential page, History, Manage Profiles, Debug Tools and the claude.ai, Console and Codex wizard routes; checked live by the user on 2026-10-01 except the Console | Automated (including a real-window placement test); manual with fixture data; live account (manual) | Differences 14-20, 23 and 28-37; plan section 2 |
@@ -50,7 +52,7 @@ Recorded on 2026-09-30.
 | Profiles, secure storage, credential ownership | 2 and 3 | Profile lifecycle, multi-profile display and simultaneous polling; one versioned DPAPI bundle per profile; CLI-linked, app-owned and unresolved ownership under one credential lock; parent-snapshot process guard; recoverable removal | Automated; manual with fixture data; live pending | DPAPI files replace Keychain; differences 13, 17, 28, 29 and 36 |
 | History persistence, charts, CSV/JSON export, network log | 3 | Implemented | Automated; manual with fixture data | Differences 33-35 |
 | Notifications, automation, safe CLI switching | 1 spike, then 4 | Spike: unpackaged self-contained registration and posting (one extracted runtime DLL), cold activation and running-instance clicks verified. Milestone 4: threshold and reset notifications for every polled profile with Windows sounds and click routing, stale-registration cleanup, launch at login, global shortcuts, checks on resume, network and session changes, opt-in session auto-start, profile auto-switch, and the guarded "Use in Claude Code" switch of the shared login | Automated; manual with fixture data (notifications in Windows' history, shortcuts, launch-at-login scratch key, a switch of a fixture folder); live: notification clicks, launch at login across a sign-in, shortcuts across an Explorer restart, network and sleep, a switch of Claude Code's account and back, one session auto-start; a real auto-switch pending | Differences 29 and 38-45; after a move, notifications posted from the old path still do nothing when clicked, but their registration is now removed at the next start |
-| Launchers, statusline, hooks and HUD | 1 gate, then 5 | NativeAOT helper timing passed; hook transport decided: HTTP for all eight events as upstream; the SessionStart entry is inert on CLI 2.1.286, as it is for upstream | Automated harness (real CLI, fake Messages API); live account (40 Haiku tool calls, stopped listener) | Secret-free statusline; transport by measurement |
+| Launchers, statusline, hooks and HUD | 1 gate, then 5 | Milestone 1: helper timing passed and HTTP chosen for all eight events, as upstream. Milestone 5: per-profile launchers, the NativeAOT status line helper and its non-secret cache, the installed helper with its manifest, rename-aside upgrades and repair, the eight HTTP hooks in every known folder while the tracker runs, the floating HUD, and HUD sessions for the switching guard. The SessionStart entry is still inert on CLI 2.1.288, as it is for upstream | Automated (including real launcher and helper processes under PowerShell, Command Prompt and Git Bash); manual with fixture data; real CLI 2.1.288 against a fake Messages API (hook gate, Notification, interactive sessions and reload, status line shell, cancellation and timing); Milestone 1 live account (40 Haiku tool calls, stopped listener); live (the user, 2026-10-03): status line Apply and Reset, the HUD and its hooks, a launcher under three shells; the switch beside a launcher session not yet exercised | Differences 46-53 |
 | Localisation, accessibility, packaging | 6 and 7 | Not started | None | Plan section 3 |
 
 ## Deliberate differences so far
@@ -63,12 +65,12 @@ Recorded on 2026-09-30.
 6. **Only helpers upstream production uses are ported.** Not ported: the relaxed validator configuration, `sanitizeForStorage`, `validateResult`, the session-key `String` extensions, `buildResult` and the dictionary query-parameter builder. Upstream's own code never calls them.
 7. **No promotional prompts.** The GitHub-star prompt, support reminder and feedback prompt are omitted, as plan.md requires.
 8. **Bare origin URLs.** A base URL whose only path is `/` builds without the trailing slash, because `System.Uri` cannot distinguish the two.
-9. **Launcher ownership from a manifest.** Slug collisions are checked against an owner map, which the Milestone 5 install manifest will provide, instead of a marker line in a shell script.
+9. **Launcher ownership from a manifest.** Slug collisions are checked against an owner map, which the install manifest provides (Milestone 5), instead of a marker line in a shell script.
 10. **Unreadable Codex credentials are never replaced.** Codex `auth.json` serialisation creates a new document only when there is no existing content. Existing content that is malformed or not a JSON object throws, rather than being silently replaced by a new document as upstream does.
 11. **CLI profiles poll the read-only usage endpoint.** Upstream's active CLI profile posts a one-token Haiku request to `/v1/messages` on every refresh and reads rate-limit headers (up to 2,880 generating requests a day at 30 seconds); its background profiles use `GET /api/oauth/usage`, which upstream's comment calls disabled. The port uses `/api/oauth/usage` for all CLI profiles and never falls back to `/v1/messages`. Verified with Claude Code 2.1.286 for a Pro account (7 of 7 requests, 2026-09-30) and a Team account (5 of 5, 2026-10-01). Both returned 200 with the claude.ai usage shape, and no throttling was seen at a 30-second cadence (spike probe; implementation in Milestone 2). Windows and fields vary by account and over time, so all are optional. Max and Enterprise accounts are unverified.
 12. **Account checks on every poll.** Upstream used whatever account the CLI was logged in as for the active profile, with no identity check, so it could show one account's usage under another profile. The port compares `accountUuid`, then email, or else an unchanged refresh token, before each request. A different account is reported ("Claude Code is now signed in to a different account.") and is neither polled nor shown. Cached usage records its account, and another account's cache is never shown.
 13. **Guarded takeover of Claude Code's login.** Upstream either took over an expired token, rotating it without process or file checks, or silently skipped the refresh (upstream issue #268). In Milestone 2 the port never refreshed and showed "Waiting for Claude Code to refresh its login". From Milestone 3 it renews an expired login of the linked account itself, but only when:
-    - no Claude Code process could be using any folder that holds the same token (until Milestone 5's launchers, any running `claude.exe` blocks it, and so does a process whose details cannot be read);
+    - no Claude Code process could be using any folder that holds the same token (a `claude.exe` started by one of the tracker's launchers counts for that launcher's folder only, from Milestone 5; any other running `claude.exe` blocks it, and so does a process whose details cannot be read);
     - every known Claude Code folder is readable and the file is unchanged when re-read under the credential lock;
     - the login is not marked as used elsewhere (a new setting on the CLI Account page) and the profile's encrypted copy is usable.
 
@@ -153,7 +155,7 @@ Recorded on 2026-09-30.
     - The settings card says that it uses usage.
 40. **Profile auto-switch.** Upstream's trigger (the active profile at 100 %, once until it drops), target choice (the next profile with credentials whose effective session is below 100 %, wrapping round) and notification. Upstream marked the profile before looking for a target, so when no other profile had room it never switched until its own session dropped. Here it is marked only when it switches, so a later check switches once another profile's window has reset, and the mark is cleared whenever the profile is seen below its limit, not only while it is the active one. Upstream's activation also wrote the target's login into the CLI. Here Claude Code is switched only when it was on the profile that reached the limit, through the switch of difference 41, which waits while Claude Code runs; that wait is announced in a notification. The waiting switch is dropped if auto-switch is turned off or Claude Code leaves that account before it closes.
 41. **Switching Claude Code's account.** A separate action, "Use in Claude Code" on the CLI Account page, writes the profile's login into the folder the plain `claude` command uses (plan.md section 2; the user's decision of 2026-10-02):
-    - **When it runs:** only while no Claude Code process could be using the folder; until Milestone 5's launchers, any running `claude.exe` makes it wait. It waits, cancellably and in memory, and is tried every five seconds.
+    - **When it runs:** only while no Claude Code process could be using the folder; any running `claude.exe` makes it wait, except one started by a launcher for another folder (Milestone 5). It waits, cancellably and in memory, and is tried every five seconds.
     - **Refusals:** a login marked as used elsewhere, an account another known folder holds, an unreadable folder or copy, a pending hand-back, a rejected login, an expired login that could not be renewed just now. The files are read again after any renewal; if Claude Code wrote or started meanwhile, nothing is written and the switch is tried again.
     - **Untracked logins:** a login no profile follows is replaced only after the user confirms, and never by an automatic switch.
     - **Order of work:**
@@ -175,6 +177,42 @@ Recorded on 2026-09-30.
 43. **Launch at login.** A per-user `Run` entry for the copy that switched it on, instead of macOS `SMAppService`. A portable copy has no fixed path, so another copy's entry is reported and replaced only when switched on here. Task Manager's own on/off choice is reported and never changed. Fixture mode writes a scratch key instead.
 44. **Wake, network and sessions.** Upstream refreshed after waking (with a 10-second debounce and a 3-second delay) and when the network became available. Here resume, the display coming back on (how Modern Standby shows a resume), a network becoming available and a console or remote desktop connect or unlock each trigger an early check of every polled profile, debounced by 10 seconds per profile. That check is not a manual refresh, so it never resends a rejected login, and a server-requested wait still holds. A connect also redraws the tray icons for the new display, and a disconnect or lock closes an attached popover. Upstream's retry of its status item after a headless start corresponds to the tray's `TaskbarCreated` handling (Milestone 2).
 45. **The CLI Account page describes only the profile's own login.** The access-token type, subscription and scopes are shown only while the linked folder holds the profile's account; before, they were read from whatever login the folder held, which after a switch is another profile's.
+46. **Launchers are executables.** Upstream wrote `~/.local/bin/claude-<slug>`, a shell script with a marker line that exported `CLAUDE_CONFIG_DIR=~/.claude-<slug>` and ran `exec claude`. The port installs a copy of its NativeAOT helper as `%USERPROFILE%\.local\bin\claude-<slug>.exe`, recorded in the install manifest (difference 9). Differences:
+    - It works the same in PowerShell, Command Prompt and Git Bash, with no shell in between.
+    - It derives the folder from its own name and place.
+    - It starts the native `claude.exe` beside it or on PATH, never itself, another launcher or the helper.
+    - Windows has no `exec`, so it waits for Claude Code and returns its exit code. It cancels Ctrl+C and Ctrl+Break in itself, so the shell prompt cannot return while Claude Code runs.
+    - PATH is never edited; the card warns when `.local\bin` is not on it.
+    - As upstream, removal keeps the login folder.
+47. **The status line reads no login and fetches nothing.** Upstream installed `statusline-command.sh` and `fetch-claude-usage.swift` in `~/.claude`; the latter could carry the session key and fetched claude.ai usage on every update. The port's helper renders upstream's script output from Claude Code's stdin and a non-secret file per Claude Code folder. The tracker writes that file only from usage fetched with that folder's own verified login. The usage source is chosen in this order:
+    - the tracker's cache while it is at most twice the polling interval old
+    - otherwise Claude Code's `rate_limits` on stdin
+    - otherwise the stale cache labelled "(stale)", never after its reset
+    - otherwise "~"
+
+    Cost comes from a fresh cache only. A per-element pace colour is honoured, as upstream's own preview showed it, where its script ignored it. The line goes to every known Claude Code folder, not only `~/.claude`. Another tool's `statusLine` is replaced only with your consent, and Reset puts it back. The command has forward slashes, quoted for Git Bash or PowerShell only when its path needs it.
+48. **Hooks while the tracker runs, in every known folder.** Upstream wrote its eight HTTP hooks to `~/.claude/settings.json` when the HUD was switched on and left them there when it quit. The port follows plan section 2 for HTTP:
+    - The listener starts first, then the hooks go to every known Claude Code folder. A clean exit removes them before the listener stops.
+    - The port is persistent and random, outside the dynamic and excluded ranges, and the listener binds it exclusively.
+    - The path secret is 256 bits and kept encrypted.
+    - Entries count as the tracker's by the ports recorded in the install manifest, so another tool's loopback hooks are never touched.
+    - Edits keep every other member and refuse duplicate names.
+49. **A floating HUD instead of the notch.** A PC has no notch, so the HUD is a dark pill at the top centre of the primary display. A click switches between upstream's compact and expanded views, and it never takes the focus. Upstream's texts, status symbols (as Segoe Fluent Icons), colours, idle hiding after 5 seconds and session ordering are kept. Fixture mode labels it.
+50. **Stricter event ordering.** On upstream's reducer, the plan's rules:
+    - Tools are correlated by `tool_use_id`, so a late PreToolUse never reopens a completed tool and parallel tools finish independently.
+    - A Stop for an earlier prompt (`prompt_id`) does not idle a later one.
+    - An ended session is revived only by a new SessionStart or prompt.
+    - Any event with a `cwd` names the session.
+    - The session's Claude Code folder is taken from `transcript_path`.
+51. **HUD sessions only add to the switching guard.** Process attribution stays authoritative. A launcher's `claude.exe` belongs to the launcher's folder, retained images included, and a HUD session can only turn an idle folder into one in use. An empty HUD proves nothing.
+52. **An installed footprint with upgrades and repair.** Upstream rewrote its scripts in place. The port installs one helper at a fixed per-user path and records it and each launcher in `install.json`:
+    - Upgrades stage, verify and rename aside, so running launchers keep their image. An interrupted install is settled at the next start.
+    - A newer helper is never downgraded, and a file the tracker did not install is never overwritten.
+    - Missing or replaced pieces show a banner in the popover with a Repair action.
+53. **Applying the status line.** As upstream, the components, labels and colours are edited with a live preview and installed with Apply, which needs at least one component. Differences:
+    - Upstream also required a claude.ai session key, which the helper does not use.
+    - Upstream saved each later choice only at the next Apply. Here, once applied, a choice on the page reaches the status line at once.
+    - A Claude Code folder that becomes known later (a new launcher, a linked folder) gets the line too.
 
 ## Upstream test inventory
 
@@ -182,29 +220,30 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 
 - **Ported**: translated; the Windows test is named. Method names drop the `test` prefix and use British spelling.
 - **Ported, changed**: translated with a deliberate difference listed above.
+- **Manual**: the Windows equivalent is an acceptance check made by hand, which has passed; the milestone log records it.
 - **Scheduled Mn**: needs Windows functionality first; its Windows acceptance test lands with milestone n.
-- **Conditional**: applies only if the Milestone 1 gate selects the HTTP hook transport. If named pipes win, these are marked inapplicable and replaced by pipe ACL, framing, deadline, offline, burst and ordering tests. The Milestone 1 gate selected HTTP ([milestone-1.md](milestone-1.md) section 6), so these are due in Milestone 5.
+- **Conditional**: applies only if the Milestone 1 gate selects the HTTP hook transport. If named pipes win, these are marked inapplicable and replaced by pipe ACL, framing, deadline, offline, burst and ordering tests. The Milestone 1 gate selected HTTP ([milestone-1.md](milestone-1.md) section 6), and Milestone 5 ported all of them.
 - **Excluded**: not applicable, with the reason.
 
-| Upstream file | Cases | Ported | Scheduled | Conditional | Excluded |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| ClaudeUsageTests.swift | 18 | 13 | 0 | 0 | 5 |
-| CodexProviderTests.swift | 28 | 28 | 0 | 0 | 0 |
-| DateExtensionsTests.swift | 10 | 10 | 0 | 0 | 0 |
-| LanguageManagerTests.swift | 3 | 3 | 0 | 0 | 0 |
-| NSWindowFullScreenSpacesTests.swift | 3 | 0 | 3 | 0 | 0 |
-| NotchHUDCoreTests.swift | 23 | 14 | 0 | 9 | 0 |
-| NotchHookInstallerTests.swift | 6 | 0 | 5 | 0 | 1 |
-| NotchHookServerTests.swift | 6 | 0 | 0 | 6 | 0 |
-| ProfileKeychainMigrationTests.swift | 8 | 6 | 0 | 0 | 2 |
-| ProfileProviderTests.swift | 13 | 11 | 0 | 0 | 2 |
-| SessionKeyValidatorTests.swift | 33 | 25 | 0 | 0 | 8 |
-| SharedDataStoreTests.swift | 16 | 1 | 8 | 0 | 7 |
-| SupportReminderServiceTests.swift | 4 | 0 | 0 | 0 | 4 |
-| TerminalLauncherServiceTests.swift | 8 | 3 | 4 | 0 | 1 |
-| URLBuilderTests.swift | 20 | 17 | 0 | 0 | 3 |
-| UsageStatusCalculatorTests.swift | 12 | 12 | 0 | 0 | 0 |
-| **Total** | **211** | **143** | **20** | **15** | **33** |
+| Upstream file | Cases | Ported | Manual | Scheduled | Conditional | Excluded |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ClaudeUsageTests.swift | 18 | 13 | 0 | 0 | 0 | 5 |
+| CodexProviderTests.swift | 28 | 28 | 0 | 0 | 0 | 0 |
+| DateExtensionsTests.swift | 10 | 10 | 0 | 0 | 0 | 0 |
+| LanguageManagerTests.swift | 3 | 3 | 0 | 0 | 0 | 0 |
+| NSWindowFullScreenSpacesTests.swift | 3 | 0 | 3 | 0 | 0 | 0 |
+| NotchHUDCoreTests.swift | 23 | 23 | 0 | 0 | 0 | 0 |
+| NotchHookInstallerTests.swift | 6 | 5 | 0 | 0 | 0 | 1 |
+| NotchHookServerTests.swift | 6 | 6 | 0 | 0 | 0 | 0 |
+| ProfileKeychainMigrationTests.swift | 8 | 6 | 0 | 0 | 0 | 2 |
+| ProfileProviderTests.swift | 13 | 11 | 0 | 0 | 0 | 2 |
+| SessionKeyValidatorTests.swift | 33 | 25 | 0 | 0 | 0 | 8 |
+| SharedDataStoreTests.swift | 16 | 7 | 0 | 2 | 0 | 7 |
+| SupportReminderServiceTests.swift | 4 | 0 | 0 | 0 | 0 | 4 |
+| TerminalLauncherServiceTests.swift | 8 | 7 | 0 | 0 | 0 | 1 |
+| URLBuilderTests.swift | 20 | 17 | 0 | 0 | 0 | 3 |
+| UsageStatusCalculatorTests.swift | 12 | 12 | 0 | 0 | 0 | 0 |
+| **Total** | **211** | **173** | **3** | **2** | **0** | **33** |
 
 ### ClaudeUsageTests.swift
 
@@ -293,23 +332,23 @@ Ported to `ResetTimeExtensionsTests`, using fixed time zones (difference 4).
 
 | Upstream case | Disposition | Windows milestone |
 | --- | --- | --- |
-| `testEnableDisplayJoinsAllSpacesAndFullScreenSpaces` | Scheduled M5 | Windows equivalent: the popover and HUD stay available over full-screen apps and across virtual desktops (manual acceptance). The popover part passed on 2026-10-01 ([milestone-2.md](milestone-2.md#live-and-manual-checks)); the HUD part follows in M5 |
-| `testEnableDisplayClearsMoveToActiveSpace` | Scheduled M5 | As above |
-| `testEnableDisplayPreservesUnrelatedCollectionBehavior` | Scheduled M5 | As above; window style changes preserve unrelated flags |
+| `testEnableDisplayJoinsAllSpacesAndFullScreenSpaces` | Manual (M2 and M5) | Windows equivalent: the popover and HUD stay available over full-screen apps and across virtual desktops. The popover passed on 2026-10-01 ([milestone-2.md](milestone-2.md#live-and-manual-checks)), and the HUD on 2026-10-03 ([milestone-5.md](milestone-5.md#live-checks-so-far)) |
+| `testEnableDisplayClearsMoveToActiveSpace` | Manual (M2 and M5) | As above |
+| `testEnableDisplayPreservesUnrelatedCollectionBehavior` | Manual (M2 and M5) | As above; window style changes preserve unrelated flags |
 
 ### NotchHUDCoreTests.swift
 
 | Upstream case | Disposition | Windows test or condition |
 | --- | --- | --- |
-| `HookHTTPParserTests.testCompleteRequestSinglePacket` | Conditional | HTTP transport only (Milestone 1 gate, then M5) |
-| `HookHTTPParserTests.testMultiPacketBody` | Conditional | As above |
-| `HookHTTPParserTests.testNonPOSTRejected` | Conditional | As above |
-| `HookHTTPParserTests.testMissingContentLengthRejected` | Conditional | As above |
-| `HookHTTPParserTests.testOversizedBodyReportedWithRemainingCount` | Conditional | As above |
-| `HookHTTPParserTests.testUnauthorizedPathRejectedBeforeBodyArrives` | Conditional | As above |
-| `HookHTTPParserTests.testUnauthorizedPathBeatsOversizeStatus` | Conditional | As above |
-| `HookHTTPParserTests.testAuthorizedPathStillParses` | Conditional | As above |
-| `HookHTTPParserTests.testOversizedHeaderRejected` | Conditional | As above |
+| `HookHTTPParserTests.testCompleteRequestSinglePacket` | Ported (M5) | `HookHttpParserTests.CompleteRequestSinglePacket` |
+| `HookHTTPParserTests.testMultiPacketBody` | Ported (M5) | `HookHttpParserTests.MultiPacketBody` |
+| `HookHTTPParserTests.testNonPOSTRejected` | Ported (M5) | `HookHttpParserTests.NonPostRejected` |
+| `HookHTTPParserTests.testMissingContentLengthRejected` | Ported (M5) | `HookHttpParserTests.MissingContentLengthRejected` |
+| `HookHTTPParserTests.testOversizedBodyReportedWithRemainingCount` | Ported (M5) | `HookHttpParserTests.OversizedBodyReportedWithRemainingCount` |
+| `HookHTTPParserTests.testUnauthorizedPathRejectedBeforeBodyArrives` | Ported (M5) | `HookHttpParserTests.UnauthorisedPathRejectedBeforeBodyArrives` |
+| `HookHTTPParserTests.testUnauthorizedPathBeatsOversizeStatus` | Ported (M5) | `HookHttpParserTests.UnauthorisedPathBeatsOversizeStatus` |
+| `HookHTTPParserTests.testAuthorizedPathStillParses` | Ported (M5) | `HookHttpParserTests.AuthorisedPathStillParses` |
+| `HookHTTPParserTests.testOversizedHeaderRejected` | Ported (M5) | `HookHttpParserTests.OversizedHeaderRejected` |
 | `ToolActivityMapperTests.testBashMapsToRunningCommandWithTruncatedCommand` | Ported | `ToolActivityMapperTests.BashMapsToRunningCommandWithTruncatedCommand` |
 | `ToolActivityMapperTests.testEditorToolsMapToWritingCode` | Ported | `ToolActivityMapperTests.EditorToolsMapToWritingCode` (difference 5) |
 | `ToolActivityMapperTests.testReadToolsMapToReadingFiles` | Ported | `ToolActivityMapperTests.ReadToolsMapToReadingFiles` |
@@ -325,29 +364,29 @@ Ported to `ResetTimeExtensionsTests`, using fixed time zones (difference 4).
 | `NotchSessionStoreTests.testStaleSweepRemovesOldSessionsWithAttentionGrace` | Ported | `HudSessionStoreTests.StaleSweepRemovesOldSessionsWithAttentionGrace` |
 | `NotchSessionStoreTests.testPromptTruncatedTo80` | Ported | `HudSessionStoreTests.PromptTruncatedTo80`. The pipe transport in plan.md does not forward prompts, so this path may carry no data in production. |
 
-The reducer is upstream's. Milestone 5 adds the plan's stricter rules (tool-use correlation, no late `PreToolUse` reopening a completed tool, no revival of an ended session without corroborating activity) with their own tests.
+The reducer is upstream's. Milestone 5 added the plan's stricter rules (difference 50) with their own tests in `HudOrderingTests`; upstream's cases above still pass unchanged.
 
 ### NotchHookInstallerTests.swift
 
 | Upstream case | Disposition | Windows milestone or reason |
 | --- | --- | --- |
-| `testFreshInstallCreatesEightTokenedHooks` | Scheduled M5 | Eight hooks for the selected transport; the token-in-URL form applies only to HTTP |
-| `testInstallPreservesForeignSettingsAndHooks` | Scheduled M5 | Transport-independent |
+| `testFreshInstallCreatesEightTokenedHooks` | Ported (M5) | `HookSettingsTests.FreshInstallCreatesEightTokenedHooks` |
+| `testInstallPreservesForeignSettingsAndHooks` | Ported (M5) | `HookSettingsTests.InstallPreservesForeignSettingsAndHooks` |
 | `testLegacyTenHookConfigDetectedAndReplaced` | Excluded | Detects hooks from an abandoned upstream branch; no Windows installation wrote them |
-| `testUninstallRemovesOnlyOurHooks` | Scheduled M5 | Transport-independent |
-| `testUninstallOnMissingFileSucceeds` | Scheduled M5 | Transport-independent |
-| `testPartialDetection` | Scheduled M5 | Feeds the degraded-integration state and repair action |
+| `testUninstallRemovesOnlyOurHooks` | Ported, changed (M5) | `HookSettingsTests.UninstallRemovesOnlyOurHooks`: ownership by recorded port (difference 48) |
+| `testUninstallOnMissingFileSucceeds` | Ported (M5) | `HookSettingsTests.UninstallOnMissingFileSucceeds` |
+| `testPartialDetection` | Ported (M5) | `HookSettingsTests.PartialDetection`; it feeds the repair banner (difference 52) |
 
 ### NotchHookServerTests.swift
 
 | Upstream case | Disposition | Condition |
 | --- | --- | --- |
-| `testTokenedEventReachesStore` | Conditional | HTTP transport only |
-| `testLegacyTokenlessPathGets404AndIsDropped` | Conditional | HTTP transport only |
-| `testWrongTokenGets404` | Conditional | HTTP transport only |
-| `testGETRejected405` | Conditional | HTTP transport only |
-| `testMalformedJSONStillGets200` | Conditional | HTTP transport only; the pipe route needs its own malformed-input test |
-| `testOversizeBodyGets200AndIsDropped` | Conditional | HTTP transport only; the pipe route needs its own size-bound test |
+| `testTokenedEventReachesStore` | Ported (M5) | `HookServerTests.TokenedEventReachesStore` |
+| `testLegacyTokenlessPathGets404AndIsDropped` | Ported (M5) | `HookServerTests.LegacyTokenlessPathGets404AndIsDropped` |
+| `testWrongTokenGets404` | Ported (M5) | `HookServerTests.WrongTokenOrPathGets404` |
+| `testGETRejected405` | Ported (M5) | `HookServerTests.GetRejected405` |
+| `testMalformedJSONStillGets200` | Ported (M5) | `HookServerTests.MalformedJsonStillGets200` |
+| `testOversizeBodyGets200AndIsDropped` | Ported (M5) | `HookServerTests.OversizeBodyGets200AndIsDropped` |
 
 ### ProfileKeychainMigrationTests.swift
 
@@ -426,12 +465,12 @@ Ported cases keep their names in `SessionKeyValidatorTests`.
 | --- | --- | --- |
 | `testLanguageCode` | Scheduled M6 | Persisted UI language |
 | `testLanguageCodeNil` | Scheduled M6 | As above |
-| `testStatuslineShowDirectory` | Scheduled M5 | Statusline settings default to shown and round-trip |
-| `testStatuslineShowBranch` | Scheduled M5 | As above |
-| `testStatuslineShowUsage` | Scheduled M5 | As above |
-| `testStatuslineShowProgressBar` | Scheduled M5 | As above |
-| `testStatuslineShowResetTime` | Scheduled M5 | As above |
-| `testStatuslineShowModel` | Scheduled M5 | As above, including the default of shown |
+| `testStatuslineShowDirectory` | Ported (M5) | `SettingsStoreTests.StatuslineShowDirectory` |
+| `testStatuslineShowBranch` | Ported (M5) | `SettingsStoreTests.StatuslineShowBranch` |
+| `testStatuslineShowUsage` | Ported (M5) | `SettingsStoreTests.StatuslineShowUsage` |
+| `testStatuslineShowProgressBar` | Ported (M5) | `SettingsStoreTests.StatuslineShowProgressBar` |
+| `testStatuslineShowResetTime` | Ported (M5) | `SettingsStoreTests.StatuslineShowResetTime` |
+| `testStatuslineShowModel` | Ported (M5) | `SettingsStoreTests.StatuslineShowModel`, including the default of shown |
 | `testHasCompletedSetup` | Ported, changed | `SettingsStoreTests.HasCompletedSetup`: an isolated settings file, without upstream's legacy `~/.claude-session-key` check; set by every successful setup route |
 | `testFirstLaunchDate` | Excluded | Used only by the GitHub-star and feedback prompts (difference 7) |
 | `testLastGitHubStarPromptDate` | Excluded | Difference 7 |
@@ -456,12 +495,12 @@ Ported cases keep their names in `SessionKeyValidatorTests`.
 | --- | --- | --- |
 | `testSlugLowercasesAndDashesNonAlphanumerics` | Ported | `LauncherNamingTests.SlugLowercasesAndDashesNonAlphanumerics` (4 rows) |
 | `testSlugFallsBackToIdForUnusableNames` | Ported | `LauncherNamingTests.SlugFallsBackToIdForUnusableNames` |
-| `testInstallWritesExecutableScriptWithConfigDirAndMarker` | Scheduled M5 | Windows equivalent: `claude-<slug>.exe` alias, manifest entry and config directory |
-| `testIsInstalledTracksMarkerOwnership` | Scheduled M5 | Ownership from the install manifest |
+| `testInstallWritesExecutableScriptWithConfigDirAndMarker` | Ported, changed (M5) | `IntegrationServiceTests.InstallWritesLauncherWithConfigDirAndManifestEntry`: an executable and a manifest entry instead of a script with a marker (difference 46) |
+| `testIsInstalledTracksMarkerOwnership` | Ported, changed (M5) | `IntegrationServiceTests.IsInstalledTracksManifestOwnership`: ownership from the install manifest (difference 9) |
 | `testCollidingNamesGetIdSuffixedSlug` | Ported | `LauncherNamingTests.CollidingNamesGetIdSuffixedSlug` (difference 9) |
-| `testUninstallRemovesOnlyOwnScriptAndKeepsConfigDir` | Scheduled M5 | Removal keeps the login directory |
+| `testUninstallRemovesOnlyOwnScriptAndKeepsConfigDir` | Ported (M5) | `IntegrationServiceTests.UninstallRemovesOnlyOwnLauncherAndKeepsConfigDir` |
 | `testExpectedKeychainServiceUsesPinnedHashAlgorithm` | Excluded | macOS Keychain naming |
-| `testTerminalLauncherSlugSurvivesEncodeDecode` | Scheduled M5 | Slug persistence in the manifest |
+| `testTerminalLauncherSlugSurvivesEncodeDecode` | Ported (M5) | `SettingsStoreTests.IntegrationChoicesAndTheLauncherSlugRoundTrip`: the slug is kept in the profile, as upstream, and in the manifest |
 
 ### URLBuilderTests.swift
 
@@ -521,3 +560,8 @@ These characterise upstream source that upstream did not test, or pin a Windows-
 - `LauncherNamingTests.OwnerKeepsItsInstalledSlug`.
 - `SupportedLanguagesTests.ChineseCodesMapToExplicitCultures`.
 - Milestone 4 (upstream has no tests for these features): `UsageAlertsTests`, `AutoSwitchTests`, `AutomationServiceTests`, `AutoStartServiceTests`, `CliSwitchTests`, `NotificationRegistrationsTests`, `LaunchAtLoginTests`, `MilestoneFourSettingsTests` and the `UsageFetched` and `CheckSoon` cases of `RefreshCoordinatorTests`.
+- Milestone 5:
+  - Upstream's status line script and its launcher processes have no tests: `StatuslineRendererTests`, `StatuslineUsageTests`, `StatuslineInputTests`, `StatuslineCommandTests`, `StatuslineSyncTests`, `ShellEnvironmentTests`, `LauncherPathsTests`, `LauncherProcessTests`.
+  - The installed footprint and hook lifecycle are the port's own: `FileInstallerTests`, `HookPortsTests`, `HudServiceTests`, `HudOrderingTests`, `IntegrationCoordinatorTests`, `MilestoneFiveViewTests`.
+  - Cases beyond the ported ones in `HookHttpParserTests` (7), `HookServerTests` (7), `HookSettingsTests` (9) and `IntegrationServiceTests`.
+  - `SettingsStoreTests`: `StatuslineDefaultsAreUpstreams` and `SettingsFromBeforeTheIntegrationsLoadWithTheirDefaults`.

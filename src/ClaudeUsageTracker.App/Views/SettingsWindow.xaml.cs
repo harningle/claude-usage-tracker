@@ -25,6 +25,8 @@ public enum SettingsSection
     History,
     AppSettings,
     ManageProfiles,
+    ClaudeCode,
+    Hud,
     Shortcuts,
     Popover,
     Debug,
@@ -105,6 +107,8 @@ public partial class SettingsWindow : Window
         SettingsSection.History => NavHistory,
         SettingsSection.AppSettings => NavAppSettings,
         SettingsSection.ManageProfiles => NavProfiles,
+        SettingsSection.ClaudeCode => NavClaudeCode,
+        SettingsSection.Hud => NavHud,
         SettingsSection.Shortcuts => NavShortcuts,
         SettingsSection.Popover => NavPopover,
         SettingsSection.Debug => NavDebug,
@@ -121,7 +125,7 @@ public partial class SettingsWindow : Window
                      (PageCodex, SettingsSection.Codex), (PageAppearance, SettingsSection.Appearance), (PageGeneral, SettingsSection.General),
                      (PageHistory, SettingsSection.History), (PageAppSettings, SettingsSection.AppSettings), (PageProfiles, SettingsSection.ManageProfiles),
                      (PageShortcuts, SettingsSection.Shortcuts), (PagePopover, SettingsSection.Popover), (PageDebug, SettingsSection.Debug),
-                     (PageAbout, SettingsSection.About),
+                     (PageAbout, SettingsSection.About), (PageClaudeCode, SettingsSection.ClaudeCode), (PageHud, SettingsSection.Hud),
                  })
         {
             page.Visibility = shown == section ? Visibility.Visible : Visibility.Collapsed;
@@ -140,6 +144,15 @@ public partial class SettingsWindow : Window
         else if (section == SettingsSection.Debug)
         {
             _viewModel.ReloadLog();
+        }
+        else if (section == SettingsSection.ClaudeCode)
+        {
+            // What is installed is checked when its page opens.
+            _viewModel.Statusline.Refresh();
+        }
+        else if (section == SettingsSection.Hud)
+        {
+            _viewModel.Hud.Refresh();
         }
     }
 
@@ -346,6 +359,50 @@ public partial class SettingsWindow : Window
     }
 
     private void OnPreviewSound(object sender, RoutedEventArgs e) => _viewModel.PreviewSound();
+
+    private void OnInstallLauncher(object sender, RoutedEventArgs e) => _viewModel.Launcher.Install();
+
+    private void OnRemoveLauncher(object sender, RoutedEventArgs e) => _viewModel.Launcher.Remove();
+
+    private void OnCopyLauncher(object sender, RoutedEventArgs e) => Clipboard.SetText(_viewModel.Launcher.Command);
+
+    /// <summary>
+    /// Upstream's Apply. A folder that already has a status line of its own is asked about, one by one; it is
+    /// replaced only on a yes.
+    /// </summary>
+    private void OnApplyStatusline(object sender, RoutedEventArgs e)
+    {
+        var foreign = _viewModel.Statusline.Apply([]);
+        var agreed = foreign
+            .Where(folder => Confirm(
+                Strings.Get("windows.claudecode.foreign.title"),
+                Strings.Format("windows.claudecode.foreign.message", folder.ConfigDirectory, folder.Command ?? "")))
+            .Select(folder => folder.ConfigDirectory)
+            .ToList();
+        if (agreed.Count > 0)
+        {
+            foreign = _viewModel.Statusline.Apply(agreed);
+        }
+
+        if (foreign.Count > 0)
+        {
+            _viewModel.Statusline.KeptForeign(foreign.Select(folder => folder.ConfigDirectory));
+        }
+    }
+
+    private void OnResetStatusline(object sender, RoutedEventArgs e) => _viewModel.Statusline.Reset();
+
+    private void OnDismissStatuslineMessage(object sender, RoutedEventArgs e) => _viewModel.Statusline.DismissMessage();
+
+    private void OnUpdateHelper(object sender, RoutedEventArgs e) => _viewModel.Statusline.UpdateHelper();
+
+    private void OnRepairIntegration(object sender, RoutedEventArgs e) => _viewModel.Statusline.Repair();
+
+    private void OnChangeHooks(object sender, RoutedEventArgs e) => _viewModel.Hud.ChangeHooks();
+
+    private void OnRetryHud(object sender, RoutedEventArgs e) => _viewModel.Hud.Retry();
+
+    private void OnHudNewPort(object sender, RoutedEventArgs e) => _viewModel.Hud.UseAnotherPort();
 
     /// <summary>Upstream's recorder: a click starts recording, a second click stops it.</summary>
     private void OnRecordShortcut(object sender, RoutedEventArgs e)

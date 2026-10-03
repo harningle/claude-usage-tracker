@@ -64,7 +64,7 @@ public class HookEventTests
     public void KnownEventsDecode()
     {
         Assert.Equal(
-            new HookEvent.SessionStart("s", "/p"),
+            new HookEvent.SessionStart("s", "/p") { WorkingDirectory = "/p" },
             HookEvent.From("session-start", new JsonObject { ["session_id"] = "s", ["cwd"] = "/p" }));
         Assert.Equal(new HookEvent.Stop("s"), HookEvent.From("stop", new JsonObject { ["session_id"] = "s" }));
         Assert.Equal(

@@ -63,6 +63,9 @@ public sealed class SettingsIntegrations
 
     /// <summary>Releases every shortcut while a new one is recorded.</summary>
     public required Action SuspendShortcuts { get; init; }
+
+    /// <summary>The Milestone 5 pages: the status line, the activity HUD and the launcher card.</summary>
+    public required IntegrationPages Pages { get; init; }
 }
 
 /// <summary>
@@ -420,6 +423,21 @@ public sealed class SettingsViewModel : ObservableObject
         RaisePropertyChanged(nameof(ShortcutRows));
     }
 
+    // Claude CLI, Activity HUD and the launcher card: upstream ClaudeCodeView, NotchHUDSettingsView and TerminalLauncherSection.
+
+    public StatuslineViewModel Statusline => _integrations.Pages.Statusline;
+
+    public HudSettingsViewModel Hud => _integrations.Pages.Hud;
+
+    public LauncherViewModel Launcher => _integrations.Pages.Launcher;
+
+    /// <summary>
+    /// Upstream hides the Claude CLI section only when no profile's provider has a Claude Code login and nothing
+    /// is installed; while the status line is applied, the page must stay reachable to remove it.
+    /// </summary>
+    public bool ShowClaudeCodeSection =>
+        _settings.StatuslineEnabled || _settings.Profiles.Any(p => p.ProviderKind.Descriptor().Capabilities.CliAccountSync);
+
     // Manage Profiles: upstream's auto-switch card.
 
     public bool AutoSwitchEnabled
@@ -749,6 +767,7 @@ public sealed class SettingsViewModel : ObservableObject
     /// <summary>Re-reads every value, e.g. after the wizard changed the active profile.</summary>
     public void Reload()
     {
+        _integrations.Pages.SettingsChanged();
         foreach (var property in GetType().GetProperties())
         {
             RaisePropertyChanged(property.Name);

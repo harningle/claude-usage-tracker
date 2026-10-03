@@ -10,6 +10,8 @@ using ClaudeUsageTracker.App.Browser;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.CodexCli;
 using ClaudeUsageTracker.App.Diagnostics;
+using ClaudeUsageTracker.App.Hud;
+using ClaudeUsageTracker.App.Integration;
 using ClaudeUsageTracker.App.Localisation;
 using ClaudeUsageTracker.App.Notifications;
 using ClaudeUsageTracker.App.Profiles;
@@ -76,6 +78,19 @@ public partial class App : Application
     private SystemWatcher? _watcher;
     private LaunchAtLogin _launchAtLogin = null!;
     private IReadOnlyList<HotkeyAction> _refusedShortcuts = [];
+    private IntegrationService _integration = null!;
+    private IntegrationCoordinator _integrations = null!;
+    private IntegrationPages _pages = null!;
+    private HudService _hud = null!;
+    private HudController? _hudController;
+    private bool _integrationNeedsRepair;
+    private int _ticks;
+
+    // Usage this run fetched itself, per profile: what the status line may show as fresh.
+    private readonly Dictionary<Guid, CachedUsage> _fetched = [];
+
+    // The Claude Code folder of each session the HUD shows, read by polling threads; null stands for an unknown folder.
+    private volatile IReadOnlyList<string?> _hudFolders = [];
 
     // The profile the popover shows: in multi-profile mode the one whose icon was clicked, otherwise the active one.
     private Guid? _viewedId;
@@ -171,8 +186,12 @@ public partial class App : Application
         _log = new RequestLog(_paths.DiagnosticsDirectory);
         var tokens = new OAuthTokenClient(http, time, _log);
 
-        // Launchers arrive in Milestone 5; until then no running Claude Code is attributed to a profile.
-        var processes = fixture is null ? CliProcessGuard.ForThisPc(() => new Dictionary<string, string>()) : FixtureMode.ProcessGuard();
+        // A Claude Code started by one of the installed launchers is attributed to that launcher's folder; sessions the
+        // HUD observes count as further evidence of use, never of idleness.
+        _integration = new IntegrationService(_paths.Root, _userProfile, IntegrationService.DefaultBundledHelper, time);
+        var processes = fixture is null
+            ? CliProcessGuard.ForThisPc(() => _integration.LauncherImages, SessionObservedIn)
+            : FixtureMode.ProcessGuard();
         _links = new CliLinkService(secrets, time, _userProfile, credentialLock, tokens, processes,
             () => CliStore.Inventory(_userProfile, _configDirOverride, _linkedFolders),
             new CliSwitchRecords(_paths.CliSwitchJournalFile, new SecretStore(Path.Combine(_paths.SecretsDirectory, "backups"))));
@@ -214,11 +233,30 @@ public partial class App : Application
         _automation = new AutomationService(_settings, _toasts, new AutomationStateStore(_paths.AutomationFile), time, LastKnownUsage, OnAutoSwitch);
         _coordinator.UsageFetched += (profileId, usage) =>
         {
+            _fetched[profileId] = usage;
+            _integrations.SyncStatusline();
             if (_settings.Profiles.FirstOrDefault(p => p.Id == profileId) is { } profile)
             {
                 _automation.UsageFetched(profile, usage.Usage);
             }
         };
+        _hud = new HudService(
+            new HookEndpointStore(new SecretStore(Path.Combine(_paths.SecretsDirectory, "integration"))), _integration.Store, _integration.Manifest,
+            HookPorts.Query, IntegrationFolders, time, action => Dispatcher.BeginInvoke(action));
+        _hud.Changed += () => _hudFolders = [.. _hud.Sessions.Sessions.Select(s => s.ConfigDirectory).Distinct()];
+        var statuslineFiles = new StatuslineFiles(_paths.Root);
+        _integrations = new IntegrationCoordinator(
+            _settings, () => Persist(), _integration, _hud, statuslineFiles, new StatuslineSync(statuslineFiles, _links.Read, _userProfile),
+            IntegrationFolders, ShellEnvironment.GitBashInstalled, profileId => _fetched.GetValueOrDefault(profileId));
+        _integrations.Changed += () =>
+        {
+            // A launcher was installed or removed: its folder joins or leaves the known ones.
+            RefreshKnownFolders();
+            CheckIntegrations();
+        };
+        _pages = new IntegrationPages(
+            _settings, _integrations, () => Persist(), () => _settings.ActiveProfile is { } active ? _states.GetValueOrDefault(active.Id) : null,
+            _links.Read, ShellEnvironment.OnPath, _userProfile, time);
         _autoStart = new AutoStartService(_settings, claudeAi, _automation, time, _coordinator.Current, profileId =>
         {
             if (_coordinator.Current(profileId) is null)
@@ -264,6 +302,7 @@ public partial class App : Application
         {
             // A remote desktop connection can change the DPI and display layout the icons were drawn for.
             _tray.Redraw();
+            _hudController?.Reposition();
             _coordinator.CheckSoon();
         };
         _watcher.SessionDisconnected += () =>
@@ -281,6 +320,7 @@ public partial class App : Application
         _popover.SettingsRequested += (_, _) => ShowSettings(null);
         _popover.SetupRequested += (_, _) => ShowWizard(null);
         _popover.ManageProfilesRequested += (_, _) => ShowSettings(SettingsSection.ManageProfiles);
+        _popover.IntegrationRequested += (_, _) => ShowSettings(SettingsSection.ClaudeCode);
         _popover.ProfileSelected += OnProfileSelected;
 
         _signalWait = ThreadPool.RegisterWaitForSingleObject(
@@ -288,9 +328,23 @@ public partial class App : Application
 
         CleanUpLeftovers();
         WatchDisplayed();
+        // An install an earlier run left unfinished is settled, and what is switched on comes up: the HUD's listener
+        // first, then its hook entries.
+        _hudController = new HudController(_hud, _settings, time, Dispatcher, fixture is null ? null : Strings.Get("windows.fixture.label"));
+        _integrations.Start();
+        CheckIntegrations();
         UpdateViews();
         _clock = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) =>
         {
+            // Upstream sweeps silent HUD sessions every 30 seconds.
+            _hud.Sweep();
+            if (++_ticks % 10 == 0)
+            {
+                // Installed files are checked again now and then: an async hook or a status line fails quietly.
+                _integration.CleanRetained();
+                CheckIntegrations();
+            }
+
             UpdateViews();
             _automation.Tick();
         }, Dispatcher);
@@ -320,6 +374,9 @@ public partial class App : Application
         _autoStartTimer?.Stop();
         _hotkeys?.Dispose();
         _watcher?.Dispose();
+        _hudController?.Dispose();
+        // The clean exit: the hook entries are removed before the listener stops.
+        _integrations?.Shutdown();
         _toasts?.Dispose();
         _signalWait?.Unregister(null);
         if (_coordinator is not null)
@@ -355,7 +412,7 @@ public partial class App : Application
             StopWatching(id);
         }
 
-        _linkedFolders = [.. _settings.Profiles.Select(p => p.CliLink?.ConfigDirectory).OfType<string>()];
+        RefreshKnownFolders();
         foreach (var profile in wanted)
         {
             _coordinator.Watch(profile);
@@ -390,7 +447,7 @@ public partial class App : Application
         var now = DateTimeOffset.UtcNow;
         var use24Hour = UsageDisplay.Uses24HourTime(_settings.TimeFormat, CultureInfo.CurrentCulture);
         _tray.Show(TrayModel.Build(_settings, id => _states.GetValueOrDefault(id), use24Hour, now, TimeZoneInfo.Local, Strings.Culture));
-        _popoverModel.Update(_settings, viewed, viewed is null ? null : _states.GetValueOrDefault(viewed.Id), _status, now);
+        _popoverModel.Update(_settings, viewed, viewed is null ? null : _states.GetValueOrDefault(viewed.Id), _status, now, _integrationNeedsRepair);
         if (_settingsModel is not null)
         {
             var active = _settings.ActiveProfile;
@@ -407,6 +464,35 @@ public partial class App : Application
     {
         var inventory = CliStore.Inventory(_userProfile, _configDirOverride, []);
         return inventory.Count > 1 ? inventory[1] : inventory[0];
+    }
+
+    /// <summary>
+    /// The known Claude Code folders besides the default: those profiles are linked to and those of installed launchers.
+    /// Read from the settings and the install manifest as they are now, on the UI thread.
+    /// </summary>
+    private IReadOnlyList<string> KnownFolders() =>
+        [.. _settings.Profiles.Select(p => p.CliLink?.ConfigDirectory).OfType<string>(), .. _integration.LauncherDirectories];
+
+    /// <summary>Hands the known folders to the polling threads, whose takeover checks cover every one of them.</summary>
+    private void RefreshKnownFolders() => _linkedFolders = KnownFolders();
+
+    /// <summary>The folders whose <c>settings.json</c> carry the status line and the hook entries: every known Claude Code folder.</summary>
+    private IReadOnlyList<string> IntegrationFolders() =>
+        [.. CliStore.Inventory(_userProfile, _configDirOverride, KnownFolders()).Select(directory => directory.Path)];
+
+    /// <summary>Whether the HUD shows a live session that uses this folder, or one whose folder is unknown. Called from polling threads.</summary>
+    private bool SessionObservedIn(string directory) =>
+        _hudFolders.Any(folder => folder is null || Core.Statusline.StatuslinePaths.SameDirectory(folder, directory));
+
+    /// <summary>Looks again at everything installed for Claude Code; a fault shows in the popover and on the Claude CLI page.</summary>
+    private void CheckIntegrations()
+    {
+        var needsRepair = _integrations.Problems().Count > 0;
+        if (needsRepair != _integrationNeedsRepair)
+        {
+            _integrationNeedsRepair = needsRepair;
+            UpdateViews();
+        }
     }
 
     /// <summary>A profile's last known usage, live or from the cache of its current account, for choosing an auto-switch target.</summary>
@@ -566,6 +652,9 @@ public partial class App : Application
     private void OnSettingsApplied()
     {
         WatchDisplayed();
+        // A new launcher or link is a new folder for the status line and the hooks; a rename reaches the status line.
+        _integrations.FoldersChanged();
+        _hudController?.Update();
         UpdateViews();
     }
 
@@ -699,6 +788,7 @@ public partial class App : Application
                     NotificationsSwitchedOn = _automation.NotificationsSwitchedOn,
                     ApplyShortcuts = () => _refusedShortcuts = _hotkeys!.Apply(_settings.Shortcuts),
                     SuspendShortcuts = () => _hotkeys!.Suspend(),
+                    Pages = _pages,
                 });
             _settingsWindow = new SettingsWindow(_settingsModel);
             _settingsWindow.SourceInitialized += (_, _) => _theme.StyleTitleBar(_settingsWindow);
@@ -832,7 +922,8 @@ public partial class App : Application
             return;
         }
 
-        var model = new SetupWizardViewModel(_links, _client, _setup, _wizardServices, TimeProvider.System, _userProfile, _configDirOverride);
+        var model = new SetupWizardViewModel(
+            _links, _client, _setup, _wizardServices, TimeProvider.System, _userProfile, _configDirOverride, () => _integration.LauncherDirectories);
         model.Saved += profile =>
         {
             _automation.UserTriggered(profile.Id);

@@ -74,6 +74,8 @@ public sealed class SettingsStore(string path)
         settings.MultiProfileDisplayConfig ??= new MultiProfileDisplayConfig();
         settings.PendingCleanups ??= [];
         settings.Shortcuts ??= new ShortcutSettings();
+        settings.Statusline ??= new Core.Statusline.StatuslineConfig();
+        settings.Statusline.ElementColors ??= new Core.Statusline.StatuslineElementColors();
 
         return settings;
     }

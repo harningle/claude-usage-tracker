@@ -125,7 +125,10 @@ public sealed class PopoverViewModel : ObservableObject
     public string StatusTooltip => Strings.Get("menubar.click_status");
 
     /// <param name="profile">The profile shown: the active one, or in multi-profile mode the one whose icon was clicked.</param>
-    public void Update(AppSettings settings, ProfileSettings? profile, ProfileUsageState? state, ServiceStatus? status, DateTimeOffset now)
+    /// <param name="integrationNeedsRepair">Something installed for Claude Code is missing or broken; said when the profile itself has nothing more urgent.</param>
+    public void Update(
+        AppSettings settings, ProfileSettings? profile, ProfileUsageState? state, ServiceStatus? status, DateTimeOffset now,
+        bool integrationNeedsRepair = false)
     {
         var use24Hour = UsageDisplay.Uses24HourTime(settings.TimeFormat, CultureInfo.CurrentCulture);
         var provider = profile?.ProviderKind ?? Provider.Anthropic;
@@ -164,7 +167,11 @@ public sealed class PopoverViewModel : ObservableObject
         });
         IsRefreshing = state?.IsRefreshing == true;
         Placeholder = model.Placeholder;
-        Banner = model.Banner is { } b
+        var banner = model.Banner
+                     ?? (integrationNeedsRepair
+                         ? new BannerModel(Strings.Get("windows.banner.integration"), BannerTone.Caution, BannerAction.OpenIntegration)
+                         : null);
+        Banner = banner is { } b
             ? new BannerView(b.Message, b.Glyph,
                 Resource(b.Tone switch { BannerTone.Warning => "Banner.Warning", BannerTone.Caution => "Banner.Caution", _ => "Banner.Info" }),
                 Resource(b.Tone switch { BannerTone.Warning => "Status.Moderate", BannerTone.Caution => "Status.Caution", _ => "Status.Info" }),

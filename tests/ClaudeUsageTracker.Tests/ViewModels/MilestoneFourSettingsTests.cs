@@ -80,6 +80,7 @@ public sealed class MilestoneFourSettingsTests : IDisposable
                     return [];
                 },
                 SuspendShortcuts = () => _calls.Add("suspend"),
+                Pages = new Integration.IntegrationHarness(Path.Combine(_temp.Path, "integration"), _settings, _time).Pages,
             });
     }
 

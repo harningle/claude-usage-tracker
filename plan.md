@@ -12,7 +12,7 @@ Use upstream commit [`588775e4540757443691fa1bcb33457315e05f86`](https://github.
 - Preserve upstream translations, licence notices and attribution. Omit telemetry and promotional prompts in both personal and public builds; document these intentional differences.
 - Personal delivery includes a self-contained build, local registration needed by notifications/startup, manual upgrade and integration cleanup. Installer, signing and automatic updates belong to the later public-release milestone; they are not abandoned or claimed complete.
 - No import of macOS Keychain or macOS app data. Existing native Windows CLI accounts can be linked through setup.
-- The repository has the Milestone 0 scaffold and ported pure logic, the Milestone 1 experiment harnesses in `spikes/`, the Milestone 2 tray app for the Claude Code route ([Milestone 2 log](docs/milestone-2.md)) and the Milestone 3 browser, Console, Codex, profile, ownership, billing and history features, which await their live checks ([Milestone 3 log](docs/milestone-3.md)), and the Milestone 4 notifications, automation and guarded switching of Claude Code's login, whose main live checks have passed; the session auto-start and remote desktop are still unchecked ([Milestone 4 log](docs/milestone-4.md)). .NET SDK **10.0.401** and native Claude Code **2.1.287** (auto-updated; Milestone 1 measured 2.1.286) are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools 2026 with the MSVC x64/x86 tools and Windows SDK 10.0.26100 is present, and NativeAOT publishing is verified ([Milestone 1 log](docs/milestone-1.md)).
+- The repository has the Milestone 0 scaffold and ported pure logic, the Milestone 1 experiment harnesses in `spikes/`, the Milestone 2 tray app for the Claude Code route ([Milestone 2 log](docs/milestone-2.md)) and the Milestone 3 browser, Console, Codex, profile, ownership, billing and history features, which await their live checks ([Milestone 3 log](docs/milestone-3.md)), and the Milestone 4 notifications, automation and guarded switching of Claude Code's login, whose main live checks have passed; the session auto-start and remote desktop are still unchecked ([Milestone 4 log](docs/milestone-4.md)), and the Milestone 5 launchers, status line helper, hooks and HUD, whose live checks passed on 2026-10-03 ([Milestone 5 log](docs/milestone-5.md)). .NET SDK **10.0.401** and native Claude Code **2.1.288** (auto-updated; Milestone 1 measured 2.1.286, Milestone 5 2.1.288) are installed; the latter resolves to `%USERPROFILE%\.local\bin\claude.exe`. Visual Studio Build Tools 2026 with the MSVC x64/x86 tools and Windows SDK 10.0.26100 is present, and NativeAOT publishing is verified ([Milestone 1 log](docs/milestone-1.md)).
 
 ### Evidence limits
 
@@ -143,6 +143,8 @@ Use a matching cache while its age is at most twice the configured polling inter
 
 Measure the NativeAOT helper both directly and through each actual shell runner. Target warm end-to-end p95 below 100 ms and first-run latency below 300 ms on the development machine; report shell overhead separately. Test rapid replacement/cancellation. The documentation confirms cancellation of an in-flight invocation, but does not establish a stable 300 ms debounce guarantee; treat that timing as version-dependent and measure the installed CLI. Do not make correctness depend on it.
 
+Milestone 5 result (CLI 2.1.288): Claude Code runs the command through Git for Windows' `bash.exe`, and a newer update ends a run still in progress. The production helper takes 33.5 ms p95 through Git Bash and 37.4 ms on a fresh copy's first run; PowerShell 5.1 alone misses the target (138.6 ms p95). See [the Milestone 5 log](docs/milestone-5.md#d3-the-status-line).
+
 ### Passive hooks and activity HUD: measure before selecting transport
 
 Preserve exactly the eight baseline events: SessionStart, SessionEnd, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, Stop and Notification. The user measured roughly two seconds to refuse a .NET connection to a closed local port; this is evidence of risk, not a measured Claude Code delay. The Milestone 1 benchmark uses actual model-driven tool calls and **consumes usage**, potentially starting a session. It requires the user's explicit go-ahead for that run; approving this plan or ordinary implementation does not authorise it. Disclose the chosen cheap available model and trial count before requesting approval.
@@ -169,6 +171,7 @@ Milestone 1 result: HTTP passes the gate on CLI 2.1.286. With a local fake Messa
 - Rejected: a mixed configuration with one async command hook for SessionStart. Its only gain is showing idle sessions sooner, at the cost of a second hook format to install, repair and remove.
 - Rejected: async command hooks with a named pipe for all eight. These lost SessionEnd in every run and cost a process per event plus 95-150 ms at every CLI exit. Their data-isolation advantage matters only on multi-user PCs, which are out of scope.
 - Re-measure the gate whenever the minimum supported CLI version changes. See [the Milestone 1 log](docs/milestone-1.md#6-hook-transport-latency-and-reload).
+- Re-measured on 2.1.288 (Milestone 5, fake endpoint): the stopped listener cost +3.7 ms p95 and the tracker's own listener +2.7 ms. SessionStart is still skipped. In interactive sessions every other event is delivered, Notification included (`permission_prompt` and `idle_prompt`), and user-settings edits reload in about a second. See [the Milestone 5 log](docs/milestone-5.md#measurements-with-the-real-cli).
 
 ### Diagnostics and build location
 
@@ -246,6 +249,23 @@ Status (2026-10-03): implemented, with 942 automated tests, a mutation check of 
 - Close the Milestone 1 follow-ups assigned here: G5 (re-measure the hook gate on CLI changes), G6 (Notification delivery), G7 (hooks in interactive sessions) and D3 (statusline shell, cancellation and production-helper timing); see [docs/milestone-1.md](docs/milestone-1.md#7-known-gaps-and-follow-ups).
 
 **Acceptance:** PowerShell, Command Prompt and Git Bash preserve arguments, exit codes and Ctrl+C, including metacharacters and paths with spaces; the shell prompt does not return over a live child. The statusline remains secret-free and responsive. Hook overhead meets the real-CLI budget even when the tracker is down; async process cost and best-effort ordering or HTTP lifecycle/port constraints are measured and documented. No hook emits decisions or context.
+
+Status (2026-10-03): implemented. The evidence so far:
+
+- 1,285 automated tests, including real launcher and helper processes under the three shells in a pseudo console.
+- A mutation check of eleven guards.
+- Manual checks in fixture mode: status line Apply, hooks and HUD, a launcher.
+- Real-CLI runs against a fake Messages API on 2.1.288 (no usage).
+
+**Acceptance met** on that evidence. G5, G6, G7 and D3 are closed. Hooks are installed in every known folder while the tracker runs and removed on a clean exit; the status line stays.
+
+The user's live checks the same evening passed:
+
+- the status line's Apply and Reset in the real Claude Code folders
+- the HUD with real sessions, its hooks removed on quitting, over a full-screen window and on another virtual desktop
+- a launcher under PowerShell, Command Prompt and Git Bash, with login, arguments, exit codes, Ctrl+C and removal
+
+Not yet exercised live: the switch beside a launcher-only session (Claude Code was already on that account) and a helper upgrade. See [the Milestone 5 log](docs/milestone-5.md#live-checks-so-far).
 
 ### Milestone 6 - Personal-use delivery
 

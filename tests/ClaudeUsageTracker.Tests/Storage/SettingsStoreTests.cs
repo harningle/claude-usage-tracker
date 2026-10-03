@@ -1,6 +1,7 @@
 using System.IO;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.Core.Providers;
+using ClaudeUsageTracker.Core.Statusline;
 using ClaudeUsageTracker.Core.Usage;
 
 namespace ClaudeUsageTracker.Tests.Storage;
@@ -243,7 +244,118 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(cleanup.ProfileId, Assert.Single(loaded.PendingCleanups).ProfileId);
         var text = File.ReadAllText(SettingsPath);
         Assert.DoesNotContain("sessionKey\"", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("token", text, StringComparison.OrdinalIgnoreCase);
+        // The status line's "contextAsTokens" option counts context tokens; it is not a credential.
+        Assert.DoesNotContain("token", text.Replace("contextAsTokens", ""), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Upstream SharedDataStoreTests: the statusline options default as upstream's and round-trip.
+
+    private StatuslineConfig RoundTrip(Action<StatuslineConfig> change)
+    {
+        var store = new SettingsStore(SettingsPath);
+        var settings = new AppSettings();
+        change(settings.Statusline);
+        store.Save(settings);
+        return store.Load().Statusline;
+    }
+
+    [Fact]
+    public void StatuslineShowDirectory()
+    {
+        Assert.False(RoundTrip(c => c.ShowDirectory = false).ShowDirectory);
+        Assert.True(RoundTrip(c => c.ShowDirectory = true).ShowDirectory);
+    }
+
+    [Fact]
+    public void StatuslineShowBranch()
+    {
+        Assert.False(RoundTrip(c => c.ShowBranch = false).ShowBranch);
+        Assert.True(RoundTrip(c => c.ShowBranch = true).ShowBranch);
+    }
+
+    [Fact]
+    public void StatuslineShowUsage()
+    {
+        Assert.False(RoundTrip(c => c.ShowUsage = false).ShowUsage);
+        Assert.True(RoundTrip(c => c.ShowUsage = true).ShowUsage);
+    }
+
+    [Fact]
+    public void StatuslineShowProgressBar()
+    {
+        Assert.False(RoundTrip(c => c.ShowProgressBar = false).ShowProgressBar);
+        Assert.True(RoundTrip(c => c.ShowProgressBar = true).ShowProgressBar);
+    }
+
+    [Fact]
+    public void StatuslineShowResetTime()
+    {
+        Assert.False(RoundTrip(c => c.ShowResetTime = false).ShowResetTime);
+        Assert.True(RoundTrip(c => c.ShowResetTime = true).ShowResetTime);
+    }
+
+    [Fact]
+    public void StatuslineShowModel()
+    {
+        // The default is shown.
+        Assert.True(new SettingsStore(SettingsPath).Load().Statusline.ShowModel);
+
+        Assert.False(RoundTrip(c => c.ShowModel = false).ShowModel);
+        Assert.True(RoundTrip(c => c.ShowModel = true).ShowModel);
+    }
+
+    [Fact]
+    public void StatuslineDefaultsAreUpstreams()
+    {
+        var config = new SettingsStore(SettingsPath).Load().Statusline;
+
+        Assert.True(config is
+        {
+            ShowModel: true, ShowDirectory: true, ShowBranch: true, ShowContext: true, ContextAsTokens: false, ShowUsage: true,
+            ShowProgressBar: true, ShowPaceMarker: true, PaceMarkerStepColors: false, ShowResetTime: true, Use24HourTime: false,
+            ShowContextLabel: true, ShowUsageLabel: true, ShowResetLabel: true, ShowProfile: false, ShowWeekly: false,
+            ShowWeeklyBar: true, ShowWeeklyPaceMarker: true, ShowWeeklyResetTime: true, ShowWeeklyLabel: true, ShowExtraUsage: false,
+            ColorMode: "colored", SingleColorHex: "#00BFFF",
+        });
+        Assert.True(config.ElementColors is
+        {
+            DirectoryHex: "#0000EE", BranchHex: "#00BB00", ModelHex: "#BBBB00", ProfileHex: "#BB00BB", ContextHex: "#00BBBB",
+            SeparatorHex: "#808080", UsageBaseHex: null, PaceBaseHex: null, WeeklyBaseHex: null, ExtraUsageBaseHex: null,
+        });
+    }
+
+    [Fact]
+    public void IntegrationChoicesAndTheLauncherSlugRoundTrip()
+    {
+        var store = new SettingsStore(SettingsPath);
+        var defaults = store.Load();
+        // Upstream's defaults: no status line, the HUD off, auto-hide on, no launcher.
+        Assert.False(defaults.StatuslineEnabled);
+        Assert.False(defaults.HudEnabled);
+        Assert.True(defaults.HudAutoHide);
+
+        var settings = new AppSettings { StatuslineEnabled = true, HudEnabled = true, HudAutoHide = false };
+        settings.Profiles.Add(new ProfileSettings { Name = "Round Trip", TerminalLauncherSlug = "round-trip" });
+        settings.Statusline.ColorMode = StatuslineConfig.PerElement;
+        settings.Statusline.ElementColors.UsageBaseHex = "#123456";
+        store.Save(settings);
+
+        var loaded = store.Load();
+        Assert.True(loaded is { StatuslineEnabled: true, HudEnabled: true, HudAutoHide: false });
+        Assert.Equal("round-trip", Assert.Single(loaded.Profiles).TerminalLauncherSlug);
+        Assert.Equal((StatuslineConfig.PerElement, "#123456"), (loaded.Statusline.ColorMode, loaded.Statusline.ElementColors.UsageBaseHex));
+    }
+
+    [Fact]
+    public void SettingsFromBeforeTheIntegrationsLoadWithTheirDefaults()
+    {
+        File.WriteAllText(SettingsPath, """{"version":1,"profiles":[{"id":"7f1c2a34-0000-4000-8000-000000000001","name":"Old"}],"statusline":null}""");
+
+        var loaded = new SettingsStore(SettingsPath).Load();
+
+        Assert.True(loaded.Statusline.ShowModel);
+        Assert.Null(Assert.Single(loaded.Profiles).TerminalLauncherSlug);
+        Assert.False(loaded.HudEnabled);
     }
 }
 

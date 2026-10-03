@@ -31,6 +31,8 @@ public sealed class SettingToggle : ContentControl
         var description = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
         description.SetResourceReference(StyleProperty, "Text.Secondary");
         description.SetBinding(TextBlock.TextProperty, new Binding(nameof(Description)) { Source = this });
+        // A toggle without a description takes one line, as upstream's does.
+        description.SetBinding(VisibilityProperty, new Binding(nameof(Description)) { Source = this, Converter = Converters.NotNullToVisible });
         var text = new StackPanel { Children = { title, description } };
         var toggle = new CheckBox { Margin = new Thickness(16, 0, 0, 0) };
         toggle.SetResourceReference(StyleProperty, "Switch");

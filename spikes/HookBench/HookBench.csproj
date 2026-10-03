@@ -9,4 +9,13 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Milestone 5: the interactive run drives the CLI through the tests' pseudo console; the status line timing writes a real cache. -->
+    <Compile Include="..\..\tests\ClaudeUsageTracker.Tests\PseudoConsole.cs" Link="PseudoConsole.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ClaudeUsageTracker.Core\ClaudeUsageTracker.Core.csproj" />
+  </ItemGroup>
+
 </Project>

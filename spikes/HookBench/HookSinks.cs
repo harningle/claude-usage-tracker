@@ -7,7 +7,8 @@ namespace HookBench;
 
 /// <param name="Route">The HTTP path secret or "pipe".</param>
 /// <param name="ReceivedTicks">Arrival at the bench (HTTP) or at the helper (pipe).</param>
-internal sealed record HookReceipt(string Route, string Event, string? ToolUseId, long ReceivedTicks, long ArrivedTicks);
+/// <param name="Detail">A Notification's <c>notification_type</c> or a SessionEnd's <c>reason</c> (HTTP only).</param>
+internal sealed record HookReceipt(string Route, string Event, string? ToolUseId, long ReceivedTicks, long ArrivedTicks, string? Detail = null);
 
 /// <summary>
 /// A loopback HTTP hook sink answering <c>200 {}</c> without decisions, like upstream's listener.
@@ -35,6 +36,7 @@ internal sealed class HttpHookListener(int port, IReadOnlyCollection<string> sec
             }
 
             string? toolUseId = null;
+            string? detail = null;
             try
             {
                 using var document = await JsonDocument.ParseAsync(context.Request.Body);
@@ -42,12 +44,18 @@ internal sealed class HttpHookListener(int port, IReadOnlyCollection<string> sec
                 {
                     toolUseId = id.GetString();
                 }
+
+                if (document.RootElement.TryGetProperty("notification_type", out var type)
+                    || document.RootElement.TryGetProperty("reason", out type))
+                {
+                    detail = type.GetString();
+                }
             }
             catch (JsonException)
             {
             }
 
-            Receipts.Enqueue(new HookReceipt(secret, suffix, toolUseId, arrived, arrived));
+            Receipts.Enqueue(new HookReceipt(secret, suffix, toolUseId, arrived, arrived, detail));
             return Results.Text("{}", "application/json");
         });
         await app.StartAsync();

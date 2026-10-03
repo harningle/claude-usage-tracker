@@ -13,6 +13,12 @@ internal static class Bench
 {
     public static readonly string[] AllConditions = ["none", "http-up", "http-down", "http-restart", "async-up", "async-down"];
 
+    /// <summary>
+    /// Milestone 5: the hooks point at the tracker's own listener, read from a Claude Code settings file the
+    /// running app (in fixture mode) installed them in. Not part of the default set; needs <c>--hooks-from</c>.
+    /// </summary>
+    public const string AppCondition = "http-app";
+
     public static async Task<int> RunAsync(Options options)
     {
         var claude = options.Get("claude", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @".local\bin\claude.exe"));
@@ -36,12 +42,24 @@ internal static class Bench
             Path.Combine(layout.Results, $"warmup-{warmup}-debug.txt"));
         Json.Write(Path.Combine(layout.Results, $"warmup-{warmup}.json"), warmupRecord);
 
+        // The tracker's own listener: its port and path secret are read from the hook entries it installed and never printed.
+        (int Port, string Secret)? app = null;
+        if (conditions.Contains(AppCondition))
+        {
+            var installed = System.Text.RegularExpressions.Regex.Match(
+                File.ReadAllText(options.Required("hooks-from")), @"http://127\.0\.0\.1:(\d+)/hook/([0-9a-f]+)/");
+            app = installed.Success
+                ? (int.Parse(installed.Groups[1].Value), installed.Groups[2].Value)
+                : throw new ArgumentException("--hooks-from names a settings file without the tracker's hook entries.");
+        }
+
         var runs = new List<RunRecord>();
         for (var rep = 1; rep <= repeat; rep++)
         {
             foreach (var condition in conditions)
             {
-                var record = await RunConditionAsync(condition, rep, layout, claude, helper, apiPort, hookPort, secret,
+                var (port, pathSecret) = condition == AppCondition ? app!.Value : (hookPort, secret);
+                var record = await RunConditionAsync(condition, rep, layout, claude, helper, apiPort, port, pathSecret,
                     pipe, calls, null);
                 runs.Add(record);
                 Json.Write(Path.Combine(layout.Results, $"{condition}-{rep}.json"), record);
@@ -64,7 +82,7 @@ internal static class Bench
         ClaudeRunner.WriteSettings(settingsPath, condition switch
         {
             "none" => ClaudeRunner.NoHooks(),
-            "http-up" or "http-down" or "http-restart" => ClaudeRunner.HttpHooks(hookPort, secret),
+            "http-up" or "http-down" or "http-restart" or AppCondition => ClaudeRunner.HttpHooks(hookPort, secret),
             "async-up" or "async-down" => ClaudeRunner.AsyncCommandHooks(helper, pipeName),
             _ => throw new ArgumentException($"Unknown condition '{condition}'."),
         });

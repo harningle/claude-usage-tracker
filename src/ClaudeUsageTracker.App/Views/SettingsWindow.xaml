@@ -8,6 +8,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:ClaudeUsageTracker.App.Localisation"
         xmlns:views="clr-namespace:ClaudeUsageTracker.App.Views"
+        xmlns:setup="clr-namespace:ClaudeUsageTracker.App.Setup"
         Title="{l:Loc app.window.settings}"
         Width="720" Height="750" MinHeight="480" ResizeMode="CanResize" WindowStartupLocation="CenterScreen"
         Background="{DynamicResource Window.Background}" FontFamily="{StaticResource UiFont}" UseLayoutRounding="True">
@@ -117,6 +118,22 @@
       <Setter Property="Margin" Value="0,0,8,0" />
     </Style>
 
+    <!-- A status line colour as #RRGGBB, with a swatch of it beside the box. -->
+    <Style x:Key="ColourInput" TargetType="TextBox" BasedOn="{StaticResource Input}">
+      <Setter Property="Width" Value="90" />
+      <Setter Property="MaxLength" Value="7" />
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    </Style>
+    <Style x:Key="ColourSwatch" TargetType="Border">
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Margin" Value="8,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Card.Border}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
     <DataTemplate x:Key="DetailRows">
       <Grid Margin="0,0,0,8">
         <Grid.ColumnDefinitions>
@@ -203,6 +220,21 @@
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="&#xE716;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
             <TextBlock Text="{l:Loc section.manage_profiles_title}" />
+          </StackPanel>
+        </RadioButton>
+        <RadioButton x:Name="NavClaudeCode" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                     AutomationProperties.Name="{l:Loc settings.claude_cli}"
+                     Visibility="{Binding ShowClaudeCodeSection, Converter={StaticResource Visible}}">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE943;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+            <TextBlock Text="{l:Loc settings.claude_cli}" />
+          </StackPanel>
+        </RadioButton>
+        <RadioButton x:Name="NavHud" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                     AutomationProperties.Name="{l:Loc windows.hud.section_title}">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE7F4;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+            <TextBlock Text="{l:Loc windows.hud.section_title}" />
           </StackPanel>
         </RadioButton>
         <RadioButton x:Name="NavShortcuts" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
@@ -553,6 +585,61 @@
             </StackPanel>
           </Border>
 
+          <!--
+            Upstream's Terminal Launcher card, for providers whose profiles have a Claude Code login: a
+            claude-<profile> command that runs Claude Code with this profile's own folder.
+          -->
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0" DataContext="{Binding Launcher}"
+                  Visibility="{Binding Show, Converter={StaticResource Visible}}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc launcher.title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc launcher.subtitle}" FontSize="12" Margin="0,4,0,12" />
+              <StackPanel Visibility="{Binding NotInstalled, Converter={StaticResource Visible}}">
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding Description}" TextWrapping="Wrap" />
+                <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc launcher.install}" Click="OnInstallLauncher" HorizontalAlignment="Left"
+                        Margin="0,10,0,0" AutomationProperties.Name="{l:Loc launcher.install}" />
+              </StackPanel>
+              <StackPanel Visibility="{Binding Installed, Converter={StaticResource Visible}}">
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Style="{StaticResource SecondaryButton}" Content="{l:Loc launcher.remove}" Click="OnRemoveLauncher"
+                          AutomationProperties.Name="{l:Loc launcher.remove}" AutomationProperties.HelpText="{l:Loc windows.launcher.folder_kept}" />
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE756;" FontSize="13" Foreground="{DynamicResource Accent}" Width="20" />
+                    <TextBox Text="{Binding Command, Mode=OneWay}" IsReadOnly="True" BorderThickness="0" Background="Transparent" Padding="0"
+                             Foreground="{DynamicResource Foreground.Primary}" FontFamily="{StaticResource MonoFont}" FontSize="12" FontWeight="SemiBold"
+                             Margin="6,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="{l:Loc launcher.title}" />
+                    <Button Style="{StaticResource HeaderIconButton}" Margin="6,0,0,0" Click="OnCopyLauncher"
+                            ToolTip="{l:Loc windows.launcher.copy}" AutomationProperties.Name="{l:Loc windows.launcher.copy}">
+                      <TextBlock Text="&#xE8C8;" FontFamily="{StaticResource IconFont}" FontSize="10"
+                                 Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                    </Button>
+                  </StackPanel>
+                </DockPanel>
+                <Border Background="{DynamicResource Banner.Warning}" CornerRadius="6" Padding="12,8" Margin="0,10,0,0"
+                        Visibility="{Binding FileProblem, Converter={x:Static views:Converters.NotNullToVisible}}">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{Binding FileProblem}" TextWrapping="Wrap" />
+                </Border>
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0" Visibility="{Binding Linked, Converter={StaticResource Visible}}">
+                  <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE930;" FontSize="12" Foreground="{DynamicResource Status.Safe}" />
+                  <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding LoginText}" Margin="6,0,0,0" Foreground="{DynamicResource Status.Safe}" />
+                </StackPanel>
+                <StackPanel Margin="0,10,0,0" Visibility="{Binding NeedsLogin, Converter={StaticResource Visible}}">
+                  <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding LoginText}" TextWrapping="Wrap" />
+                  <!-- Linking goes through the wizard, which tests the login and shows a review before it saves. -->
+                  <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc launcher.verify}" Click="OnCredentialSetup"
+                          Tag="{x:Static setup:WizardRoute.ClaudeCode}" HorizontalAlignment="Left" Margin="0,8,0,0" FontSize="11" />
+                </StackPanel>
+                <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8" Margin="0,10,0,0"
+                        Visibility="{Binding PathWarning, Converter={x:Static views:Converters.NotNullToVisible}}">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{Binding PathWarning}" TextWrapping="Wrap" />
+                </Border>
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.launcher.folder_kept}" Margin="0,10,0,0" />
+              </StackPanel>
+              <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Error}" FontSize="11" Foreground="{DynamicResource Status.Critical}"
+                         TextWrapping="Wrap" Margin="0,10,0,0" Visibility="{Binding Error, Converter={x:Static views:Converters.NotNullToVisible}}" />
+            </StackPanel>
+          </Border>
+
           <!-- Upstream's Notifications card. -->
           <Border Style="{StaticResource Card}" Margin="0,16,0,0" IsEnabled="{Binding HasProfile}">
             <StackPanel>
@@ -666,6 +753,374 @@
               <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8"
                       Visibility="{Binding LaunchAtLoginNote, Converter={x:Static views:Converters.NotNullToVisible}}">
                 <TextBlock Style="{StaticResource Text.Body}" Text="{Binding LaunchAtLoginNote}" TextWrapping="Wrap" />
+              </Border>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!--
+          Claude CLI: upstream ClaudeCodeView. The preview is the helper's own renderer on sample session data.
+          Apply installs the status line in every known Claude Code folder; Reset removes it.
+        -->
+        <StackPanel x:Name="PageClaudeCode" DataContext="{Binding Statusline}">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc claudecode.title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc claudecode.subtitle}" />
+
+          <Border Background="{DynamicResource Banner.Warning}" CornerRadius="6" Padding="12,10" Margin="0,16,0,0"
+                  Visibility="{Binding HasProblems, Converter={StaticResource Visible}}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc windows.integration.title}" FontSize="12" FontWeight="Medium" />
+              <ItemsControl ItemsSource="{Binding Problems}" Focusable="False" Margin="0,4,0,8">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Style="{StaticResource Text.Body}" Text="{Binding}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc windows.integration.repair}" Click="OnRepairIntegration" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+            <StackPanel>
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Caption}" Text="{l:Loc ui.updates_realtime}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE7B3;" FontSize="12" Foreground="{DynamicResource Foreground.Primary}" />
+                  <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc claudecode.preview_label}" FontSize="13" FontWeight="Medium" Margin="8,0,0,0" />
+                </StackPanel>
+              </DockPanel>
+              <Border Background="{DynamicResource Input.Background}" BorderBrush="{DynamicResource Card.Border}" BorderThickness="1" CornerRadius="6"
+                      Padding="10,8" Margin="0,10,0,0">
+                <!-- A terminal shows it on one line; here it wraps so that every component can be seen. -->
+                <ItemsControl ItemsSource="{Binding Preview}" Focusable="False" AutomationProperties.Name="{l:Loc claudecode.preview_label}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}" FontFamily="{StaticResource MonoFont}" FontSize="11" xml:space="preserve" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Border>
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claudecode.preview_description}" Margin="0,8,0,0" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc windows.claudecode.colours.title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claudecode.colours.subtitle}" FontSize="12" Margin="0,4,0,12" />
+              <ListBox ItemsSource="{Binding ColourModes}" SelectedItem="{Binding ColourMode, Mode=TwoWay}" Background="Transparent" BorderThickness="0"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="{l:Loc windows.claudecode.colours.title}">
+                <ListBox.ItemsPanel>
+                  <ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="ListBoxItem">
+                    <Setter Property="Margin" Value="0,0,6,6" />
+                    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}" />
+                    <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+                    <Setter Property="AutomationProperties.HelpText" Value="{Binding Description}" />
+                    <Setter Property="Template">
+                      <Setter.Value>
+                        <ControlTemplate TargetType="ListBoxItem">
+                          <Border x:Name="Chrome" CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource Card.Border}" Background="Transparent"
+                                  Padding="10,8">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock Text="{Binding Glyph}" FontFamily="{StaticResource IconFont}" FontSize="12" VerticalAlignment="Center"
+                                         Foreground="{DynamicResource Accent}" Width="20" />
+                              <StackPanel>
+                                <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Name}" FontSize="12" />
+                                <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Description}" FontSize="10" />
+                              </StackPanel>
+                            </StackPanel>
+                          </Border>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                              <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                              <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Accent.Soft}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                              <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Hover}" />
+                            </Trigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Setter.Value>
+                    </Setter>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+              </ListBox>
+
+              <StackPanel Orientation="Horizontal" Margin="0,8,0,0" Visibility="{Binding IsSingleColour, Converter={StaticResource Visible}}">
+                <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc windows.claudecode.colour.custom}" VerticalAlignment="Center" Width="150" />
+                <TextBox Style="{StaticResource ColourInput}" Text="{Binding SingleColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                         AutomationProperties.Name="{l:Loc windows.claudecode.colour.custom}" />
+                <Border Style="{StaticResource ColourSwatch}" Background="{Binding SingleColour}" />
+              </StackPanel>
+
+              <StackPanel Margin="0,8,0,0" Visibility="{Binding IsPerElement, Converter={StaticResource Visible}}">
+                <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc claudecode.element_colors_title}" FontSize="12" FontWeight="Medium" Margin="0,0,0,8" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc claudecode.element_color_directory}" VerticalAlignment="Center" Width="150" />
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding DirectoryColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_directory}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding DirectoryColour}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc claudecode.element_color_branch}" VerticalAlignment="Center" Width="150" />
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding BranchColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_branch}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding BranchColour}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc claudecode.element_color_model}" VerticalAlignment="Center" Width="150" />
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding ModelColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_model}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding ModelColour}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc claudecode.element_color_profile}" VerticalAlignment="Center" Width="150" />
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding ProfileColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_profile}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding ProfileColour}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc claudecode.element_color_context}" VerticalAlignment="Center" Width="150" />
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding ContextColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_context}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding ContextColour}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc claudecode.element_color_separator}" VerticalAlignment="Center" Width="150" />
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding SeparatorColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_separator}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding SeparatorColour}" />
+                </StackPanel>
+                <Rectangle Height="1" Margin="0,6,0,12" Fill="{DynamicResource Line.Divider}" />
+                <views:SettingToggle Title="{l:Loc claudecode.element_color_usage}" Description="{l:Loc claudecode.element_color_usage_desc}"
+                                     IsOn="{Binding OverrideUsageColour, Mode=TwoWay}" Margin="0,0,0,-10" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,12" Visibility="{Binding OverrideUsageColour, Converter={StaticResource Visible}}">
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding UsageColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_usage}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding UsageColour}" />
+                </StackPanel>
+                <views:SettingToggle Title="{l:Loc claudecode.element_color_pace}" Description="{l:Loc claudecode.element_color_pace_desc}"
+                                     IsOn="{Binding OverridePaceColour, Mode=TwoWay}" Margin="0,0,0,-10" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,12" Visibility="{Binding OverridePaceColour, Converter={StaticResource Visible}}">
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding PaceColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_pace}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding PaceColour}" />
+                </StackPanel>
+                <views:SettingToggle Title="{l:Loc claudecode.element_color_weekly}" Description="{l:Loc claudecode.element_color_weekly_desc}"
+                                     IsOn="{Binding OverrideWeeklyColour, Mode=TwoWay}" Margin="0,0,0,-10" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,12" Visibility="{Binding OverrideWeeklyColour, Converter={StaticResource Visible}}">
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding WeeklyColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_weekly}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding WeeklyColour}" />
+                </StackPanel>
+                <views:SettingToggle Title="{l:Loc claudecode.element_color_extra}" Description="{l:Loc claudecode.element_color_extra_desc}"
+                                     IsOn="{Binding OverrideExtraColour, Mode=TwoWay}" Margin="0,0,0,-10" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4" Visibility="{Binding OverrideExtraColour, Converter={StaticResource Visible}}">
+                  <TextBox Style="{StaticResource ColourInput}" Text="{Binding ExtraColour, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                           AutomationProperties.Name="{l:Loc claudecode.element_color_extra}" />
+                  <Border Style="{StaticResource ColourSwatch}" Background="{Binding ExtraColour}" />
+                </StackPanel>
+              </StackPanel>
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claudecode.colour.hex_hint}" Margin="0,6,0,0" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc ui.display_components}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claudecode.components.subtitle}" FontSize="12" Margin="0,4,0,16" />
+              <views:SettingToggle Title="{l:Loc claudecode.component_directory}" IsOn="{Binding ShowDirectory, Mode=TwoWay}" />
+              <views:SettingToggle Title="{l:Loc claudecode.component_branch}" IsOn="{Binding ShowBranch, Mode=TwoWay}" />
+              <views:SettingToggle Title="{l:Loc claudecode.component_model}" IsOn="{Binding ShowModel, Mode=TwoWay}" />
+              <views:SettingToggle Title="{l:Loc claudecode.component_profile}" IsOn="{Binding ShowProfile, Mode=TwoWay}" />
+              <views:SettingToggle Title="{l:Loc claudecode.component_context}" IsOn="{Binding ShowContext, Mode=TwoWay}" />
+              <StackPanel Margin="16,0,0,0" Visibility="{Binding ShowContext, Converter={StaticResource Visible}}">
+                <views:SettingToggle Title="{l:Loc claudecode.component_context_tokens}" Description="{l:Loc claudecode.context_info}"
+                                     IsOn="{Binding ContextAsTokens, Mode=TwoWay}" />
+              </StackPanel>
+              <views:SettingToggle Title="{l:Loc claudecode.component_usage}" IsOn="{Binding ShowUsage, Mode=TwoWay}" />
+              <StackPanel Margin="16,0,0,0" Visibility="{Binding ShowUsage, Converter={StaticResource Visible}}">
+                <views:SettingToggle Title="{l:Loc claudecode.component_progressbar}" IsOn="{Binding ShowProgressBar, Mode=TwoWay}" />
+                <StackPanel Margin="16,0,0,0" Visibility="{Binding ShowBarOptions, Converter={StaticResource Visible}}">
+                  <views:SettingToggle Title="{l:Loc claudecode.component_pace_marker}" Description="{l:Loc claudecode.pace_marker_info}"
+                                       IsOn="{Binding ShowPaceMarker, Mode=TwoWay}" />
+                  <StackPanel Margin="16,0,0,0" Visibility="{Binding ShowPaceOptions, Converter={StaticResource Visible}}">
+                    <views:SettingToggle Title="{l:Loc windows.claudecode.pace_tiers}" Description="{l:Loc windows.claudecode.pace_tiers.description}"
+                                         IsOn="{Binding PaceMarkerStepColors, Mode=TwoWay}" />
+                  </StackPanel>
+                </StackPanel>
+                <views:SettingToggle Title="{l:Loc claudecode.component_resettime}" IsOn="{Binding ShowResetTime, Mode=TwoWay}" />
+                <StackPanel Margin="16,0,0,0" Visibility="{Binding ShowResetOptions, Converter={StaticResource Visible}}">
+                  <views:SettingToggle Title="{l:Loc windows.claudecode.time_24h}" IsOn="{Binding Use24HourTime, Mode=TwoWay}" />
+                </StackPanel>
+                <Rectangle Height="1" Margin="0,0,0,12" Fill="{DynamicResource Line.Divider}" />
+                <views:SettingToggle Title="{l:Loc windows.claudecode.label_context}" IsOn="{Binding ShowContextLabel, Mode=TwoWay}"
+                                     Visibility="{Binding ShowContextLabelOption, Converter={StaticResource Visible}}" />
+                <views:SettingToggle Title="{l:Loc windows.claudecode.label_usage}" IsOn="{Binding ShowUsageLabel, Mode=TwoWay}" />
+                <views:SettingToggle Title="{l:Loc windows.claudecode.label_reset}" IsOn="{Binding ShowResetLabel, Mode=TwoWay}"
+                                     Visibility="{Binding ShowResetOptions, Converter={StaticResource Visible}}" />
+                <Rectangle Height="1" Margin="0,0,0,12" Fill="{DynamicResource Line.Divider}" />
+                <views:SettingToggle Title="{l:Loc claudecode.component_weekly}" Description="{l:Loc claudecode.component_weekly_description}"
+                                     IsOn="{Binding ShowWeekly, Mode=TwoWay}" />
+                <StackPanel Margin="16,0,0,0" Visibility="{Binding ShowWeeklyOptions, Converter={StaticResource Visible}}">
+                  <views:SettingToggle Title="{l:Loc claudecode.component_progressbar}" IsOn="{Binding ShowWeeklyBar, Mode=TwoWay}" />
+                  <StackPanel Margin="16,0,0,0" Visibility="{Binding ShowWeeklyBarOptions, Converter={StaticResource Visible}}">
+                    <views:SettingToggle Title="{l:Loc claudecode.component_pace_marker}" Description="{l:Loc claudecode.pace_marker_info}"
+                                         IsOn="{Binding ShowWeeklyPaceMarker, Mode=TwoWay}" />
+                  </StackPanel>
+                  <views:SettingToggle Title="{l:Loc claudecode.component_resettime}" IsOn="{Binding ShowWeeklyResetTime, Mode=TwoWay}" />
+                  <views:SettingToggle Title="{l:Loc claudecode.weekly_label}" IsOn="{Binding ShowWeeklyLabel, Mode=TwoWay}" />
+                </StackPanel>
+                <views:SettingToggle Title="{l:Loc claudecode.component_extra_usage}" Description="{l:Loc claudecode.component_extra_usage_description}"
+                                     IsOn="{Binding ShowExtraUsage, Mode=TwoWay}" />
+              </StackPanel>
+
+              <Rectangle Height="1" Margin="0,0,0,12" Fill="{DynamicResource Line.Divider}" />
+              <StackPanel Orientation="Horizontal">
+                <Button Style="{StaticResource PrimaryButton}" MinWidth="70" Content="{l:Loc claudecode.button_apply}" Click="OnApplyStatusline"
+                        AutomationProperties.Name="{l:Loc claudecode.button_apply}" />
+                <Button Style="{StaticResource SecondaryButton}" MinWidth="70" Margin="10,0,0,0" Content="{l:Loc claudecode.button_reset}"
+                        Click="OnResetStatusline" AutomationProperties.Name="{l:Loc claudecode.button_reset}" />
+                <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="16,0,6,0">
+                  <Ellipse.Style>
+                    <Style TargetType="Ellipse">
+                      <Setter Property="Fill" Value="{DynamicResource Foreground.Secondary}" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsApplied}" Value="True">
+                          <Setter Property="Fill" Value="{DynamicResource Status.Safe}" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Ellipse.Style>
+                </Ellipse>
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding AppliedText}" VerticalAlignment="Center" />
+              </StackPanel>
+              <Border CornerRadius="4" Padding="8" Margin="0,12,0,0"
+                      Visibility="{Binding Message, Converter={x:Static views:Converters.NotNullToVisible}}">
+                <Border.Style>
+                  <Style TargetType="Border">
+                    <Setter Property="Background" Value="{DynamicResource Banner.Info}" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding MessageIsError}" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource Banner.Warning}" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Style="{StaticResource HeaderIconButton}" Click="OnDismissStatuslineMessage"
+                          ToolTip="{l:Loc common.close}" AutomationProperties.Name="{l:Loc common.close}">
+                    <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="9"
+                               Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                  </Button>
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Message}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </DockPanel>
+              </Border>
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claudecode.how.helper}" Margin="0,12,0,0" TextWrapping="Wrap" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claudecode.how.folders}" Margin="0,2,0,0" TextWrapping="Wrap" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.claudecode.how.reload}" Margin="0,2,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+
+          <!-- The installed helper: where hooks and status lines point, independent of where the app is. -->
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc windows.helper.title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.helper.subtitle}" FontSize="12" Margin="0,4,0,12" TextWrapping="Wrap" />
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource SecondaryButton}" Content="{l:Loc windows.helper.update}" Click="OnUpdateHelper"
+                        Visibility="{Binding CanUpdateHelper, Converter={StaticResource Visible}}" />
+                <StackPanel Orientation="Horizontal">
+                  <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <Ellipse.Style>
+                      <Style TargetType="Ellipse">
+                        <Setter Property="Fill" Value="{DynamicResource Status.Moderate}" />
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding HelperOk}" Value="True">
+                            <Setter Property="Fill" Value="{DynamicResource Status.Safe}" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Ellipse.Style>
+                  </Ellipse>
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{Binding HelperText}" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="340" />
+                </StackPanel>
+              </DockPanel>
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding HelperPath}" Margin="0,8,0,0" TextWrapping="Wrap" FontFamily="{StaticResource MonoFont}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- Activity HUD: upstream NotchHUDSettingsView. -->
+        <StackPanel x:Name="PageHud" DataContext="{Binding Hud}">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc windows.hud.section_title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc windows.hud.section_desc}" />
+          <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+            <StackPanel>
+              <views:SettingToggle Title="{l:Loc windows.hud.enable}" Description="{l:Loc windows.hud.enable_desc}" IsOn="{Binding Enabled, Mode=TwoWay}" />
+              <views:SettingToggle Title="{l:Loc notch.hud.auto_hide}" Description="{l:Loc notch.hud.auto_hide_desc}" IsOn="{Binding AutoHide, Mode=TwoWay}"
+                                   IsEnabled="{Binding Enabled}" Margin="16,0,0,-16" />
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc notch.hooks.title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.hud.hooks_desc}" FontSize="12" Margin="0,4,0,12" TextWrapping="Wrap" />
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource SecondaryButton}" Content="{Binding HookButton}" Click="OnChangeHooks"
+                        IsEnabled="{Binding CanChangeHooks}" AutomationProperties.Name="{Binding HookButton}" />
+                <StackPanel Orientation="Horizontal">
+                  <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,8,0"
+                           Fill="{Binding HookColour, Converter={x:Static views:Converters.ResourceBrush}}" />
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{Binding HookStatusText}" VerticalAlignment="Center" />
+                </StackPanel>
+              </DockPanel>
+              <ItemsControl ItemsSource="{Binding Folders}" Focusable="False" Margin="16,8,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <DockPanel Margin="0,0,0,4">
+                      <Ellipse DockPanel.Dock="Left" Width="6" Height="6" VerticalAlignment="Center" Margin="0,0,8,0"
+                               Fill="{Binding Colour, Converter={x:Static views:Converters.ResourceBrush}}" />
+                      <TextBlock DockPanel.Dock="Right" Style="{StaticResource Text.Caption}" Text="{Binding Text}" Margin="8,0,0,0" />
+                      <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding Folder}" TextTrimming="CharacterEllipsis"
+                                 FontFamily="{StaticResource MonoFont}" />
+                    </DockPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <DockPanel Margin="0,10,0,0" Visibility="{Binding ShowServer, Converter={StaticResource Visible}}">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                  <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc notch.server.retry}" Click="OnRetryHud"
+                          Visibility="{Binding CanRetry, Converter={StaticResource Visible}}" />
+                  <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc windows.hud.new_port}" Click="OnHudNewPort" Margin="8,0,0,0"
+                          Visibility="{Binding CanUseAnotherPort, Converter={StaticResource Visible}}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <Ellipse.Style>
+                      <Style TargetType="Ellipse">
+                        <Setter Property="Fill" Value="{DynamicResource Status.Critical}" />
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding ServerOk}" Value="True">
+                            <Setter Property="Fill" Value="{DynamicResource Status.Safe}" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Ellipse.Style>
+                  </Ellipse>
+                  <TextBlock Style="{StaticResource Text.Body}" Text="{Binding ServerText}" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="300" />
+                </StackPanel>
+              </DockPanel>
+              <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8" Margin="0,10,0,0"
+                      Visibility="{Binding Problem, Converter={x:Static views:Converters.NotNullToVisible}}">
+                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding Problem}" TextWrapping="Wrap" />
               </Border>
             </StackPanel>
           </Border>

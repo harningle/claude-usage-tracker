@@ -60,6 +60,22 @@
   </Target>
 
   <!--
+    The NativeAOT helper the app installs for the status line and the launchers (plan.md section 2). It is
+    published on its own (dotnet publish src/ClaudeUsageTracker.Helper -c Release -r win-x64), because NativeAOT
+    needs the C++ build tools and takes far longer than a build. When that output exists it is copied to helper\
+    beside the app, where the app looks for it; without it the app says that this build has no helper.
+  -->
+  <PropertyGroup>
+    <PublishedHelper>$(ArtifactsPath)\publish\ClaudeUsageTracker.Helper\release_win-x64\ClaudeUsageTracker.Helper.exe</PublishedHelper>
+  </PropertyGroup>
+  <Target Name="CopyHelperAfterBuild" AfterTargets="Build" Condition="Exists('$(PublishedHelper)')">
+    <Copy SourceFiles="$(PublishedHelper)" DestinationFolder="$(OutDir)helper" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyHelperAfterPublish" AfterTargets="Publish" Condition="Exists('$(PublishedHelper)')">
+    <Copy SourceFiles="$(PublishedHelper)" DestinationFolder="$(PublishDir)helper" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!--
     Upstream's Localizable.strings files, unchanged and looked up by upstream key, plus Windows.strings
     for text the port adds (keys prefixed "windows.").
   -->

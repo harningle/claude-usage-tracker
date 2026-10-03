@@ -51,6 +51,9 @@ public partial class PopoverWindow : Window
     public event EventHandler? SetupRequested;
     public event EventHandler? ManageProfilesRequested;
 
+    /// <summary>The banner about an installed integration that needs repair was clicked.</summary>
+    public event EventHandler? IntegrationRequested;
+
     /// <summary>A profile was chosen in the switcher menu.</summary>
     public event Action<Guid>? ProfileSelected;
 
@@ -248,6 +251,10 @@ public partial class PopoverWindow : Window
             case BannerAction.OpenSetup:
                 Dismiss();
                 SetupRequested?.Invoke(this, EventArgs.Empty);
+                break;
+            case BannerAction.OpenIntegration:
+                Dismiss();
+                IntegrationRequested?.Invoke(this, EventArgs.Empty);
                 break;
         }
     }

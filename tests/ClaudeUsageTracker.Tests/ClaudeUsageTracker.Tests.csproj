@@ -19,6 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ClaudeUsageTracker.Core\ClaudeUsageTracker.Core.csproj" />
     <ProjectReference Include="..\..\src\ClaudeUsageTracker.App\ClaudeUsageTracker.App.csproj" />
+    <!-- Built before the tests, which run it as the launcher's child; it is not referenced as an assembly. -->
+    <ProjectReference Include="..\FakeClaude\FakeClaude.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

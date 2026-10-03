@@ -91,6 +91,7 @@ public sealed class SetupWizardViewModel : ObservableObject
     private readonly TimeProvider _time;
     private readonly string _userProfile;
     private readonly string? _configDirOverride;
+    private readonly Func<IReadOnlyList<string>>? _knownFolders;
     private readonly List<string> _extraDirectories = [];
     private WizardStep _step = WizardStep.ChooseProvider;
     private WizardRoute _route = WizardRoute.ClaudeCode;
@@ -112,8 +113,9 @@ public sealed class SetupWizardViewModel : ObservableObject
 
     public SetupWizardViewModel(
         CliLinkService links, UsageClient client, SetupService setup, WizardServices services, TimeProvider time, string userProfile,
-        string? configDirOverride)
+        string? configDirOverride, Func<IReadOnlyList<string>>? knownFolders = null)
     {
+        _knownFolders = knownFolders;
         _links = links;
         _client = client;
         _setup = setup;
@@ -197,7 +199,8 @@ public sealed class SetupWizardViewModel : ObservableObject
         Step = WizardStep.Detecting;
         Message = null;
         var linked = _setup.TargetProfile?.CliLink?.ConfigDirectory;
-        var known = new List<string>(_extraDirectories);
+        // Folders of installed launchers are known places to look, and are listed once they hold a login.
+        var known = new List<string>([.. _extraDirectories, .. _knownFolders?.Invoke() ?? []]);
         if (linked is not null)
         {
             known.Add(linked);

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ClaudeUsageTracker.Core.Providers;
+using ClaudeUsageTracker.Core.Statusline;
 using ClaudeUsageTracker.Core.Usage;
 
 namespace ClaudeUsageTracker.App.Storage;
@@ -51,6 +52,21 @@ public sealed class AppSettings
 
     /// <summary>Global keyboard shortcuts (upstream <c>ShortcutManager</c>); none by default, as upstream.</summary>
     public ShortcutSettings Shortcuts { get; set; } = new();
+
+    /// <summary>What the Claude Code status line shows (upstream's statusline preferences), as last chosen on its page.</summary>
+    public StatuslineConfig Statusline { get; set; } = new();
+
+    /// <summary>
+    /// The user applied the status line: it belongs in every known Claude Code folder's settings. Set by Apply and
+    /// cleared by Reset; upstream inferred it from its installed scripts.
+    /// </summary>
+    public bool StatuslineEnabled { get; set; }
+
+    /// <summary>Upstream <c>notchHUDEnabled</c>: install the hooks and show the activity HUD. Off by default, as upstream.</summary>
+    public bool HudEnabled { get; set; }
+
+    /// <summary>Upstream <c>notchHUDAutoHide</c>: hide the HUD a few seconds after every session went idle. On by default, as upstream.</summary>
+    public bool HudAutoHide { get; set; } = true;
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
@@ -188,6 +204,12 @@ public sealed class ProfileSettings
     /// by this opt-in, never by usage polling.
     /// </summary>
     public bool AutoStartSessionEnabled { get; set; }
+
+    /// <summary>
+    /// Upstream <c>terminalLauncherSlug</c>: the slug of this profile's installed launcher (<c>claude-&lt;slug&gt;</c>),
+    /// fixed when it is installed so that renaming the profile does not move its Claude Code folder. Null without a launcher.
+    /// </summary>
+    public string? TerminalLauncherSlug { get; set; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
