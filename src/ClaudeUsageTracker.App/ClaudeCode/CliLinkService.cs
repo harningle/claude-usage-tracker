@@ -110,9 +110,6 @@ public sealed partial class CliLinkService(
     /// <summary>A torn read during a CLI write is retried once after this delay.</summary>
     internal static readonly TimeSpan RereadDelay = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>After a renewal that got no usable answer, the next attempt waits this long.</summary>
-    internal static readonly TimeSpan RenewalRetryDelay = TimeSpan.FromMinutes(5);
-
     private readonly Lock _gate = new();
 
     // Refresh tokens a successful grant used up: never sent again.
@@ -125,7 +122,8 @@ public sealed partial class CliLinkService(
     // for that profile meanwhile.
     private readonly Dictionary<Guid, CliSecret> _unsaved = [];
 
-    private readonly Dictionary<Guid, DateTimeOffset> _renewalNotBefore = [];
+    // After a failed renewal the next attempt waits, longer each time the login service refuses.
+    private readonly RenewalBackoff _renewalHolds = new(time);
 
     public CliSnapshot Read(CliConfigDirectory directory) => CliStore.Read(directory, time.GetUtcNow());
 
@@ -425,7 +423,9 @@ public sealed partial class CliLinkService(
             switch (outcome.Result)
             {
                 case RefreshResult.Succeeded:
-                    var renewed = Renewed(copy.CredentialsJson, refreshToken, outcome, CredentialOwnership.AppOwned, copy.SourceConfigDirectory, null, copy.OAuthAccountJson);
+                    var renewed = Renewed(
+                        profileId, copy.CredentialsJson, refreshToken, outcome, CredentialOwnership.AppOwned, copy.SourceConfigDirectory, null,
+                        copy.OAuthAccountJson);
                     mirrorError = Persist(profileId, renewed) ?? mirrorError;
                     ShareRenewal(profileId, refreshToken, renewed);
                     return Result(LinkStatus.Ready, CliCredentials.Parse(renewed.CredentialsJson));
@@ -433,7 +433,7 @@ public sealed partial class CliLinkService(
                     Reject(refreshToken);
                     return Result(LinkStatus.LoginRejected, null);
                 default:
-                    HoldRenewal(profileId);
+                    HoldRenewal(profileId, outcome);
                     return Result(LinkStatus.RefreshFailed, null, LinkNotice.RenewalFailed);
             }
         }
@@ -502,7 +502,7 @@ public sealed partial class CliLinkService(
                 case RefreshResult.Succeeded:
                     var pending = new PendingWriteBack(refreshToken, time.GetUtcNow(), [.. holders.Select(h => h.Directory.Path)]);
                     var renewed = Renewed(
-                        fresh.Credentials!.RawJson, refreshToken, outcome, CredentialOwnership.CliLinked, snapshot.Directory.Path, pending,
+                        profileId, fresh.Credentials!.RawJson, refreshToken, outcome, CredentialOwnership.CliLinked, snapshot.Directory.Path, pending,
                         fresh.Account?.RawJson ?? LoadCopy(profileId).Copy?.OAuthAccountJson);
                     // Saved before it is handed back, so a crash in between can be reconciled at the next start. If
                     // it cannot be saved it is still handed back: the folder is where Claude Code looks.
@@ -517,7 +517,7 @@ public sealed partial class CliLinkService(
                     Reject(refreshToken);
                     return new LinkCheck(LinkStatus.LoginRejected, snapshot, null, mirrorError) { Notice = notice };
                 default:
-                    HoldRenewal(profileId);
+                    HoldRenewal(profileId, outcome);
                     return Waiting(LinkNotice.RenewalFailed);
             }
         }
@@ -692,13 +692,14 @@ public sealed partial class CliLinkService(
 
     /// <summary>The copy after a successful grant: the old login with the new tokens and expiry.</summary>
     private CliSecret Renewed(
-        string credentialsJson, string sentRefreshToken, ClaudeRefreshOutcome outcome, CredentialOwnership ownership, string source,
-        PendingWriteBack? pending, string? accountJson)
+        Guid profileId, string credentialsJson, string sentRefreshToken, ClaudeRefreshOutcome outcome, CredentialOwnership ownership,
+        string source, PendingWriteBack? pending, string? accountJson)
     {
         var response = outcome.Response!;
-        if (response.RefreshToken is { } rotated && rotated != sentRefreshToken)
+        lock (_gate)
         {
-            lock (_gate)
+            _renewalHolds.Clear(profileId);
+            if (response.RefreshToken is { } rotated && rotated != sentRefreshToken)
             {
                 _consumed.Add(sentRefreshToken);
             }
@@ -851,7 +852,7 @@ public sealed partial class CliLinkService(
         {
             return _consumed.Contains(refreshToken)
                    || _unsaved.ContainsKey(profileId)
-                   || (_renewalNotBefore.TryGetValue(profileId, out var notBefore) && time.GetUtcNow() < notBefore);
+                   || _renewalHolds.Holds(profileId);
         }
     }
 
@@ -907,11 +908,11 @@ public sealed partial class CliLinkService(
         }
     }
 
-    private void HoldRenewal(Guid profileId)
+    private void HoldRenewal(Guid profileId, ClaudeRefreshOutcome outcome)
     {
         lock (_gate)
         {
-            _renewalNotBefore[profileId] = time.GetUtcNow() + RenewalRetryDelay;
+            _renewalHolds.Failed(profileId, answered: outcome.Status is not null);
         }
     }
 
@@ -920,7 +921,7 @@ public sealed partial class CliLinkService(
         lock (_gate)
         {
             _unsaved.Remove(profileId);
-            _renewalNotBefore.Remove(profileId);
+            _renewalHolds.Clear(profileId);
         }
     }
 

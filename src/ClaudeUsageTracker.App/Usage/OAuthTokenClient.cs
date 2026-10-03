@@ -76,7 +76,8 @@ public sealed class OAuthTokenClient(HttpClient http, TimeProvider time, Request
         {
             Content = new StringContent(ClaudeOAuth.RefreshRequestBody(refreshToken), Encoding.UTF8, "application/x-www-form-urlencoded"),
         };
-        request.Headers.TryAddWithoutValidation("User-Agent", UsageClient.CliUserAgent);
+        // No User-Agent, as upstream: the endpoint answers the usage request's "claude-code/..." value with an
+        // immediate 429 whatever the token (live, 2026-10-03), and accepts a request without one.
         request.Headers.Accept.ParseAdd("application/json");
 
         var (failure, status, body) = await SendAsync(request, "claudeTokenRefresh", "/v1/oauth/token", cancellation).ConfigureAwait(false);

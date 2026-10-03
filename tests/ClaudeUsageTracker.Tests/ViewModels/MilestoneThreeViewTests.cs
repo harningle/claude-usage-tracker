@@ -380,6 +380,15 @@ public sealed class CodexUsageSourceTests : IDisposable
         _time.Now += TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1);
         await source.ResolveAsync(watch, CancellationToken.None);
         Assert.Equal(2, links.TokenRequests);
+
+        // The second refusal doubles the wait.
+        _time.Now += TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1);
+        await source.ResolveAsync(watch, CancellationToken.None);
+        Assert.Equal(2, links.TokenRequests);
+
+        _time.Now += TimeSpan.FromMinutes(5);
+        await source.ResolveAsync(watch, CancellationToken.None);
+        Assert.Equal(3, links.TokenRequests);
     }
 
     private ProfileWatch Watch() => ProfileWatch.From(new ProfileSettings

@@ -388,7 +388,9 @@ public sealed partial class CliLinkService
             switch (outcome.Result)
             {
                 case RefreshResult.Succeeded:
-                    copy = Renewed(copy.CredentialsJson, refreshToken, outcome, CredentialOwnership.AppOwned, copy.SourceConfigDirectory, null, copy.OAuthAccountJson);
+                    copy = Renewed(
+                        targetId, copy.CredentialsJson, refreshToken, outcome, CredentialOwnership.AppOwned, copy.SourceConfigDirectory, null,
+                        copy.OAuthAccountJson);
                     if (Persist(targetId, copy) is { } persistError)
                     {
                         return Refused(CliSwitchRefusal.StorageFailed, persistError);
@@ -400,7 +402,7 @@ public sealed partial class CliLinkService
                     Reject(refreshToken);
                     return Refused(CliSwitchRefusal.LoginRejected);
                 default:
-                    HoldRenewal(targetId);
+                    HoldRenewal(targetId, outcome);
                     return Refused(CliSwitchRefusal.RenewalFailed);
             }
         }

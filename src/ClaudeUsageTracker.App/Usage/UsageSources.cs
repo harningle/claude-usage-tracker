@@ -75,9 +75,6 @@ public sealed class CodexUsageSource(
     ProfileSecretStore secrets, CredentialLock credentialLock, OAuthTokenClient tokens, CodexClient client, TimeProvider time,
     Func<string> defaultHome) : IUsageSource
 {
-    /// <summary>After a renewal that got no usable answer, the next attempt waits this long.</summary>
-    internal static readonly TimeSpan RenewalRetryDelay = TimeSpan.FromMinutes(5);
-
     private readonly Lock _gate = new();
 
     // Refresh tokens a successful grant used up. OpenAI revokes the whole login when one is sent twice.
@@ -91,7 +88,8 @@ public sealed class CodexUsageSource(
     // meanwhile win, and the renewal is dropped.
     private readonly Dictionary<Guid, (string Replaced, string Renewed)> _unsaved = [];
 
-    private readonly Dictionary<Guid, DateTimeOffset> _renewalNotBefore = [];
+    // After a failed renewal the next attempt waits, longer each time the login service refuses.
+    private readonly RenewalBackoff _renewalHolds = new(time);
 
     public async Task<SourceCredentials> ResolveAsync(ProfileWatch watch, CancellationToken cancellation)
     {
@@ -212,7 +210,7 @@ public sealed class CodexUsageSource(
                 // Never sent twice, nothing more is renewed while an earlier renewal is still unsaved, and a
                 // failed renewal waits before the next attempt.
                 if (current.RefreshToken.Length == 0 || _consumed.Contains(current.RefreshToken) || _unsaved.ContainsKey(profileId)
-                    || (_renewalNotBefore.TryGetValue(profileId, out var notBefore) && time.GetUtcNow() < notBefore))
+                    || _renewalHolds.Holds(profileId))
                 {
                     return (null, RefreshResult.Failed, error);
                 }
@@ -229,7 +227,7 @@ public sealed class CodexUsageSource(
                     }
                     else
                     {
-                        _renewalNotBefore[profileId] = time.GetUtcNow() + RenewalRetryDelay;
+                        _renewalHolds.Failed(profileId, answered: outcome.Status is not null);
                     }
                 }
 
@@ -239,7 +237,7 @@ public sealed class CodexUsageSource(
             var serialised = CodexAuthJson.SerialiseAuthJson(renewed, json, time.GetUtcNow());
             lock (_gate)
             {
-                _renewalNotBefore.Remove(profileId);
+                _renewalHolds.Clear(profileId);
                 if (renewed.RefreshToken != current.RefreshToken)
                 {
                     _consumed.Add(current.RefreshToken);

@@ -231,6 +231,8 @@ public sealed class OAuthTokenClientTests : IDisposable
         Assert.Equal("at-2", outcome.Response?.AccessToken);
         Assert.Equal("application/x-www-form-urlencoded", handler.Requests.Single().Content?.Headers.ContentType?.MediaType);
         Assert.Equal("grant_type=refresh_token&refresh_token=rt-synthetic-1&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e", body);
+        // Upstream sends no User-Agent here, and the endpoint refuses the usage request's one with a 429.
+        Assert.Empty(handler.Requests.Single().Headers.UserAgent);
         Assert.DoesNotContain("rt-synthetic-1", File.ReadAllText(Log.FilePath), StringComparison.Ordinal);
         Assert.DoesNotContain("at-2", File.ReadAllText(Log.FilePath), StringComparison.Ordinal);
     }
@@ -239,6 +241,7 @@ public sealed class OAuthTokenClientTests : IDisposable
     [InlineData(HttpStatusCode.BadRequest, """{"error":"invalid_grant"}""", RefreshResult.LoginRejected)]
     [InlineData(HttpStatusCode.BadRequest, """{"error":"invalid_request"}""", RefreshResult.Failed)]
     [InlineData(HttpStatusCode.ServiceUnavailable, "{}", RefreshResult.Failed)]
+    [InlineData(HttpStatusCode.TooManyRequests, """{"error":{"type":"rate_limit_error","message":"Rate limited. Please try again later."}}""", RefreshResult.Failed)]
     [InlineData(HttpStatusCode.OK, """{"access_token":""}""", RefreshResult.Failed)]
     [InlineData(HttpStatusCode.Forbidden, "<html>Just a moment...</html>", RefreshResult.Failed)]
     public async Task ClaudeOutcomesAreClassified(HttpStatusCode status, string body, RefreshResult expected) =>

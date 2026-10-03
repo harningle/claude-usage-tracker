@@ -72,8 +72,8 @@ public static class ClaudeCliCredentials
 
 /// <summary>
 /// Claude Code's OAuth <c>refresh_token</c> grant, as upstream <c>ClaudeCodeSyncService.performTokenRefresh</c>
-/// sends it. The client ID is Claude Code's public one. The request shape is upstream's; it has not been
-/// exercised live by this port (docs/milestone-3.md).
+/// sends it. The client ID is Claude Code's public one. The request shape is upstream's; it first renewed a
+/// login live on 2026-10-03 (docs/milestone-4.md).
 /// </summary>
 public static class ClaudeOAuth
 {

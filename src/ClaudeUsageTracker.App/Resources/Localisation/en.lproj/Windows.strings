@@ -110,7 +110,7 @@
 /* MARK: - Milestone 3: popover and tray */
 "windows.popover.switch_profile" = "Switch profile";
 "windows.banner.hand_back_pending" = "The tracker renewed Claude Code's login but could not write it back to Claude Code yet. It keeps trying.";
-"windows.banner.renewal_failed" = "Couldn't renew the login. The tracker tries again in a few minutes.";
+"windows.banner.renewal_failed" = "Couldn't renew the login. The tracker tries again in a few minutes, and less often if it keeps failing.";
 "windows.banner.login_rejected" = "The login was rejected. Sign in again in Claude Code, then set up this profile again.";
 "windows.banner.claude_ai_other_account" = "The claude.ai session belongs to an account that can't see this organization. Sign in again.";
 "windows.banner.waiting_for_codex" = "Waiting for the Codex CLI to refresh its login";
@@ -243,7 +243,7 @@
 "windows.cli.switch.signed_in_button" = "Signed In Again";
 "windows.cli.switch.signed_in_confirm" = "Choose OK only after signing in again in Claude Code (/login). The tracker then treats the folder's login as Claude Code's own and resumes renewing logins.";
 "windows.cli.switch.superseded" = "A newer Claude Code sign-in replaced the unfinished switch, so it was left as it is.";
-"windows.cli.switch.refused.renewal_failed" = "This profile's login has expired and could not be renewed just now. Try again in a few minutes.";
+"windows.cli.switch.refused.renewal_failed" = "This profile's login has expired and could not be renewed just now. Try again later.";
 "windows.cli.switch.notification.title" = "Claude Code Account";
 "windows.cli.switch.refused.no_copy" = "This profile has no saved Claude Code login to switch to. Set it up again.";
 "windows.cli.switch.refused.used_elsewhere" = "This login is marked as also used elsewhere. Writing it into Claude Code here would give it a second holder, and each would sign the other out.";

@@ -3,6 +3,7 @@ using System.Net;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Interop;
 using ClaudeUsageTracker.App.Storage;
+using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.Tests.Usage;
 
 namespace ClaudeUsageTracker.Tests.ClaudeCode;
@@ -174,9 +175,56 @@ public sealed class CliOwnershipTests : IDisposable
         await Check(harness, profileId, link);
         Assert.Equal(1, harness.TokenRequests);
 
-        _time.Now += CliLinkService.RenewalRetryDelay + TimeSpan.FromSeconds(1);
+        _time.Now += RenewalBackoff.FirstDelay + TimeSpan.FromSeconds(1);
         Assert.Equal(LinkStatus.Ready, (await Check(harness, profileId, link)).Status);
         Assert.Equal(2, harness.TokenRequests);
+    }
+
+    [Fact]
+    public async Task RenewalsTheServiceKeepsRefusingWaitLongerEachTime()
+    {
+        // As on 2026-10-03: the service answers every renewal with a rate limit.
+        var harness = Harness(LinkHarness.TokenEndpoint(
+            () => LinkHarness.Json(HttpStatusCode.TooManyRequests, "{}"), () => LinkHarness.Json(HttpStatusCode.TooManyRequests, "{}"),
+            () => LinkHarness.Grant("at-2", "rt-2"), () => LinkHarness.Json(HttpStatusCode.TooManyRequests, "{}")));
+        var (profileId, link) = await LinkExpired(harness);
+        await Check(harness, profileId, link);
+
+        _time.Now += RenewalBackoff.FirstDelay + TimeSpan.FromSeconds(1);
+        await Check(harness, profileId, link);
+        Assert.Equal(2, harness.TokenRequests);
+
+        // The second refusal doubles the wait.
+        _time.Now += RenewalBackoff.FirstDelay + TimeSpan.FromSeconds(1);
+        Assert.Equal(LinkNotice.RenewalFailed, (await Check(harness, profileId, link)).Notice);
+        Assert.Equal(2, harness.TokenRequests);
+
+        _time.Now += RenewalBackoff.FirstDelay;
+        Assert.Equal(LinkStatus.Ready, (await Check(harness, profileId, link)).Status);
+        Assert.Equal(3, harness.TokenRequests);
+
+        // That success starts over: when the renewed login expires and is refused, the wait is the first one again.
+        _time.Now += TimeSpan.FromHours(9);
+        await Check(harness, profileId, link);
+        Assert.Equal(4, harness.TokenRequests);
+        _time.Now += RenewalBackoff.FirstDelay + TimeSpan.FromSeconds(1);
+        await Check(harness, profileId, link);
+        Assert.Equal(5, harness.TokenRequests);
+    }
+
+    [Fact]
+    public async Task ARenewalWithoutAnAnswerIsRetriedAfterFiveMinutesEachTime()
+    {
+        var harness = Harness(new ScriptedHandler((_, _) => throw new HttpRequestException("offline")));
+        var (profileId, link) = await LinkExpired(harness);
+        await Check(harness, profileId, link);
+
+        foreach (var expected in new[] { 2, 3, 4 })
+        {
+            _time.Now += RenewalBackoff.FirstDelay + TimeSpan.FromSeconds(1);
+            Assert.Equal(LinkNotice.RenewalFailed, (await Check(harness, profileId, link)).Notice);
+            Assert.Equal(expected, harness.TokenRequests);
+        }
     }
 
     [Fact]
