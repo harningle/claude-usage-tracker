@@ -56,6 +56,9 @@ public enum CliSwitchRefusal
 
     /// <summary>An unfinished switch left the folder unclear; the user has to sign in again in Claude Code and say so.</summary>
     SignInAgain,
+
+    /// <summary>What an automatic switch was asked for no longer holds; nothing was changed.</summary>
+    NoLongerApplies,
 }
 
 /// <summary>A profile's Claude Code link, copied from the settings for the switch.</summary>
@@ -101,8 +104,13 @@ public sealed partial class CliLinkService
     /// <summary>Writes the target profile's login and account record into <paramref name="folder"/>.</summary>
     /// <param name="profiles">Every profile with a Claude Code link, to find who follows the folder's current account.</param>
     /// <param name="confirmedOccupant">The <see cref="CliSwitchResult.OccupantStamp"/> the user agreed to sign out, if any.</param>
+    /// <param name="stillWanted">
+    /// For an automatic switch: asked under the lock, after any renewal and before anything is saved or written, with the
+    /// folder's login as the switch read it. False leaves everything as it is. It runs off the caller's thread.
+    /// </param>
     public async Task<CliSwitchResult> SwitchAsync(
-        Guid targetId, IReadOnlyList<LinkedProfile> profiles, CliConfigDirectory folder, string? confirmedOccupant, CancellationToken cancellation)
+        Guid targetId, IReadOnlyList<LinkedProfile> profiles, CliConfigDirectory folder, string? confirmedOccupant,
+        Func<CliSnapshot, bool>? stillWanted, CancellationToken cancellation)
     {
         if (processes.ActivityFor(folder) != StoreActivity.Idle)
         {
@@ -111,7 +119,7 @@ public sealed partial class CliLinkService
 
         using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
-            return await SwitchLockedAsync(targetId, profiles, folder, confirmedOccupant, cancellation).ConfigureAwait(false);
+            return await SwitchLockedAsync(targetId, profiles, folder, confirmedOccupant, stillWanted, cancellation).ConfigureAwait(false);
         }
     }
 
@@ -276,7 +284,8 @@ public sealed partial class CliLinkService
     }
 
     private async Task<CliSwitchResult> SwitchLockedAsync(
-        Guid targetId, IReadOnlyList<LinkedProfile> profiles, CliConfigDirectory folder, string? confirmedOccupant, CancellationToken cancellation)
+        Guid targetId, IReadOnlyList<LinkedProfile> profiles, CliConfigDirectory folder, string? confirmedOccupant,
+        Func<CliSnapshot, bool>? stillWanted, CancellationToken cancellation)
     {
         static CliSwitchResult Refused(CliSwitchRefusal why, string? detail = null) => new(CliSwitchOutcome.Refused, why, detail);
 
@@ -428,6 +437,13 @@ public sealed partial class CliLinkService
             || (accountFile is not null && oldAccountIdentity != occupant.Account?.Identity))
         {
             return new CliSwitchResult(CliSwitchOutcome.Deferred);
+        }
+
+        // The wait for the lock and a renewal's request may have taken a while. An automatic switch is asked again now,
+        // on the login the files were just confirmed to hold.
+        if (stillWanted?.Invoke(occupant) == false)
+        {
+            return Refused(CliSwitchRefusal.NoLongerApplies);
         }
 
         var accountRecord = copy.OAuthAccountJson ?? MinimalAccount(target.Link);

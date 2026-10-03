@@ -73,7 +73,7 @@ public sealed class CliSwitchTests : IDisposable
     }
 
     private Task<CliSwitchResult> Switch(LinkHarness harness, string? confirmed = null) =>
-        harness.Service.SwitchAsync(_target, Profiles, Default, confirmed, CancellationToken.None);
+        harness.Service.SwitchAsync(_target, Profiles, Default, confirmed, null, CancellationToken.None);
 
     private static JsonObject Json(string file) => (JsonObject)JsonNode.Parse(File.ReadAllText(file))!;
 

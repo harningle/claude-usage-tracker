@@ -21,6 +21,8 @@ public sealed class AutoStartService(
     AppSettings settings, ClaudeAiClient client, AutomationService automation, TimeProvider time,
     Func<Guid, ProfileUsageState?> current, Action<Guid> releaseBrowser)
 {
+    // For profiles that are not polled: the wait the server asked for after a failed usage read.
+    private readonly Dictionary<Guid, DateTimeOffset> _retryNotBefore = [];
     private bool _running;
     private DateTimeOffset _lastCheck = DateTimeOffset.MinValue;
 
@@ -148,7 +150,22 @@ public sealed class AutoStartService(
                 : null;
         }
 
+        if (_retryNotBefore.TryGetValue(profile.Id, out var wait) && now < wait)
+        {
+            return null;
+        }
+
         var fetched = await client.FetchUsageAsync(profile.Id, organization, cancellation).ConfigureAwait(true);
+        if (fetched is FetchFailed failed
+            && (failed.RetryAfter ?? (failed.Failure == FetchFailure.RateLimited ? RefreshPolicy.DefaultRateLimitWait : null)) is { } asked)
+        {
+            _retryNotBefore[profile.Id] = failed.At + asked;
+        }
+        else
+        {
+            _retryNotBefore.Remove(profile.Id);
+        }
+
         return fetched is FetchSucceeded success ? success.Usage : null;
     }
 }

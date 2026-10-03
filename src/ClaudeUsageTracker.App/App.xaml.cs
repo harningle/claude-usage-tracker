@@ -435,7 +435,7 @@ public partial class App : Application
         OnProfileSelected(to.Id);
         if (onFrom && to.CliLink is not null && to.ProviderKind == Provider.Anthropic)
         {
-            _ = _switcher.RequestAsync(to, automatic: true, null);
+            _ = _switcher.RequestAsync(to, from.Id, null);
         }
     }
 
@@ -778,12 +778,12 @@ public partial class App : Application
             return;
         }
 
-        var result = await _switcher.RequestAsync(profile, automatic: false, null);
+        var result = await _switcher.RequestAsync(profile, null, null);
         if (result is { Outcome: CliSwitchOutcome.NeedsConfirmation, OccupantStamp: { } stamp }
             && MessageBox.Show(_settingsWindow, _switcher.Describe(result, profile), Strings.Get("windows.cli.switch.confirm.title"),
                 MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK)
         {
-            await _switcher.RequestAsync(profile, automatic: false, stamp);
+            await _switcher.RequestAsync(profile, null, stamp);
         }
 
         UpdateViews();

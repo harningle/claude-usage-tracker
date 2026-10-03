@@ -141,6 +141,24 @@ public sealed class AutomationServiceTests : IDisposable
     }
 
     [Fact]
+    public void AResetSeenInTheBackgroundLetsTheProfileSwitchAgain()
+    {
+        _settings.AutoSwitchProfileEnabled = true;
+        var service = Service();
+        service.UsageFetched(_first, Session(100));
+
+        // The second profile is the active one while the first one's window resets.
+        _settings.ActiveProfileId = _second.Id;
+        service.UsageFetched(_first, Session(40, Now.AddHours(5)));
+
+        // Back on the first profile when it reaches its next limit.
+        _settings.ActiveProfileId = _first.Id;
+        service.UsageFetched(_first, Session(100, Now.AddHours(5)));
+
+        Assert.Equal(2, _switches.Count);
+    }
+
+    [Fact]
     public void AutoSwitchIsOffByDefaultAndOnlyFollowsTheActiveProfile()
     {
         var service = Service();

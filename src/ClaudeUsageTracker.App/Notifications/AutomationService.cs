@@ -94,6 +94,11 @@ public sealed class AutomationService
         if (evaluation.Effective is { } effective)
         {
             _previousEffective[profile.Id] = effective;
+            if (effective < AutoSwitch.Limit)
+            {
+                // Below the limit again, also while another profile is the active one: its next limit may switch again.
+                _autoSwitched.Remove(profile.Id);
+            }
         }
 
         if (evaluation.State.WindowResetAt != memory.SessionWindowResetAt || !evaluation.State.NotifiedLevels.SequenceEqual(memory.NotifiedLevels))
@@ -190,13 +195,7 @@ public sealed class AutomationService
             return;
         }
 
-        if (effective < AutoSwitch.Limit)
-        {
-            _autoSwitched.Remove(active.Id);
-            return;
-        }
-
-        if (_autoSwitched.Contains(active.Id))
+        if (effective < AutoSwitch.Limit || _autoSwitched.Contains(active.Id))
         {
             return;
         }

@@ -11,9 +11,12 @@ using ClaudeUsageTracker.Core.Providers;
 namespace ClaudeUsageTracker.App.ClaudeCode;
 
 /// <summary>A switch waiting for Claude Code to close.</summary>
-/// <param name="Automatic">Requested by auto-switch rather than by the user.</param>
+/// <param name="AutomaticFrom">For a switch requested by auto-switch rather than by the user: the profile that reached its limit.</param>
 /// <param name="ConfirmedOccupant">The login the user agreed to sign out, if the switch needed that.</param>
-public sealed record PendingCliSwitch(Guid TargetProfileId, bool Automatic, string? ConfirmedOccupant, DateTimeOffset RequestedAt);
+public sealed record PendingCliSwitch(Guid TargetProfileId, Guid? AutomaticFrom, string? ConfirmedOccupant, DateTimeOffset RequestedAt)
+{
+    public bool Automatic => AutomaticFrom is not null;
+}
 
 /// <summary>What the CLI Account page shows about switching Claude Code to the active profile's account.</summary>
 /// <param name="InUse">Claude Code's shared folder holds this account now.</param>
@@ -72,8 +75,10 @@ public sealed class CliSwitcher
     /// Switches Claude Code to the profile's account now, or queues the switch when Claude Code is running. Returns the
     /// outcome; <see cref="CliSwitchOutcome.NeedsConfirmation"/> asks the caller to confirm and call again.
     /// </summary>
-    public async Task<CliSwitchResult> RequestAsync(ProfileSettings target, bool automatic, string? confirmedOccupant)
+    /// <param name="automaticFrom">Set by auto-switch: the profile that reached its limit, whose account Claude Code is on.</param>
+    public async Task<CliSwitchResult> RequestAsync(ProfileSettings target, Guid? automaticFrom, string? confirmedOccupant)
     {
+        var automatic = automaticFrom is not null;
         // The newest request is the one that counts: a switch still waiting for another profile is dropped.
         var request = ++_requests;
         Pending = null;
@@ -81,13 +86,20 @@ public sealed class CliSwitcher
         {
             // Another switch or a settlement is running: this one waits its turn rather than being lost, and its outcome
             // is reported when it runs.
-            Pending = new PendingCliSwitch(target.Id, automatic, confirmedOccupant, _time.GetUtcNow());
+            Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow());
             Changed?.Invoke();
             KeepTrying();
             return new CliSwitchResult(CliSwitchOutcome.Deferred);
         }
 
-        var result = await RunAsync(target.Id, confirmedOccupant);
+        var result = await RunAsync(target.Id, confirmedOccupant, automaticFrom);
+        if (result.Refusal == CliSwitchRefusal.NoLongerApplies)
+        {
+            // Dropped as a queued one would be: nothing was changed, so there is nothing to report.
+            KeepTrying();
+            return result;
+        }
+
         if (result.Outcome == CliSwitchOutcome.Deferred)
         {
             if (request != _requests)
@@ -97,7 +109,7 @@ public sealed class CliSwitcher
                 return result;
             }
 
-            Pending = new PendingCliSwitch(target.Id, automatic, confirmedOccupant, _time.GetUtcNow());
+            Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow());
         }
 
         Report(target.Id, result, automatic, queued: false);
@@ -203,7 +215,7 @@ public sealed class CliSwitcher
         };
     }
 
-    private async Task TickAsync()
+    internal async Task TickAsync()
     {
         // A tick never overlaps a running switch or settlement (one can hold the credential lock through a renewal).
         if (_busy)
@@ -226,15 +238,60 @@ public sealed class CliSwitcher
             return;
         }
 
-        var result = await RunAsync(target.Id, pending.ConfirmedOccupant);
+        if (pending.AutomaticFrom is { } origin)
+        {
+            var applies = AutomaticStillApplies(origin);
+            if (applies != true)
+            {
+                if (applies == false)
+                {
+                    // What the automatic switch was queued for no longer holds, so it is dropped rather than applied late.
+                    Cancel();
+                }
+
+                KeepTrying();
+                return;
+            }
+        }
+
+        var result = await RunAsync(target.Id, pending.ConfirmedOccupant, pending.AutomaticFrom);
         // A newer request made meanwhile replaced this one and stays queued.
         if (result.Outcome != CliSwitchOutcome.Deferred && ReferenceEquals(Pending, pending))
         {
-            Pending = null;
-            Report(target.Id, result, pending.Automatic, queued: true);
+            if (result.Refusal == CliSwitchRefusal.NoLongerApplies)
+            {
+                Cancel();
+            }
+            else
+            {
+                Pending = null;
+                Report(target.Id, result, pending.Automatic, queued: true);
+            }
         }
 
         KeepTrying();
+    }
+
+    /// <summary>
+    /// Whether a queued automatic switch should still happen (see <see cref="AutomaticConditions"/>). Null while the
+    /// folder cannot be read, which decides nothing.
+    /// </summary>
+    private bool? AutomaticStillApplies(Guid fromProfileId)
+    {
+        var shared = _links.Read(_sharedFolder());
+        return shared.State is CliLoginState.Unreadable or CliLoginState.Invalid ? null : AutomaticConditions(fromProfileId)(shared);
+    }
+
+    /// <summary>
+    /// What an automatic switch depends on, for a read of Claude Code's folder: auto-switch is still on and Claude Code is
+    /// still signed in to the account that reached its limit. The switch asks it again from another thread just before it
+    /// writes, so the profile's identity is taken here and only the setting is read later.
+    /// </summary>
+    private Func<CliSnapshot, bool> AutomaticConditions(Guid fromProfileId)
+    {
+        var identity = _settings.Profiles.FirstOrDefault(p => p.Id == fromProfileId)?.CliLink?.Identity;
+        return shared => _settings.AutoSwitchProfileEnabled && shared.Credentials is not null
+                         && CliLoginLabels.Compare(identity, shared.Account?.Identity, null, null) == CliAccountMatch.SameAccount;
     }
 
     /// <summary>Runs the retry timer while a switch waits or an unfinished one has to be settled.</summary>
@@ -250,13 +307,14 @@ public sealed class CliSwitcher
         }
     }
 
-    private async Task<CliSwitchResult> RunAsync(Guid targetId, string? confirmedOccupant)
+    private async Task<CliSwitchResult> RunAsync(Guid targetId, string? confirmedOccupant, Guid? automaticFrom)
     {
         _busy = true;
         try
         {
             var folder = _sharedFolder();
-            var result = await _links.SwitchAsync(targetId, LinkedProfiles(), folder, confirmedOccupant, CancellationToken.None);
+            var stillWanted = automaticFrom is { } origin ? AutomaticConditions(origin) : null;
+            var result = await _links.SwitchAsync(targetId, LinkedProfiles(), folder, confirmedOccupant, stillWanted, CancellationToken.None);
             if (result.Outcome == CliSwitchOutcome.Switched)
             {
                 Relink(targetId);

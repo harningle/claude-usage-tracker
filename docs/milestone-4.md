@@ -72,7 +72,7 @@ New and changed parts, in outline:
 
 ## Automated tests
 
-934 pass (801 at the end of Milestone 3), with no build warnings. New suites:
+942 pass (801 at the end of Milestone 3), with no build warnings. New suites:
 
 - `UsageAlertsTests`, `AutoSwitchTests`: threshold choice, jumps past several thresholds, once per window, a restart in the same window, a new window after a restart, reset rules, passed reset times, missing values, custom thresholds, the auto-switch target with wrap-round, unknown and passed-reset candidates.
 - `AutomationServiceTests`: alert text, sound and profile; once across a restart; the persisted state holds no usage values; a damaged state file is reported and left alone; auto-switch once until the session drops, only for the active profile and only with a target, and again once another profile has room; the Console expiry warning once; "Usage Updated" only right after a user action, removed after two seconds.
@@ -90,7 +90,7 @@ New and changed parts, in outline:
   - a newer login after a cut-short switch, left alone
   - backup pruning
   - the cases added after the code review (below)
-- `CliSwitcherTests`: the newest request replaces a waiting one, also when it succeeds at once or when an older switch still running ends up waiting, and cancelling clears it.
+- `CliSwitcherTests`: the newest request replaces a waiting one, also when it succeeds at once or when an older switch still running ends up waiting, and cancelling clears it; a queued automatic switch is dropped when auto-switch is turned off or Claude Code has left the account that reached its limit, and waits while the folder cannot be read.
 - `RefreshCoordinatorTests` (new cases): `UsageFetched` only for fresh usage, `CheckSoon` debounce and no resent rejected login.
 - `NotificationRegistrationsTests`, `LaunchAtLoginTests`: on scratch keys under `HKCU\Software\ClaudeUsageTracker.Tests`, never the real registrations.
 - `MilestoneFourSettingsTests`: shortcut rules and recording (Escape, a modifier alone, Shift alone, duplicates, clearing), custom thresholds, persistence of the new switches, launch at login, and the CLI Account rows (see defect 2).
@@ -148,6 +148,16 @@ A follow-up review of the auto-start fixes the same day found two more. Both now
 
 6. **[P1] Switching off while the conversation was being created still sent the message.** The message request followed the conversation request with no check in between. Just before the message, the client now asks again, on the UI thread, whether the profile still wants it. If not, it deletes the conversation unsent, and nothing counts as a start or a failure (`NothingIsSentWhenTheProfileChangesWhileItsConversationIsCreated`).
 7. **[P2] Signing out a later profile during an earlier one's check could end the app.** The round listed its profiles once at the start and checked them one after another. A profile signed out meanwhile then met a missing claude.ai link, and the exception escaped the timer's handler. Each profile is now checked again when its turn comes (`AProfileSignedOutWhileAnEarlierOneIsCheckedIsSkipped`).
+
+### Third review
+
+A review on 2026-10-03, after commit `1b3d30b`, found three defects. Each was confirmed against the code and now has a test that fails without its fix (checked by removing each fix in turn).
+
+1. **[P1] A queued automatic switch was applied without looking again.** Auto-switch queues the switch of Claude Code while Claude Code runs. When it closed, the switch was made even if auto-switch had been turned off meanwhile, or Claude Code had been signed in to another account that a profile follows. The queued switch now remembers the profile that reached its limit and is dropped unless auto-switch is still on and Claude Code is still signed in to that profile's account. While the folder cannot be read it keeps waiting (`AQueuedAutomaticSwitchIsDroppedWhenItNoLongerApplies`, `AQueuedAutomaticSwitchThatStillAppliesIsMadeOnceTheFolderCanBeRead`). Not checked: whether that profile is still at its limit.
+
+   A follow-up found that this check ran before the switch waited for the credential lock, so turning auto-switch off during that wait, or during the target's renewal, still let the folder be written. The switch itself now asks again under the lock, after any renewal and before it saves or writes anything, on the login it has just confirmed the files hold. This also covers an automatic switch that runs at once (`AnAutomaticSwitchAsksAgainAfterItsRenewal`).
+2. **[P2] A reset seen in the background did not let a profile switch again.** The mark "already switched" was cleared only while its profile was the active one, as upstream. A profile whose window reset while another was active kept the mark, and did not switch at its next limit. The mark is now cleared whenever the profile is seen below its limit (`AResetSeenInTheBackgroundLetsTheProfileSwitchAgain`). A profile that is not polled in the background is not seen, so its mark stays until it is the active one below its limit.
+3. **[P2] Auto-start ignored the server's wait for a profile that is not polled.** Its own usage read dropped a failed answer together with the `Retry-After`, and asked again five minutes later. It now keeps that wait per profile, and after a rate limit without guidance waits five minutes as the polling loop does (`AServerRequestedWaitIsHonouredForAProfileThatIsNotPolled`).
 
 ## Manual checks in fixture mode
 

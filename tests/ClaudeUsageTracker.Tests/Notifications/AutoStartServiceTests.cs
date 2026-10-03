@@ -33,6 +33,7 @@ public sealed class AutoStartServiceTests : IDisposable
     private int _completionStatus = 200;
     private ProfileUsageState? _current;
     private Action? _duringUsage;
+    private BrowserResponse? _usageResponse;
 
     public AutoStartServiceTests()
     {
@@ -51,7 +52,7 @@ public sealed class AutoStartServiceTests : IDisposable
             }
 
             _duringUsage?.Invoke();
-            return ScriptedTransport.Ok(_usage);
+            return _usageResponse ?? ScriptedTransport.Ok(_usage);
         })
         {
             AutoStart = (step, _) => step switch
@@ -306,6 +307,26 @@ public sealed class AutoStartServiceTests : IDisposable
 
         Assert.Empty(_transport.Requests);
         Assert.Empty(_transport.AutoStartRequests);
+    }
+
+    [Theory]
+    [InlineData("3600", 60)]
+    [InlineData(null, 5)] // a rate limit without guidance waits as the polling loop does
+    public async Task AServerRequestedWaitIsHonouredForAProfileThatIsNotPolled(string? retryAfter, int minutes)
+    {
+        _usageResponse = new BrowserResponse(429, "application/json", false, "{}", retryAfter, null);
+        var service = Service();
+        await service.CheckAllAsync(CancellationToken.None);
+        Assert.Equal(1, UsageRequests);
+
+        // Checks before the wait is over, such as one after a wake, send nothing.
+        _time.Advance(TimeSpan.FromMinutes(minutes) - TimeSpan.FromSeconds(30));
+        await service.CheckAllAsync(CancellationToken.None);
+        Assert.Equal(1, UsageRequests);
+
+        _time.Advance(TimeSpan.FromSeconds(30));
+        await service.CheckAllAsync(CancellationToken.None);
+        Assert.Equal(2, UsageRequests);
     }
 
     [Fact]
