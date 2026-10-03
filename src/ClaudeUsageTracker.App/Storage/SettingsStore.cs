@@ -66,10 +66,14 @@ public sealed class SettingsStore(string path)
 
             profile.IconConfig ??= new IconConfiguration();
             profile.IconConfig.Metrics ??= new IconConfiguration().Metrics;
+            profile.NotificationSettings ??= new NotificationSettings();
+            profile.NotificationSettings.CustomThresholds ??= [];
+            profile.NotificationSettings.SoundName ??= "default";
         }
 
         settings.MultiProfileDisplayConfig ??= new MultiProfileDisplayConfig();
         settings.PendingCleanups ??= [];
+        settings.Shortcuts ??= new ShortcutSettings();
 
         return settings;
     }

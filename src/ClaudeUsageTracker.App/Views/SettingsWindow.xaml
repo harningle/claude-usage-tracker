@@ -72,6 +72,51 @@
       </Setter>
     </Style>
 
+    <!-- A row of choices drawn like the segmented controls (Segment), for a list bound to a selection. -->
+    <Style x:Key="SegmentList" TargetType="ListBox">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="ItemsPanel">
+        <Setter.Value>
+          <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+        </Setter.Value>
+      </Setter>
+      <Setter Property="ItemContainerStyle">
+        <Setter.Value>
+          <Style TargetType="ListBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}" />
+            <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+            <Setter Property="Template">
+              <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                  <Border x:Name="Chrome" CornerRadius="5" Padding="10,4" Margin="0,0,2,2" Background="Transparent">
+                    <TextBlock x:Name="Label" Text="{Binding Name}" FontSize="11" Foreground="{DynamicResource Foreground.Secondary}" />
+                  </Border>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsSelected" Value="True">
+                      <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Card.Background}" />
+                      <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Foreground.Primary}" />
+                    </Trigger>
+                    <Trigger Property="IsMouseOver" Value="True">
+                      <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Foreground.Primary}" />
+                    </Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate>
+              </Setter.Value>
+            </Setter>
+          </Style>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Upstream ThresholdToggleRow: a coloured dot, the level, its label and a small switch. -->
+    <Style x:Key="ThresholdDot" TargetType="Ellipse">
+      <Setter Property="Width" Value="8" />
+      <Setter Property="Height" Value="8" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+
     <DataTemplate x:Key="DetailRows">
       <Grid Margin="0,0,0,8">
         <Grid.ColumnDefinitions>
@@ -146,11 +191,25 @@
     <DockPanel Background="{DynamicResource Sidebar.Background}">
       <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,8">
         <TextBlock Style="{StaticResource Caption}" Text="{l:Loc section.app}" />
+        <RadioButton x:Name="NavAppSettings" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                     AutomationProperties.Name="{l:Loc section.app_settings_title}">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE770;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+            <TextBlock Text="{l:Loc section.app_settings_title}" />
+          </StackPanel>
+        </RadioButton>
         <RadioButton x:Name="NavProfiles" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
                      AutomationProperties.Name="{l:Loc section.manage_profiles_title}">
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="&#xE716;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
             <TextBlock Text="{l:Loc section.manage_profiles_title}" />
+          </StackPanel>
+        </RadioButton>
+        <RadioButton x:Name="NavShortcuts" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
+                     AutomationProperties.Name="{l:Loc section.shortcuts_title}">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE765;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="18" VerticalAlignment="Center" />
+            <TextBlock Text="{l:Loc section.shortcuts_title}" />
           </StackPanel>
         </RadioButton>
         <RadioButton x:Name="NavPopover" Style="{StaticResource SidebarItem}" GroupName="Nav" Checked="OnNavigate"
@@ -321,6 +380,24 @@
           <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc cli.title}" />
           <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc cli.subtitle}" />
           <ContentControl Content="{Binding Cli}" ContentTemplate="{StaticResource CredentialBody}" Focusable="False" />
+          <!-- Switching Claude Code's shared folder to this account: a separate action from activating the profile. -->
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0" Visibility="{Binding ShowCliSwitch, Converter={StaticResource Visible}}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc windows.cli.switch.title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Body}" Text="{Binding CliSwitchStatus}" Margin="0,8,0,0" TextWrapping="Wrap" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding CliSwitchMessage}" Margin="0,6,0,0" TextWrapping="Wrap"
+                         Visibility="{Binding CliSwitchMessage, Converter={x:Static views:Converters.NotNullToVisible}}" />
+              <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <Button Style="{StaticResource PrimaryButton}" Content="{l:Loc windows.cli.switch.button}" Click="OnSwitchCli"
+                        IsEnabled="{Binding CanSwitchCli}" AutomationProperties.Name="{l:Loc windows.cli.switch.button}" />
+                <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc windows.cli.switch.cancel}" Click="OnCancelCliSwitch" Margin="10,0,0,0"
+                        Visibility="{Binding CliSwitchPending, Converter={StaticResource Visible}}" />
+                <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc windows.cli.switch.signed_in_button}" Click="OnSignedInAgain" Margin="10,0,0,0"
+                        Visibility="{Binding CliNeedsSignIn, Converter={StaticResource Visible}}" />
+              </StackPanel>
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.cli.switch.about}" Margin="0,12,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
           <Border Style="{StaticResource Card}" Margin="0,16,0,0" Padding="16,16,16,0"
                   Visibility="{Binding IsLinked, Converter={StaticResource Visible}}">
             <views:SettingToggle Title="{l:Loc windows.cli.used_elsewhere.title}" Description="{l:Loc windows.cli.used_elsewhere.description}"
@@ -457,6 +534,188 @@
                 <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc general.refresh_min}" />
                 <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc general.refresh_max}" HorizontalAlignment="Right" />
               </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- Upstream's Auto-Start Session card, only for providers that can start a session (it sends a message). -->
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0" Visibility="{Binding CanAutoStart, Converter={StaticResource Visible}}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc general.autostart_title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc general.autostart_subtitle}" FontSize="12" Margin="0,4,0,16" />
+              <views:SettingToggle Title="{l:Loc general.autostart_toggle}" Description="{l:Loc windows.general.autostart_description}"
+                                   IsOn="{Binding AutoStartEnabled, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.general.autostart_requirements}" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.general.autostart_requirement}" Margin="0,2,0,0" />
+              <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8" Margin="0,10,0,0"
+                      Visibility="{Binding AutoStartNeedsClaudeAi, Converter={StaticResource Visible}}">
+                <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc windows.general.autostart_needs_claude_ai}" TextWrapping="Wrap" />
+              </Border>
+            </StackPanel>
+          </Border>
+
+          <!-- Upstream's Notifications card. -->
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0" IsEnabled="{Binding HasProfile}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc general.notifications_title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc general.notifications_subtitle}" FontSize="12" Margin="0,4,0,16" />
+              <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8" Margin="0,0,0,12"
+                      Visibility="{Binding NotificationProblem, Converter={x:Static views:Converters.NotNullToVisible}}">
+                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding NotificationProblem}" TextWrapping="Wrap" />
+              </Border>
+              <Border Background="{DynamicResource Banner.Warning}" CornerRadius="6" Padding="12,8" Margin="0,0,0,12"
+                      Visibility="{Binding AutomationProblem, Converter={x:Static views:Converters.NotNullToVisible}}">
+                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding AutomationProblem}" TextWrapping="Wrap" />
+              </Border>
+              <views:SettingToggle Title="{l:Loc notifications.enable}" Description="{l:Loc notifications.enable.description}"
+                                   IsOn="{Binding NotificationsEnabled, Mode=TwoWay}" />
+              <StackPanel Visibility="{Binding NotificationsEnabled, Converter={StaticResource Visible}}">
+                <Rectangle Height="1" Margin="0,0,0,12" Fill="{DynamicResource Line.Divider}" />
+                <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc notifications.alert_thresholds}" FontSize="12" FontWeight="Medium" Margin="0,0,0,8" />
+                <Grid Margin="0,0,0,6">
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Style="{StaticResource ThresholdDot}" Fill="{DynamicResource Accent}" />
+                    <TextBlock Style="{StaticResource Text.Base}" Text="75%" FontSize="11" FontWeight="Medium" Width="34" />
+                    <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc notifications.threshold.warning}" />
+                  </StackPanel>
+                  <CheckBox Style="{StaticResource Switch}" HorizontalAlignment="Right" IsChecked="{Binding Threshold75, Mode=TwoWay}"
+                            AutomationProperties.Name="{l:Loc notifications.threshold.warning}" />
+                </Grid>
+                <Grid Margin="0,0,0,6">
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Style="{StaticResource ThresholdDot}" Fill="{DynamicResource Status.Moderate}" />
+                    <TextBlock Style="{StaticResource Text.Base}" Text="90%" FontSize="11" FontWeight="Medium" Width="34" />
+                    <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc notifications.threshold.high}" />
+                  </StackPanel>
+                  <CheckBox Style="{StaticResource Switch}" HorizontalAlignment="Right" IsChecked="{Binding Threshold90, Mode=TwoWay}"
+                            AutomationProperties.Name="{l:Loc notifications.threshold.high}" />
+                </Grid>
+                <Grid Margin="0,0,0,6">
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Style="{StaticResource ThresholdDot}" Fill="{DynamicResource Status.Critical}" />
+                    <TextBlock Style="{StaticResource Text.Base}" Text="95%" FontSize="11" FontWeight="Medium" Width="34" />
+                    <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc notifications.threshold.critical}" />
+                  </StackPanel>
+                  <CheckBox Style="{StaticResource Switch}" HorizontalAlignment="Right" IsChecked="{Binding Threshold95, Mode=TwoWay}"
+                            AutomationProperties.Name="{l:Loc notifications.threshold.critical}" />
+                </Grid>
+                <StackPanel Orientation="Horizontal" Margin="0,2,0,12">
+                  <Ellipse Style="{StaticResource ThresholdDot}" Fill="{DynamicResource Status.Safe}" />
+                  <TextBlock Style="{StaticResource Text.Base}" Text="0%" FontSize="11" FontWeight="Medium" Width="34" />
+                  <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc notifications.threshold.session_reset}" />
+                </StackPanel>
+
+                <Rectangle Height="1" Margin="0,0,0,12" Fill="{DynamicResource Line.Divider}" />
+                <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc notifications.custom_thresholds}" FontSize="12" FontWeight="Medium" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding CustomThresholds}" Focusable="False">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,4">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <Ellipse Style="{StaticResource ThresholdDot}" Fill="{Binding Colour, Converter={x:Static views:Converters.ResourceBrush}}" />
+                          <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Text}" FontSize="11" FontWeight="Medium" Width="34" />
+                          <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc notifications.custom_threshold}" />
+                        </StackPanel>
+                        <Button Style="{StaticResource HeaderIconButton}" HorizontalAlignment="Right" Tag="{Binding Value}" Click="OnRemoveThreshold"
+                                ToolTip="{l:Loc common.remove}" AutomationProperties.Name="{l:Loc common.remove}">
+                          <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="9"
+                                     Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                        </Button>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                  <TextBox x:Name="NewThreshold" Style="{StaticResource Input}" Width="64" MaxLength="4" KeyDown="OnThresholdKeyDown"
+                           ToolTip="{l:Loc notifications.custom_placeholder}" AutomationProperties.Name="{l:Loc notifications.custom_thresholds}" />
+                  <TextBlock Style="{StaticResource Text.Caption}" Text="%" VerticalAlignment="Center" Margin="6,0,10,0" />
+                  <Button Style="{StaticResource SecondaryButton}" Content="{l:Loc notifications.custom_add}" Click="OnAddThreshold" FontSize="11" />
+                </StackPanel>
+
+                <Rectangle Height="1" Margin="0,0,0,12" Fill="{DynamicResource Line.Divider}" />
+                <Grid>
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE767;" FontSize="13" Foreground="{DynamicResource Accent}" Width="20" />
+                    <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc notifications.sound}" FontSize="12" Margin="6,0,0,0" />
+                  </StackPanel>
+                  <Button Style="{StaticResource HeaderIconButton}" HorizontalAlignment="Right" Click="OnPreviewSound"
+                          ToolTip="{l:Loc notifications.sound.preview}" AutomationProperties.Name="{l:Loc notifications.sound.preview}">
+                    <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                               Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                  </Button>
+                </Grid>
+                <Border Background="{DynamicResource Track}" CornerRadius="6" Padding="2" HorizontalAlignment="Left" Margin="0,8,0,0">
+                  <ListBox Style="{StaticResource SegmentList}" ItemsSource="{Binding Sounds}" SelectedItem="{Binding Sound, Mode=TwoWay}"
+                           AutomationProperties.Name="{l:Loc notifications.sound}" />
+                </Border>
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.notifications.sound_note}" Margin="0,8,0,0" TextWrapping="Wrap" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- Settings: upstream AppSettingsView, app-wide startup options. -->
+        <StackPanel x:Name="PageAppSettings">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc section.app_settings_title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc section.app_settings_desc}" />
+          <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc general.launch_at_login}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.general.launch_at_login.description}" FontSize="12" Margin="0,4,0,16" />
+              <views:SettingToggle Title="{l:Loc general.launch_at_login}" Description="{l:Loc windows.general.launch_at_login.description}"
+                                   IsOn="{Binding LaunchAtLogin, Mode=TwoWay}" />
+              <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8"
+                      Visibility="{Binding LaunchAtLoginNote, Converter={x:Static views:Converters.NotNullToVisible}}">
+                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding LaunchAtLoginNote}" TextWrapping="Wrap" />
+              </Border>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- Shortcuts: upstream ShortcutsSettingsView. -->
+        <StackPanel x:Name="PageShortcuts">
+          <TextBlock Style="{StaticResource Text.PageTitle}" Text="{l:Loc shortcuts.title}" />
+          <TextBlock Style="{StaticResource Text.PageSubtitle}" Text="{l:Loc shortcuts.subtitle}" />
+          <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8" Margin="0,16,0,0"
+                  Visibility="{Binding ShortcutMessage, Converter={x:Static views:Converters.NotNullToVisible}}">
+            <TextBlock Style="{StaticResource Text.Body}" Text="{Binding ShortcutMessage}" TextWrapping="Wrap" />
+          </Border>
+          <ItemsControl ItemsSource="{Binding ShortcutRows}" Focusable="False" Margin="0,20,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Style="{StaticResource Card}" Margin="0,0,0,8" Padding="12">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                      <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Title}" FontSize="12" FontWeight="Medium" />
+                      <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding Description}" FontSize="10" />
+                      <TextBlock Style="{StaticResource Text.Base}" Text="{Binding Problem}" FontSize="10" Foreground="{DynamicResource Status.Moderate}"
+                                 Visibility="{Binding Problem, Converter={x:Static views:Converters.NotNullToVisible}}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Style="{StaticResource SecondaryButton}" MinWidth="130" Tag="{Binding Action}" Click="OnRecordShortcut"
+                            Content="{Binding Text}" FontFamily="{StaticResource MonoFont}" FontSize="11"
+                            AutomationProperties.Name="{Binding Title}" AutomationProperties.HelpText="{Binding Text}" />
+                    <Button Grid.Column="2" Style="{StaticResource HeaderIconButton}" Margin="6,0,0,0" Tag="{Binding Action}" Click="OnClearShortcut"
+                            ToolTip="{l:Loc shortcuts.clear}" AutomationProperties.Name="{l:Loc shortcuts.clear}"
+                            Visibility="{Binding IsSet, Converter={StaticResource Visible}}">
+                      <TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="9"
+                                 Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                    </Button>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Background="{DynamicResource Banner.Info}" CornerRadius="6" Padding="12" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE946;" Foreground="{DynamicResource Status.Info}" FontSize="12" VerticalAlignment="Top" Margin="0,2,8,0" />
+              <StackPanel>
+                <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc shortcuts.info_title}" />
+                <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.shortcuts.info_desc}" MaxWidth="400" TextWrapping="Wrap" />
+              </StackPanel>
             </StackPanel>
           </Border>
         </StackPanel>
@@ -665,6 +924,16 @@
                 <views:SettingToggle Title="{l:Loc multiprofile.active_indicator_title}" Description="{l:Loc multiprofile.active_indicator_description}" IsOn="{Binding MultiActiveIndicator, Mode=TwoWay}" />
                 <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.multiprofile.square_note}" />
               </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Upstream's Auto-Switch Profile card. -->
+          <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc auto_switch.title}" FontSize="13" FontWeight="Medium" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc auto_switch.subtitle}" FontSize="12" Margin="0,4,0,16" />
+              <views:SettingToggle Title="{l:Loc auto_switch.enable_title}" Description="{l:Loc windows.auto_switch.enable_description}"
+                                   IsOn="{Binding AutoSwitchEnabled, Mode=TwoWay}" />
             </StackPanel>
           </Border>
         </StackPanel>

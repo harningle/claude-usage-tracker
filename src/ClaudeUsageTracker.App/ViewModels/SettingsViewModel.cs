@@ -1,15 +1,20 @@
 using System.Globalization;
+using System.IO;
 using System.Reflection;
+using System.Security;
 using System.Windows.Media;
+using ClaudeUsageTracker.App.Automation;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Diagnostics;
 using ClaudeUsageTracker.App.Localisation;
+using ClaudeUsageTracker.App.Notifications;
 using ClaudeUsageTracker.App.Profiles;
 using ClaudeUsageTracker.App.Setup;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Tray;
 using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.Core.Billing;
+using ClaudeUsageTracker.Core.Notifications;
 using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Core.Refresh;
 using ClaudeUsageTracker.Core.Usage;
@@ -31,6 +36,35 @@ public sealed record ProfileRow(Guid Id, string Name, string ProviderName, bool 
 /// <summary>A request of the network log, as text. It holds only what <see cref="RequestLogEntry"/> holds.</summary>
 public sealed record LogRow(string Time, string Operation, string Request, string Status, string Duration, string? Error) : ListItem;
 
+/// <summary>A custom notification threshold, with upstream's colour band.</summary>
+public sealed record ThresholdRow(int Value, string Text, string Colour) : ListItem;
+
+public sealed record SoundOption(string RawValue, string Name);
+
+/// <summary>One global shortcut as the Shortcuts page shows it.</summary>
+/// <param name="Problem">Why the shortcut does not work, e.g. another app holds it.</param>
+public sealed record ShortcutRow(HotkeyAction Action, string Title, string Description, string Text, bool IsSet, bool IsRecording, string? Problem) : ListItem;
+
+/// <summary>The app services the Milestone 4 settings use.</summary>
+public sealed class SettingsIntegrations
+{
+    public required LaunchAtLogin LaunchAtLogin { get; init; }
+
+    public required INotifier Notifier { get; init; }
+
+    /// <summary>Why the automation state file cannot be used, or null.</summary>
+    public required Func<string?> AutomationProblem { get; init; }
+
+    /// <summary>Upstream confirms with a notification when notifications are switched on.</summary>
+    public required Action<ProfileSettings> NotificationsSwitchedOn { get; init; }
+
+    /// <summary>Registers the shortcuts again and returns those Windows refused.</summary>
+    public required Func<IReadOnlyList<HotkeyAction>> ApplyShortcuts { get; init; }
+
+    /// <summary>Releases every shortcut while a new one is recorded.</summary>
+    public required Action SuspendShortcuts { get; init; }
+}
+
 /// <summary>
 /// The settings window's state. Like upstream, every control persists on change; unlike upstream, a
 /// changed refresh interval applies at once instead of after a profile switch or relaunch.
@@ -45,20 +79,28 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly Action _applied;
     private readonly ProfileService _profiles;
     private readonly RequestLog _log;
+    private readonly SettingsIntegrations _integrations;
     private ProfileUsageState? _state;
     private CliSnapshot? _snapshot;
+    private CliSwitchView? _cliSwitch;
+    private IReadOnlyList<HotkeyAction> _refusedShortcuts = [];
+    private HotkeyAction? _recording;
+    private string? _shortcutMessage;
+    private string? _launchError;
     private string? _profileError;
 
     /// <param name="changed">Saves the settings and applies them, after an edit made here.</param>
     /// <param name="applied">Applies settings that <paramref name="profiles"/> already saved.</param>
     public SettingsViewModel(
-        AppSettings settings, Action changed, Action applied, ProfileService profiles, HistoryViewModel history, RequestLog log, bool taskbarDark)
+        AppSettings settings, Action changed, Action applied, ProfileService profiles, HistoryViewModel history, RequestLog log, bool taskbarDark,
+        SettingsIntegrations integrations)
     {
         _settings = settings;
         _changed = changed;
         _applied = applied;
         _profiles = profiles;
         _log = log;
+        _integrations = integrations;
         History = history;
         IconStyles =
         [
@@ -158,6 +200,234 @@ public sealed class SettingsViewModel : ObservableObject
 
     public string RefreshText => Strings.Format("general.refresh_seconds", (int)RefreshInterval);
 
+    // General (per profile): upstream GeneralSettingsView's auto-start and notifications.
+
+    /// <summary>Upstream shows the auto-start card only for providers with the capability, since it sends a message.</summary>
+    public bool CanAutoStart => Profile is { } profile && profile.ProviderKind.Descriptor().Capabilities.AutoStartSession;
+
+    public bool AutoStartEnabled
+    {
+        get => Profile?.AutoStartSessionEnabled == true;
+        set => Edit(() => Profile!.AutoStartSessionEnabled = value);
+    }
+
+    /// <summary>Upstream's requirement: a claude.ai session, through which the message is sent.</summary>
+    public bool AutoStartNeedsClaudeAi => CanAutoStart && Profile?.ClaudeAi is null;
+
+    private NotificationSettings Notify => Profile?.NotificationSettings ?? new NotificationSettings();
+
+    public bool NotificationsEnabled
+    {
+        get => Notify.Enabled;
+        set => Edit(() =>
+        {
+            Notify.Enabled = value;
+            if (value && Profile is { } profile)
+            {
+                _integrations.NotificationsSwitchedOn(profile);
+            }
+        });
+    }
+
+    public bool Threshold75 { get => Notify.Threshold75Enabled; set => Edit(() => Notify.Threshold75Enabled = value); }
+    public bool Threshold90 { get => Notify.Threshold90Enabled; set => Edit(() => Notify.Threshold90Enabled = value); }
+    public bool Threshold95 { get => Notify.Threshold95Enabled; set => Edit(() => Notify.Threshold95Enabled = value); }
+
+    /// <summary>Upstream's custom thresholds, ascending, coloured by upstream's bands.</summary>
+    public IReadOnlyList<ThresholdRow> CustomThresholds => Notify.CustomThresholds
+        .Order()
+        .Select(v => new ThresholdRow(v, $"{v}%", v switch
+        {
+            >= 90 => "Status.Critical",
+            >= 70 => "Status.Moderate",
+            >= 50 => "Accent",
+            _ => "Status.Safe",
+        }))
+        .ToList();
+
+    /// <summary>Upstream <c>addThreshold</c>: a whole percentage from 1 to 100 that is not listed yet; anything else is ignored.</summary>
+    public bool AddCustomThreshold(string text)
+    {
+        if (!int.TryParse(text.Trim().TrimEnd('%'), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            || !AlertThresholds.IsValidCustom(value, Notify.CustomThresholds))
+        {
+            return false;
+        }
+
+        Edit(() => Notify.CustomThresholds.Add(value));
+        return true;
+    }
+
+    public void RemoveCustomThreshold(int value) => Edit(() => Notify.CustomThresholds.Remove(value));
+
+    public IReadOnlyList<SoundOption> Sounds { get; } = [.. NotificationSounds.Options.Select(o => new SoundOption(o.RawValue, Strings.Get(o.NameKey)))];
+
+    public SoundOption Sound
+    {
+        get => Sounds.FirstOrDefault(s => s.RawValue == NotificationSounds.For(Notify.SoundName).RawValue) ?? Sounds[0];
+        set => Edit(() => Notify.SoundName = value.RawValue);
+    }
+
+    public void PreviewSound() => NotificationSounds.Preview(Notify.SoundName);
+
+    /// <summary>Why Windows will not show notifications (switched off, registration failed), or null.</summary>
+    public string? NotificationProblem => _integrations.Notifier.Problem;
+
+    public string? AutomationProblem => _integrations.AutomationProblem();
+
+    // App settings: upstream AppSettingsView's launch at login.
+
+    public bool LaunchAtLogin
+    {
+        get => LaunchState is LaunchAtLoginState.On or LaunchAtLoginState.DisabledInTaskManager;
+        set
+        {
+            try
+            {
+                _integrations.LaunchAtLogin.Set(value);
+                _launchError = null;
+            }
+            catch (Exception e) when (e is UnauthorizedAccessException or SecurityException or IOException)
+            {
+                _launchError = Strings.Format("windows.launch.failed", e.Message);
+            }
+
+            RaisePropertyChanged(nameof(LaunchAtLogin));
+            RaisePropertyChanged(nameof(LaunchAtLoginNote));
+        }
+    }
+
+    public string? LaunchAtLoginNote => _launchError ?? LaunchState switch
+    {
+        LaunchAtLoginState.OtherCopy => Strings.Format("windows.launch.other_copy", _integrations.LaunchAtLogin.RegisteredPath ?? ""),
+        LaunchAtLoginState.DisabledInTaskManager => Strings.Get("windows.launch.disabled_in_task_manager"),
+        _ => null,
+    };
+
+    private LaunchAtLoginState LaunchState
+    {
+        get
+        {
+            try
+            {
+                return _integrations.LaunchAtLogin.State;
+            }
+            catch (Exception e) when (e is UnauthorizedAccessException or SecurityException or IOException)
+            {
+                _launchError = Strings.Format("windows.launch.failed", e.Message);
+                return LaunchAtLoginState.Off;
+            }
+        }
+    }
+
+    // Shortcuts: upstream ShortcutsSettingsView.
+
+    public IReadOnlyList<ShortcutRow> ShortcutRows => Shortcuts.Actions
+        .Select(action =>
+        {
+            var (title, description) = action switch
+            {
+                HotkeyAction.TogglePopover => ("shortcuts.open_popover", "shortcuts.open_popover_desc"),
+                HotkeyAction.Refresh => ("shortcuts.refresh", "shortcuts.refresh_desc"),
+                HotkeyAction.OpenSettings => ("shortcuts.open_settings", "shortcuts.open_settings_desc"),
+                _ => ("shortcuts.next_profile", "shortcuts.next_profile_desc"),
+            };
+            var combo = _settings.Shortcuts.Get(action);
+            var recording = _recording == action;
+            return new ShortcutRow(
+                action, Strings.Get(title), Strings.Get(description),
+                recording ? Strings.Get("shortcuts.recording") : combo is null ? Strings.Get("shortcuts.record") : Shortcuts.Describe(combo),
+                combo is not null, recording,
+                !recording && combo is not null && _refusedShortcuts.Contains(action) ? Strings.Get("windows.shortcuts.in_use") : null);
+        })
+        .ToList();
+
+    /// <summary>Why the key just pressed was not taken.</summary>
+    public string? ShortcutMessage { get => _shortcutMessage; private set => Set(ref _shortcutMessage, value); }
+
+    public bool IsRecordingShortcut => _recording is not null;
+
+    /// <summary>Starts recording a shortcut. The registered shortcuts are released meanwhile, so pressing one records it.</summary>
+    public void StartRecording(HotkeyAction action)
+    {
+        _integrations.SuspendShortcuts();
+        _recording = action;
+        ShortcutMessage = null;
+        RaisePropertyChanged(nameof(ShortcutRows));
+        RaisePropertyChanged(nameof(IsRecordingShortcut));
+    }
+
+    public void StopRecording()
+    {
+        if (_recording is null)
+        {
+            return;
+        }
+
+        _recording = null;
+        _refusedShortcuts = _integrations.ApplyShortcuts();
+        RaisePropertyChanged(nameof(ShortcutRows));
+        RaisePropertyChanged(nameof(IsRecordingShortcut));
+    }
+
+    /// <summary>
+    /// A key pressed while recording, as upstream's recorder takes it: Escape cancels, a modifier alone keeps waiting, and
+    /// a key with a modifier becomes the shortcut. Returns whether the key was taken by the recorder.
+    /// </summary>
+    public bool Record(int virtualKey, int modifiers)
+    {
+        if (_recording is not { } action)
+        {
+            return false;
+        }
+
+        if (virtualKey == 0x1B)
+        {
+            StopRecording();
+            return true;
+        }
+
+        if (Shortcuts.IsModifierKey(virtualKey))
+        {
+            return true;
+        }
+
+        if (!Shortcuts.IsAcceptable(virtualKey, modifiers))
+        {
+            ShortcutMessage = Strings.Get("windows.shortcuts.needs_modifier");
+            return true;
+        }
+
+        var combo = new KeyCombo { VirtualKey = virtualKey, Modifiers = modifiers };
+        // Upstream let two actions share a shortcut, so one of them could never fire.
+        if (Shortcuts.Actions.Where(a => a != action && combo.SameKeys(_settings.Shortcuts.Get(a))).Select(a => (HotkeyAction?)a).FirstOrDefault()
+            is { } taken)
+        {
+            ShortcutMessage = Strings.Format("windows.shortcuts.duplicate", ShortcutRows.First(r => r.Action == taken).Title);
+            return true;
+        }
+
+        EditApp(() => _settings.Shortcuts.Set(action, combo));
+        ShortcutMessage = null;
+        StopRecording();
+        return true;
+    }
+
+    public void ClearShortcut(HotkeyAction action)
+    {
+        EditApp(() => _settings.Shortcuts.Set(action, null));
+        _refusedShortcuts = _integrations.ApplyShortcuts();
+        RaisePropertyChanged(nameof(ShortcutRows));
+    }
+
+    // Manage Profiles: upstream's auto-switch card.
+
+    public bool AutoSwitchEnabled
+    {
+        get => _settings.AutoSwitchProfileEnabled;
+        set => EditApp(() => _settings.AutoSwitchProfileEnabled = value);
+    }
+
     // Popover (app-wide), upstream PopoverSettingsView.
 
     public bool TimeDisplayReset { get => _settings.TimeDisplay == PopoverTimeDisplay.ResetTime; set => SetTimeDisplay(value, PopoverTimeDisplay.ResetTime); }
@@ -170,6 +440,27 @@ public sealed class SettingsViewModel : ObservableObject
     // Credentials: upstream PersonalUsageView, APIBillingView, CLIAccountView and CodexAccountView.
 
     public bool IsLinked => Profile?.CliLink is not null;
+
+    /// <summary>Switching Claude Code's shared folder to this profile's account: shown for a profile with a Claude Code link.</summary>
+    public bool ShowCliSwitch => _cliSwitch is not null && IsAnthropicProfile;
+
+    public bool CanSwitchCli => _cliSwitch is { CanSwitch: true, Pending: false };
+
+    public bool CliSwitchPending => _cliSwitch?.Pending == true;
+
+    public string CliSwitchStatus => _cliSwitch switch
+    {
+        null => "",
+        { InUse: true } => Strings.Format("windows.cli.switch.in_use", _cliSwitch.Folder),
+        { Pending: true } => Strings.Get("windows.cli.switch.pending"),
+        _ => Strings.Format("windows.cli.switch.not_in_use", _cliSwitch.Folder),
+    };
+
+    /// <summary>The outcome of the last switch, or why the pending one waits.</summary>
+    public string? CliSwitchMessage => _cliSwitch?.Message;
+
+    /// <summary>An unfinished switch left Claude Code's folder unclear until the user signs in again there and says so.</summary>
+    public bool CliNeedsSignIn => _cliSwitch?.NeedsSignIn == true;
     public bool HasClaudeAi => Profile?.ClaudeAi is not null;
     public bool HasConsole => Profile?.Console is not null;
     public bool HasCodex => Profile?.Codex is not null;
@@ -262,7 +553,10 @@ public sealed class SettingsViewModel : ObservableObject
                     rows.Add(new(Strings.Get("windows.cli.mirror"), mirrorError));
                 }
 
-                if (_snapshot?.Credentials is { } credentials)
+                // The folder's login describes this profile only while the folder holds its account; after a switch it
+                // holds another profile's.
+                if (_snapshot?.Credentials is { } credentials
+                    && Core.ClaudeCode.CliLoginLabels.Compare(link.Identity, _snapshot.Account?.Identity, null, null) == Core.ClaudeCode.CliAccountMatch.SameAccount)
                 {
                     // Only the token's fixed type prefix is shown; upstream also showed the last four characters.
                     rows.Add(new(Strings.Get("cli.access_token"), MaskedToken(credentials.AccessToken)));
@@ -285,6 +579,7 @@ public sealed class SettingsViewModel : ObservableObject
                     LinkNotice.RenewalFailed => Strings.Get("windows.banner.renewal_failed"),
                     LinkNotice.OtherFolderUnreadable => Strings.Get("windows.cli.notice.other_folder_unreadable"),
                     LinkNotice.OtherCopyUnreadable => Strings.Get("windows.cli.notice.other_copy_unreadable"),
+                    LinkNotice.SwitchIncomplete => Strings.Get("windows.cli.notice.switch_incomplete"),
                     _ => null,
                 });
         }
@@ -427,14 +722,27 @@ public sealed class SettingsViewModel : ObservableObject
         Strings.Format("about.version", Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0");
 
     /// <summary>Refreshes the credential pages from the coordinator's state and a fresh read of the linked Claude Code folder.</summary>
-    public void Update(ProfileUsageState? state, CliSnapshot? snapshot)
+    /// <param name="cliSwitch">Whether Claude Code uses the active profile's account and any switch to it, or null without a link.</param>
+    /// <param name="refusedShortcuts">The shortcuts Windows refused when they were last registered.</param>
+    public void Update(ProfileUsageState? state, CliSnapshot? snapshot, CliSwitchView? cliSwitch, IReadOnlyList<HotkeyAction> refusedShortcuts)
     {
         _state = state;
         _snapshot = snapshot;
+        _cliSwitch = cliSwitch;
+        _refusedShortcuts = refusedShortcuts;
         History.RecordingError = state?.HistoryError;
-        foreach (var name in new[] { nameof(ClaudeAi), nameof(Console), nameof(Cli), nameof(Codex) })
+        foreach (var name in new[]
+                 {
+                     nameof(ClaudeAi), nameof(Console), nameof(Cli), nameof(Codex), nameof(ShowCliSwitch), nameof(CanSwitchCli),
+                     nameof(CliSwitchPending), nameof(CliSwitchStatus), nameof(CliSwitchMessage), nameof(CliNeedsSignIn), nameof(NotificationProblem),
+                 })
         {
             RaisePropertyChanged(name);
+        }
+
+        if (_recording is null)
+        {
+            RaisePropertyChanged(nameof(ShortcutRows));
         }
     }
 

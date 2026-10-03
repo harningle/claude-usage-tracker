@@ -1,5 +1,9 @@
 using System.Diagnostics;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using ClaudeUsageTracker.App.Diagnostics;
+using ClaudeUsageTracker.App.Localisation;
+using ClaudeUsageTracker.Core.Notifications;
 using ClaudeUsageTracker.Core.Refresh;
 using ClaudeUsageTracker.Core.Usage;
 
@@ -13,6 +17,28 @@ public enum ClaudeAiOperation
     OverageSpendLimit,
     OverageCreditGrant,
 }
+
+/// <summary>
+/// The three requests of a session auto-start (upstream <c>AutoStartSessionService.sendInitializationMessage</c>), each
+/// with a fixed method, path and body. They are sent only for a profile whose user switched auto-start on.
+/// </summary>
+public enum AutoStartStep
+{
+    /// <summary>POST a new, unnamed conversation.</summary>
+    CreateConversation,
+
+    /// <summary>POST upstream's one-word prompt to the conversation, which starts the session window.</summary>
+    Completion,
+
+    /// <summary>DELETE the conversation again, so it does not stay in the chat history.</summary>
+    DeleteConversation,
+}
+
+/// <summary>What a session auto-start achieved.</summary>
+/// <param name="Started">Whether the message was accepted, which starts the session window.</param>
+/// <param name="ResetAt">The new window's reset time, when the response reported one.</param>
+/// <param name="Failure">A short, data-free reason when it did not start (an HTTP status or a failure category).</param>
+public sealed record AutoStartResult(bool Started, DateTimeOffset? ResetAt, string? Failure);
 
 /// <summary>What the browser reported for one request.</summary>
 /// <param name="Status">The HTTP status, or null when the request did not complete.</param>
@@ -34,6 +60,11 @@ public interface IClaudeAiTransport
 
     /// <summary>Changes whenever the profile's browser session may have changed: a sign-in, a pasted key, cleared data.</summary>
     long SessionEpoch(Guid profileId);
+
+    /// <summary>Sends one fixed auto-start request in the profile's browser context.</summary>
+    /// <param name="conversationId">The ID of the conversation to create, send to or delete.</param>
+    Task<BrowserResponse> SendAutoStartAsync(
+        Guid profileId, AutoStartStep step, string organizationId, Guid conversationId, CancellationToken cancellation);
 }
 
 /// <param name="Organizations">The organisations of the signed-in account; null when the request failed.</param>
@@ -97,6 +128,78 @@ public sealed class ClaudeAiClient(IClaudeAiTransport transport, TimeProvider ti
             return new FetchFailed(FetchFailure.InvalidResponse, response.Status, null) { At = time.GetUtcNow() };
         }
     }
+
+    /// <summary>
+    /// Upstream's session auto-start: create a conversation, send the prompt, then delete the conversation (also when
+    /// the prompt failed, which upstream did not, so no empty conversation stays behind). This sends a model request
+    /// and uses the account's usage; only the opt-in auto-start calls it.
+    /// </summary>
+    /// <param name="stillWanted">
+    /// Asked once the conversation exists, on the caller's thread, just before the message: false deletes the conversation
+    /// unsent and returns null.
+    /// </param>
+    public async Task<AutoStartResult?> StartSessionAsync(
+        Guid profileId, string organizationId, Func<bool> stillWanted, CancellationToken cancellation)
+    {
+        // Back on the caller's thread afterwards, so stillWanted reads the settings where the UI changes them.
+        var created = await AutoStartAsync(profileId, AutoStartStep.CreateConversation, organizationId, Guid.NewGuid(), cancellation).ConfigureAwait(true);
+        if (created.Status is not (200 or 201))
+        {
+            return new AutoStartResult(false, null, FailureText(created));
+        }
+
+        Guid conversation;
+        try
+        {
+            conversation = (JsonNode.Parse(created.Body ?? "") as JsonObject)?["uuid"] is JsonValue value
+                           && value.TryGetValue(out string? id) && Guid.TryParse(id, out var parsed)
+                ? parsed
+                : Guid.Empty;
+        }
+        catch (JsonException)
+        {
+            conversation = Guid.Empty;
+        }
+
+        if (conversation == Guid.Empty)
+        {
+            return new AutoStartResult(false, null, Strings.Get("windows.autostart.failed_response"));
+        }
+
+        if (!stillWanted())
+        {
+            await AutoStartAsync(profileId, AutoStartStep.DeleteConversation, organizationId, conversation, cancellation).ConfigureAwait(false);
+            return null;
+        }
+
+        var completion = await AutoStartAsync(profileId, AutoStartStep.Completion, organizationId, conversation, cancellation).ConfigureAwait(false);
+        await AutoStartAsync(profileId, AutoStartStep.DeleteConversation, organizationId, conversation, cancellation).ConfigureAwait(false);
+        return completion.Status == 200
+            ? new AutoStartResult(true, SessionAutoStart.ResetTimeFromCompletion(completion.Body ?? ""), null)
+            : new AutoStartResult(false, null, FailureText(completion));
+    }
+
+    private async Task<BrowserResponse> AutoStartAsync(
+        Guid profileId, AutoStartStep step, string organizationId, Guid conversation, CancellationToken cancellation)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var response = await transport.SendAutoStartAsync(profileId, step, organizationId, conversation, cancellation).ConfigureAwait(false);
+        var (name, method, route) = step switch
+        {
+            AutoStartStep.CreateConversation => ("claudeAiAutoStartConversation", "POST", "/api/organizations/{org}/chat_conversations"),
+            AutoStartStep.Completion => ("claudeAiAutoStartMessage", "POST", "/api/organizations/{org}/chat_conversations/{id}/completion"),
+            _ => ("claudeAiAutoStartDelete", "DELETE", "/api/organizations/{org}/chat_conversations/{id}"),
+        };
+        var ok = response.Status is >= 200 and < 300;
+        log.Append(new RequestLogEntry(
+            time.GetUtcNow(), name, method, route, response.Status, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, "WebView2",
+            ok ? null : Classify(response) is { } f ? HttpResponses.Category(f) : "invalidResponse"));
+        return response;
+    }
+
+    private static string FailureText(BrowserResponse response) => response.Status is { } status
+        ? Strings.Format("windows.autostart.failed_status", status)
+        : Strings.Get("windows.autostart.failed_network");
 
     private async Task<(BrowserResponse Response, FetchFailed? Failure)> SendAsync(
         Guid profileId, ClaudeAiOperation operation, string? organizationId, CancellationToken cancellation)

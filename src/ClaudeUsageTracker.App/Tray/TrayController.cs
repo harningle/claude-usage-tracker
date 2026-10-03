@@ -207,6 +207,10 @@ public sealed class TrayController : IDisposable
     /// <summary>The icon a keyboard shortcut or second launch should anchor the popover to.</summary>
     public TrayIcon? PrimaryIcon => _slots.Count > 0 && _icons.TryGetValue(_slots[0].Key, out var icon) ? icon : null;
 
+    /// <summary>The first icon of a profile, such as its icon in multi-profile mode, for a notification click to open.</summary>
+    public TrayIcon? IconFor(Guid profileId) =>
+        _slots.FirstOrDefault(s => s.ProfileId == profileId) is { } slot && _icons.TryGetValue(slot.Key, out var icon) ? icon : null;
+
     public void Show(IReadOnlyList<TraySlot> slots)
     {
         // Icon identities belong to a profile and metric (plan.md), so a slot that is gone takes its icon with it.

@@ -5,11 +5,13 @@ using System.Net.Http;
 using System.Security.Principal;
 using System.Windows;
 using System.Windows.Threading;
+using ClaudeUsageTracker.App.Automation;
 using ClaudeUsageTracker.App.Browser;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.CodexCli;
 using ClaudeUsageTracker.App.Diagnostics;
 using ClaudeUsageTracker.App.Localisation;
+using ClaudeUsageTracker.App.Notifications;
 using ClaudeUsageTracker.App.Profiles;
 using ClaudeUsageTracker.App.Setup;
 using ClaudeUsageTracker.App.Storage;
@@ -18,8 +20,11 @@ using ClaudeUsageTracker.App.Tray;
 using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.App.ViewModels;
 using ClaudeUsageTracker.App.Views;
+using ClaudeUsageTracker.Core.Notifications;
+using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Core.Status;
 using ClaudeUsageTracker.Core.Usage;
+using Microsoft.Win32;
 
 namespace ClaudeUsageTracker.App;
 
@@ -58,9 +63,19 @@ public partial class App : Application
     private SettingsViewModel? _settingsModel;
     private SetupWizardWindow? _wizard;
     private DispatcherTimer? _clock;
+    private DispatcherTimer? _autoStartTimer;
     private ServiceStatus? _status;
     private string _userProfile = "";
     private string? _configDirOverride;
+    private UsageCacheStore _cache = null!;
+    private ToastNotifier? _toasts;
+    private AutomationService _automation = null!;
+    private AutoStartService _autoStart = null!;
+    private CliSwitcher _switcher = null!;
+    private Hotkeys? _hotkeys;
+    private SystemWatcher? _watcher;
+    private LaunchAtLogin _launchAtLogin = null!;
+    private IReadOnlyList<HotkeyAction> _refusedShortcuts = [];
 
     // The profile the popover shows: in multi-profile mode the one whose icon was clicked, otherwise the active one.
     private Guid? _viewedId;
@@ -111,6 +126,20 @@ public partial class App : Application
 
         _theme = new ThemeManager(this);
         _paths = fixture is null ? AppPaths.ForCurrentUser() : new AppPaths(fixture.DataRoot);
+
+        // Notifications register this executable before anything else, so a click that started the app is routed.
+        _toasts = ToastNotifier.Register(
+            Strings.Get("app.name"), NotificationIcon.Write(_paths.NotificationIconFile), fixture is not null, action => Dispatcher.BeginInvoke(action));
+        var coldActivation = _toasts.ColdActivation();
+        if (coldActivation is { FromFixture: true } && fixture is null)
+        {
+            // A fixture-mode notification clicked after that run ended: it must never start the app with the real login.
+            _toasts.Dispose();
+            Shutdown(0);
+            return;
+        }
+
+        RemoveStaleNotificationRegistrations();
         _store = new SettingsStore(_paths.SettingsFile);
         try
         {
@@ -130,7 +159,7 @@ public partial class App : Application
         var time = TimeProvider.System;
         var secrets = new ProfileSecretStore(new SecretStore(_paths.SecretsDirectory));
         var credentialLock = new CredentialLock();
-        var cache = new UsageCacheStore(_paths.CacheDirectory);
+        var cache = _cache = new UsageCacheStore(_paths.CacheDirectory);
         // Cookies are never stored by the HTTP stack: the Console's session cookie is sent explicitly per request.
         HttpMessageHandler handler = fixture?.Handler() ?? new SocketsHttpHandler
         {
@@ -145,7 +174,8 @@ public partial class App : Application
         // Launchers arrive in Milestone 5; until then no running Claude Code is attributed to a profile.
         var processes = fixture is null ? CliProcessGuard.ForThisPc(() => new Dictionary<string, string>()) : FixtureMode.ProcessGuard();
         _links = new CliLinkService(secrets, time, _userProfile, credentialLock, tokens, processes,
-            () => CliStore.Inventory(_userProfile, _configDirOverride, _linkedFolders));
+            () => CliStore.Inventory(_userProfile, _configDirOverride, _linkedFolders),
+            new CliSwitchRecords(_paths.CliSwitchJournalFile, new SecretStore(Path.Combine(_paths.SecretsDirectory, "backups"))));
         _client = new UsageClient(http, time, _log);
         _browser = new BrowserSessions(_paths.BrowserDirectory, Dispatcher);
         var transport = fixture?.ClaudeAi() ?? _browser;
@@ -181,6 +211,27 @@ public partial class App : Application
             _status = status ?? _status;
             UpdateViews();
         };
+        _automation = new AutomationService(_settings, _toasts, new AutomationStateStore(_paths.AutomationFile), time, LastKnownUsage, OnAutoSwitch);
+        _coordinator.UsageFetched += (profileId, usage) =>
+        {
+            if (_settings.Profiles.FirstOrDefault(p => p.Id == profileId) is { } profile)
+            {
+                _automation.UsageFetched(profile, usage.Usage);
+            }
+        };
+        _autoStart = new AutoStartService(_settings, claudeAi, _automation, time, _coordinator.Current, profileId =>
+        {
+            if (_coordinator.Current(profileId) is null)
+            {
+                _browser.Release(profileId);
+            }
+        });
+        _switcher = new CliSwitcher(_settings, _links, _profiles, _automation, SharedFolder, OnSettingsApplied, time, Dispatcher);
+        _switcher.Changed += UpdateViews;
+        _launchAtLogin = fixture is null
+            ? LaunchAtLogin.ForCurrentUser(Environment.ProcessPath!)
+            // Fixture mode never registers the real startup entry: it would start the app with the real login.
+            : new LaunchAtLogin(() => Registry.CurrentUser.CreateSubKey(@"Software\ClaudeUsageTracker.Fixture\Run", writable: true), () => null, Environment.ProcessPath!);
         _log.Changed += () => Dispatcher.BeginInvoke(() =>
         {
             if (_settingsWindow?.Section == SettingsSection.Debug)
@@ -202,6 +253,27 @@ public partial class App : Application
             UpdateViews();
         };
 
+        _toasts.Clicked += ShowForNotification;
+        _hotkeys = new Hotkeys(_host);
+        _hotkeys.Pressed += OnHotkey;
+        _refusedShortcuts = _hotkeys.Apply(_settings.Shortcuts);
+        _watcher = new SystemWatcher(_host, action => Dispatcher.BeginInvoke(action));
+        _watcher.Resumed += OnResumed;
+        _watcher.NetworkAvailable += () => _coordinator.CheckSoon();
+        _watcher.SessionConnected += () =>
+        {
+            // A remote desktop connection can change the DPI and display layout the icons were drawn for.
+            _tray.Redraw();
+            _coordinator.CheckSoon();
+        };
+        _watcher.SessionDisconnected += () =>
+        {
+            if (_popover.IsVisible && !_popover.IsDetached)
+            {
+                _popover.Dismiss();
+            }
+        };
+
         _toggle = new PopoverToggle(time);
         _popoverModel = new PopoverViewModel { FixtureLabel = fixture is null ? null : Strings.Get("windows.fixture.label") };
         _popover = new PopoverWindow(_popoverModel, _toggle);
@@ -217,8 +289,21 @@ public partial class App : Application
         CleanUpLeftovers();
         WatchDisplayed();
         UpdateViews();
-        _clock = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) => UpdateViews(), Dispatcher);
+        _clock = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) =>
+        {
+            UpdateViews();
+            _automation.Tick();
+        }, Dispatcher);
         _clock.Start();
+        _autoStartTimer = new DispatcherTimer(SessionAutoStart.CheckInterval, DispatcherPriority.Background, (_, _) => CheckAutoStart(), Dispatcher);
+        _autoStartTimer.Start();
+        // Upstream checks at once; a short delay lets the first usage checks of the profiles finish.
+        _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => Dispatcher.BeginInvoke(CheckAutoStart), TaskScheduler.Default);
+        SettleSwitch();
+        if (coldActivation is { } clicked)
+        {
+            ShowForNotification(clicked.ProfileId);
+        }
 
         // Upstream shows the wizard on the very first launch and whenever nothing is set up.
         if (!_settings.HasShownWizardOnce || _settings.ActiveProfile is not { } active || (active.UsageSource is null && active.Console is null))
@@ -232,6 +317,10 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _clock?.Stop();
+        _autoStartTimer?.Stop();
+        _hotkeys?.Dispose();
+        _watcher?.Dispose();
+        _toasts?.Dispose();
         _signalWait?.Unregister(null);
         if (_coordinator is not null)
         {
@@ -307,7 +396,147 @@ public partial class App : Application
             var active = _settings.ActiveProfile;
             _settingsModel.Update(
                 active is null ? null : _states.GetValueOrDefault(active.Id),
-                active?.CliLink is { } link ? _links.Read(CliStore.ForLink(link, _userProfile)) : null);
+                active?.CliLink is { } link ? _links.Read(CliStore.ForLink(link, _userProfile)) : null,
+                active?.CliLink is null ? null : _switcher.ViewFor(active, _links.Read(SharedFolder())),
+                _refusedShortcuts);
+        }
+    }
+
+    /// <summary>The folder the plain <c>claude</c> command uses, which an account switch changes: <c>CLAUDE_CONFIG_DIR</c> or the default.</summary>
+    private CliConfigDirectory SharedFolder()
+    {
+        var inventory = CliStore.Inventory(_userProfile, _configDirOverride, []);
+        return inventory.Count > 1 ? inventory[1] : inventory[0];
+    }
+
+    /// <summary>A profile's last known usage, live or from the cache of its current account, for choosing an auto-switch target.</summary>
+    private UsageData? LastKnownUsage(Guid profileId)
+    {
+        if (_states.GetValueOrDefault(profileId)?.Usage is { } live)
+        {
+            return live.Usage;
+        }
+
+        return _settings.Profiles.FirstOrDefault(p => p.Id == profileId) is { } profile
+               && _cache.Load(profileId) is { } cached && cached.AccountIdentity == ProfileWatch.From(profile).AccountIdentity
+            ? cached.Usage
+            : null;
+    }
+
+    /// <summary>
+    /// Upstream's auto-switch activates the next profile. Viewing it never touches Claude Code; when Claude Code is on
+    /// the account that reached its limit, it is also switched, and the switch waits while Claude Code runs.
+    /// </summary>
+    private void OnAutoSwitch(ProfileSettings from, ProfileSettings to)
+    {
+        var shared = _links.Read(SharedFolder());
+        var onFrom = from.CliLink is { } link && shared.Credentials is not null
+                     && Core.ClaudeCode.CliLoginLabels.Compare(link.Identity, shared.Account?.Identity, null, null) == Core.ClaudeCode.CliAccountMatch.SameAccount;
+        OnProfileSelected(to.Id);
+        if (onFrom && to.CliLink is not null && to.ProviderKind == Provider.Anthropic)
+        {
+            _ = _switcher.RequestAsync(to, automatic: true, null);
+        }
+    }
+
+    private async void SettleSwitch() => await _switcher.SettleAsync();
+
+    private async void CheckAutoStart() => await _autoStart.CheckAllAsync(CancellationToken.None);
+
+    /// <summary>Upstream's wake refresh: a check of every polled profile a few seconds after resume, and the auto-start check.</summary>
+    private async void OnResumed()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        _coordinator.CheckSoon();
+        CheckAutoStart();
+    }
+
+    private void OnHotkey(HotkeyAction action)
+    {
+        switch (action)
+        {
+            case HotkeyAction.TogglePopover:
+                if (_popover.IsVisible)
+                {
+                    _popover.Dismiss();
+                }
+                else if (_tray.PrimaryIcon is { } icon)
+                {
+                    UpdateViews();
+                    Interop.NativeMethods.GetCursorPos(out var cursor);
+                    _popover.ShowAt(icon.Bounds(), new Point(cursor.X, cursor.Y), fromKeyboard: true);
+                    _toggle.Opened();
+                }
+
+                break;
+            case HotkeyAction.Refresh:
+                RefreshViewed();
+                break;
+            case HotkeyAction.OpenSettings:
+                ShowSettings(null);
+                break;
+            case HotkeyAction.NextProfile:
+                // Upstream switchToNextProfile: the next profile in list order, wrapping round.
+                var profiles = _settings.Profiles;
+                if (profiles.Count > 1 && _settings.ActiveProfile is { } active)
+                {
+                    OnProfileSelected(profiles[(profiles.IndexOf(active) + 1) % profiles.Count].Id);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>A notification was clicked: the popover opens on its profile.</summary>
+    private void ShowForNotification(Guid? profileId)
+    {
+        var target = profileId is { } id && _settings.Profiles.Any(p => p.Id == id) ? id : (Guid?)null;
+        if (target is { } shown && shown != Viewed?.Id)
+        {
+            if (_settings.IsMultiProfile && _settings.DisplayedProfiles.Any(p => p.Id == shown))
+            {
+                _viewedId = shown;
+                _status = null;
+                _coordinator.SetStatusProfile(shown);
+            }
+            else
+            {
+                // A profile that is not shown is opened as the profile switcher opens it: by activating it.
+                OnProfileSelected(shown);
+                if (Viewed?.Id != shown)
+                {
+                    // Activation failed and was reported; the popover would show another profile.
+                    return;
+                }
+            }
+        }
+
+        var icon = (target is { } t ? _tray.IconFor(t) : null) ?? _tray.PrimaryIcon;
+        if (icon is not null)
+        {
+            UpdateViews();
+            Interop.NativeMethods.GetCursorPos(out var cursor);
+            _popover.ShowAt(icon.Bounds(), new Point(cursor.X, cursor.Y));
+            _toggle.Opened();
+        }
+    }
+
+    /// <summary>
+    /// Removes this app's notification registrations left by copies that were moved or deleted (Milestone 1, D6). A
+    /// failure only leaves those stale entries behind, as before.
+    /// </summary>
+    private static void RemoveStaleNotificationRegistrations()
+    {
+        try
+        {
+            using var classes = Registry.CurrentUser.OpenSubKey(@"Software\Classes", writable: true);
+            if (classes is not null)
+            {
+                NotificationRegistrations.RemoveStale(classes, Environment.ProcessPath!);
+            }
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
         }
     }
 
@@ -366,6 +595,7 @@ public partial class App : Application
             return;
         }
 
+        _automation.UserTriggered(profile.Id);
         _viewedId = profile.Id;
         _status = null;
         WatchDisplayed();
@@ -460,7 +690,16 @@ public partial class App : Application
         {
             var history = new HistoryViewModel(_history, TimeProvider.System,
                 () => UsageDisplay.Uses24HourTime(_settings.TimeFormat, CultureInfo.CurrentCulture));
-            _settingsModel = new SettingsViewModel(_settings, OnSettingsEdited, OnSettingsApplied, _profiles, history, _log, _theme.TaskbarDark);
+            _settingsModel = new SettingsViewModel(_settings, OnSettingsEdited, OnSettingsApplied, _profiles, history, _log, _theme.TaskbarDark,
+                new SettingsIntegrations
+                {
+                    LaunchAtLogin = _launchAtLogin,
+                    Notifier = _automation.Notifier,
+                    AutomationProblem = () => _automation.StateProblem,
+                    NotificationsSwitchedOn = _automation.NotificationsSwitchedOn,
+                    ApplyShortcuts = () => _refusedShortcuts = _hotkeys!.Apply(_settings.Shortcuts),
+                    SuspendShortcuts = () => _hotkeys!.Suspend(),
+                });
             _settingsWindow = new SettingsWindow(_settingsModel);
             _settingsWindow.SourceInitialized += (_, _) => _theme.StyleTitleBar(_settingsWindow);
             _settingsWindow.Closed += (_, _) =>
@@ -473,6 +712,9 @@ public partial class App : Application
             _settingsWindow.QuitRequested += (_, _) => Shutdown();
             _settingsWindow.RemoveRequested += RemoveCredential;
             _settingsWindow.DeleteProfileRequested += DeleteProfile;
+            _settingsWindow.SwitchCliRequested += SwitchCli;
+            _settingsWindow.CancelCliSwitchRequested += (_, _) => _switcher.Cancel();
+            _settingsWindow.SignedInAgainRequested += async (_, _) => await _switcher.SignedInAgainAsync();
             UpdateViews();
             _settingsWindow.Show();
         }
@@ -528,6 +770,25 @@ public partial class App : Application
         }
     }
 
+    /// <summary>"Use in Claude Code" on the CLI Account page: switch now, or after Claude Code closes, confirming first when that signs a login out.</summary>
+    private async void SwitchCli()
+    {
+        if (_settings.ActiveProfile is not { CliLink: not null } profile || _settingsWindow is null)
+        {
+            return;
+        }
+
+        var result = await _switcher.RequestAsync(profile, automatic: false, null);
+        if (result is { Outcome: CliSwitchOutcome.NeedsConfirmation, OccupantStamp: { } stamp }
+            && MessageBox.Show(_settingsWindow, _switcher.Describe(result, profile), Strings.Get("windows.cli.switch.confirm.title"),
+                MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK)
+        {
+            await _switcher.RequestAsync(profile, automatic: false, stamp);
+        }
+
+        UpdateViews();
+    }
+
     private async void DeleteProfile(Guid profileId)
     {
         if (_settings.Profiles.FirstOrDefault(p => p.Id == profileId) is not { } profile)
@@ -574,6 +835,7 @@ public partial class App : Application
         var model = new SetupWizardViewModel(_links, _client, _setup, _wizardServices, TimeProvider.System, _userProfile, _configDirOverride);
         model.Saved += profile =>
         {
+            _automation.UserTriggered(profile.Id);
             _viewedId = profile.Id;
             _status = null;
             OnSettingsApplied();

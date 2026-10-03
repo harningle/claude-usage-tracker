@@ -82,13 +82,13 @@
 "windows.appearance.show_remaining_description" = "Display remaining capacity instead of used percentage (like a battery)";
 "windows.appearance.all_metrics_off" = "All metrics are off. The app logo is shown in the notification area instead. Click it to open the popover and settings.";
 "windows.appearance.square_note" = "Windows tray icons are square, so each style is drawn in a compact form without text labels. The tooltip and popover show the details.";
-"windows.general.subtitle" = "Refresh interval for this profile";
+"windows.general.subtitle" = "Refresh interval, auto-start and notifications for this profile";
 "windows.settings.no_profile" = "Set up a profile to change these settings.";
 "windows.cli.linked_at" = "Linked %@";
 "windows.cli.current_state" = "Status";
 "windows.cli.state.ready" = "Signed in and readable";
 "windows.cli.state.not_checked" = "Not checked yet";
-"windows.cli.about" = "The tracker reads Claude Code's login and keeps an encrypted copy for this profile. When the login has expired and no Claude Code is running, the tracker renews it and writes the renewed login back to Claude Code's files; it never replaces a newer login. If Claude Code switches to another account, this profile keeps its own copy and renews it itself. Switching Claude Code to this profile's account comes in a later version.";
+"windows.cli.about" = "The tracker reads Claude Code's login and keeps an encrypted copy for this profile. When the login has expired and no Claude Code is running, the tracker renews it and writes the renewed login back to Claude Code's files; it never replaces a newer login. If Claude Code switches to another account, this profile keeps its own copy and renews it itself. To make Claude Code use this profile's account, choose Use in Claude Code.";
 "windows.cli.remove_confirm.title" = "Remove CLI Account?";
 "windows.cli.remove_confirm.message" = "This removes the link and the encrypted copy from this profile. Claude Code stays signed in.";
 "windows.about.subtitle" = "for Windows";
@@ -189,3 +189,68 @@
 "windows.multiprofile.square_note" = "Windows tray icons are square, so the profile name and the values are in each icon's tooltip.";
 "windows.debug.subtitle" = "Network requests for troubleshooting";
 "windows.debug.note" = "Every request is logged with its operation, route, status and timing only, never its address parameters, headers, cookies, bodies or account data, so logging is always on. The export holds the same fields.";
+
+/* MARK: - Milestone 4: notifications */
+"windows.notification.session_info.title" = "Usage Info";
+"windows.notification.session_info.message" = "You've used %@ of your session limit. %@";
+"windows.notification.session_key_expiring.title" = "API Session Expiring";
+"windows.notification.session_key_expiring.message" = "Your API session key expires in %@. Please re-authenticate to avoid interruption.";
+"windows.notifications.unavailable" = "Windows notifications are unavailable: %@";
+"windows.notifications.off_for_user" = "Notifications are switched off in Windows Settings → System → Notifications.";
+"windows.notifications.off_for_app" = "Notifications from Claude Usage Tracker are switched off in Windows Settings → System → Notifications.";
+"windows.notifications.off_by_policy" = "Notifications are switched off by your organisation's policy.";
+"windows.notifications.sound.im" = "Message";
+"windows.notifications.sound.mail" = "Mail";
+"windows.notifications.sound.reminder" = "Reminder";
+"windows.notifications.sound.sms" = "Text Message";
+"windows.notifications.sound_note" = "Each sound is the one Windows plays for that kind of notification, as set in Windows sound settings.";
+
+/* MARK: - Milestone 4: automation */
+"windows.general.autostart_description" = "When this profile's 5-hour session has not started, send one short message (\"Hi\", to Claude Haiku) through its claude.ai session, then delete that conversation. This uses your usage. It is sent only when switched on here, never by usage checks.";
+"windows.general.autostart_requirements" = "Requirements:";
+"windows.general.autostart_requirement" = "• A claude.ai sign-in for this profile (Credentials → Claude.ai)";
+"windows.general.autostart_needs_claude_ai" = "This profile has no claude.ai sign-in yet, so nothing is sent.";
+"windows.autostart.failed_status" = "claude.ai answered with HTTP %d.";
+"windows.autostart.failed_network" = "No response arrived.";
+"windows.autostart.failed_response" = "The response was not understood.";
+"windows.general.launch_at_login.description" = "Start Claude Usage Tracker when you sign in to Windows";
+"windows.launch.other_copy" = "Another copy of the app starts at sign-in: %@. Switch this on to start this copy instead.";
+"windows.launch.disabled_in_task_manager" = "Starting at sign-in is switched off for this app in Task Manager (Startup apps). Switch it on there.";
+"windows.launch.failed" = "Couldn't change the startup entry: %@";
+"windows.shortcuts.info_desc" = "Shortcuts work from any application. Each shortcut needs Ctrl, Alt or the Windows key. Windows keeps some combinations for itself and another app may already use one; such a shortcut is marked here.";
+"windows.shortcuts.needs_modifier" = "A shortcut needs Ctrl, Alt or the Windows key. Shift alone would stop that character being typed anywhere.";
+"windows.shortcuts.duplicate" = "That shortcut is already used for %@.";
+"windows.shortcuts.in_use" = "Another app is using this shortcut, so it does nothing here.";
+"windows.auto_switch.enable_description" = "When the active profile reaches 100% of its session, switch to the next profile that has capacity. If Claude Code is on the profile that reached the limit, Claude Code is switched too; while Claude Code is running, that waits until it closes.";
+
+/* MARK: - Milestone 4: switching Claude Code's account */
+"windows.cli.switch.title" = "Claude Code's account";
+"windows.cli.switch.in_use" = "Claude Code (%@) is signed in to this account.";
+"windows.cli.switch.not_in_use" = "Claude Code (%@) is signed in to another account, or to none.";
+"windows.cli.switch.pending" = "Claude Code switches to this account as soon as no Claude Code is running.";
+"windows.cli.switch.button" = "Use in Claude Code";
+"windows.cli.switch.cancel" = "Cancel Switch";
+"windows.cli.switch.about" = "This writes this profile's login into the folder the claude command uses, after saving the previous account's latest login to the profile that follows it. It happens only while no Claude Code is running. Both files are backed up, encrypted, and every other setting in them is kept. Activating a profile only changes what the tracker shows.";
+"windows.cli.switch.done" = "Claude Code now uses the account of profile %@.";
+"windows.cli.switch.already" = "Claude Code already uses this account.";
+"windows.cli.switch.waiting" = "Claude Code is running, so the switch waits until it closes.";
+"windows.cli.switch.deferred" = "Claude Code is running, so it keeps its account until it closes. Then it switches to the account of profile %@.";
+"windows.cli.switch.confirm.title" = "Sign Claude Code out of this account?";
+"windows.cli.switch.confirm.message" = "Claude Code is signed in to %@, which no profile follows. Switching signs it out of Claude Code, and you would need /login to use it there again. An encrypted backup of both files is kept. Switch anyway?";
+"windows.cli.switch.conflict" = "Claude Code's files changed during the switch, so it stopped and undid its own change. Try again.";
+"windows.cli.switch.repair" = "The switch could not be finished or undone (%@). The tracker settles it once no Claude Code is running.";
+"windows.cli.switch.sign_in_again" = "An unfinished switch left Claude Code's folder unclear: its login may not belong to the account it names. Until it is settled, the tracker renews no login. Sign in again in Claude Code (/login) with the account you want there, then choose Signed In Again.";
+"windows.cli.switch.signed_in_button" = "Signed In Again";
+"windows.cli.switch.signed_in_confirm" = "Choose OK only after signing in again in Claude Code (/login). The tracker then treats the folder's login as Claude Code's own and resumes renewing logins.";
+"windows.cli.switch.superseded" = "A newer Claude Code sign-in replaced the unfinished switch, so it was left as it is.";
+"windows.cli.switch.refused.renewal_failed" = "This profile's login has expired and could not be renewed just now. Try again in a few minutes.";
+"windows.cli.switch.notification.title" = "Claude Code Account";
+"windows.cli.switch.refused.no_copy" = "This profile has no saved Claude Code login to switch to. Set it up again.";
+"windows.cli.switch.refused.used_elsewhere" = "This login is marked as also used elsewhere. Writing it into Claude Code here would give it a second holder, and each would sign the other out.";
+"windows.cli.switch.refused.other_folder" = "This account is signed in to Claude Code in %@. Two folders sharing one login would sign each other out.";
+"windows.cli.switch.refused.unreadable" = "A Claude Code folder could not be read (%@), so nothing was changed.";
+"windows.cli.switch.refused.hand_back" = "A renewed login is still being written back to Claude Code. Try again in a moment.";
+"windows.cli.switch.refused.rejected" = "This login was rejected. Sign in again in Claude Code, then set up this profile again.";
+"windows.cli.switch.refused.unsettled" = "An earlier switch of Claude Code's account was not completed. Nothing was changed; try again.";
+"windows.cli.switch.refused.storage" = "A saved login could not be read or written: %@";
+"windows.cli.notice.switch_incomplete" = "A switch of Claude Code's account did not finish. The tracker settles it once no Claude Code is running; until then it renews no login.";

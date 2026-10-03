@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using ClaudeUsageTracker.App.Automation;
 using ClaudeUsageTracker.App.Interop;
 using ClaudeUsageTracker.App.Localisation;
 using ClaudeUsageTracker.App.Setup;
@@ -22,7 +23,9 @@ public enum SettingsSection
     Appearance,
     General,
     History,
+    AppSettings,
     ManageProfiles,
+    Shortcuts,
     Popover,
     Debug,
     About,
@@ -40,7 +43,20 @@ public partial class SettingsWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         Navigate(SettingsSection.Appearance);
+        PreviewKeyDown += OnRecordingKeyDown;
+        // A shortcut is recorded only while this window has the keyboard.
+        Deactivated += (_, _) => _viewModel.StopRecording();
+        Closed += (_, _) => _viewModel.StopRecording();
     }
+
+    /// <summary>"Use in Claude Code" on the CLI Account page.</summary>
+    public event Action? SwitchCliRequested;
+
+    /// <summary>Cancel the switch that waits for Claude Code to close.</summary>
+    public event EventHandler? CancelCliSwitchRequested;
+
+    /// <summary>The user has signed in again in Claude Code after an unfinished switch; the user has confirmed.</summary>
+    public event EventHandler? SignedInAgainRequested;
 
     /// <summary>Set up or change one credential of the active profile, through the wizard.</summary>
     public event Action<WizardRoute>? SetupRequested;
@@ -87,7 +103,9 @@ public partial class SettingsWindow : Window
         SettingsSection.Codex => NavCodex,
         SettingsSection.General => NavGeneral,
         SettingsSection.History => NavHistory,
+        SettingsSection.AppSettings => NavAppSettings,
         SettingsSection.ManageProfiles => NavProfiles,
+        SettingsSection.Shortcuts => NavShortcuts,
         SettingsSection.Popover => NavPopover,
         SettingsSection.Debug => NavDebug,
         SettingsSection.About => NavAbout,
@@ -101,11 +119,17 @@ public partial class SettingsWindow : Window
                  {
                      (PageClaudeAi, SettingsSection.ClaudeAi), (PageConsole, SettingsSection.Console), (PageCli, SettingsSection.CliAccount),
                      (PageCodex, SettingsSection.Codex), (PageAppearance, SettingsSection.Appearance), (PageGeneral, SettingsSection.General),
-                     (PageHistory, SettingsSection.History), (PageProfiles, SettingsSection.ManageProfiles), (PagePopover, SettingsSection.Popover),
-                     (PageDebug, SettingsSection.Debug), (PageAbout, SettingsSection.About),
+                     (PageHistory, SettingsSection.History), (PageAppSettings, SettingsSection.AppSettings), (PageProfiles, SettingsSection.ManageProfiles),
+                     (PageShortcuts, SettingsSection.Shortcuts), (PagePopover, SettingsSection.Popover), (PageDebug, SettingsSection.Debug),
+                     (PageAbout, SettingsSection.About),
                  })
         {
             page.Visibility = shown == section ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (section != SettingsSection.Shortcuts)
+        {
+            _viewModel.StopRecording();
         }
 
         // The history and the log are read when their page opens, not kept current behind the others.
@@ -283,6 +307,87 @@ public partial class SettingsWindow : Window
         {
             _viewModel.ToggleDisplayed(id);
         }
+    }
+
+    private void OnSwitchCli(object sender, RoutedEventArgs e) => SwitchCliRequested?.Invoke();
+
+    private void OnCancelCliSwitch(object sender, RoutedEventArgs e) => CancelCliSwitchRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnSignedInAgain(object sender, RoutedEventArgs e)
+    {
+        if (Confirm(Strings.Get("windows.cli.switch.signed_in_button"), Strings.Get("windows.cli.switch.signed_in_confirm")))
+        {
+            SignedInAgainRequested?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void OnAddThreshold(object sender, RoutedEventArgs e)
+    {
+        // As upstream, an invalid value is simply cleared.
+        _viewModel.AddCustomThreshold(NewThreshold.Text);
+        NewThreshold.Text = "";
+    }
+
+    private void OnThresholdKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            OnAddThreshold(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private void OnRemoveThreshold(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: int value })
+        {
+            _viewModel.RemoveCustomThreshold(value);
+        }
+    }
+
+    private void OnPreviewSound(object sender, RoutedEventArgs e) => _viewModel.PreviewSound();
+
+    /// <summary>Upstream's recorder: a click starts recording, a second click stops it.</summary>
+    private void OnRecordShortcut(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: HotkeyAction action })
+        {
+            return;
+        }
+
+        if (_viewModel.ShortcutRows.FirstOrDefault(r => r.Action == action)?.IsRecording == true)
+        {
+            _viewModel.StopRecording();
+        }
+        else
+        {
+            _viewModel.StartRecording(action);
+        }
+    }
+
+    private void OnClearShortcut(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: HotkeyAction action })
+        {
+            _viewModel.ClearShortcut(action);
+        }
+    }
+
+    /// <summary>While a shortcut is recorded, every key goes to the recorder, including Space and Enter.</summary>
+    private void OnRecordingKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!_viewModel.IsRecordingShortcut)
+        {
+            return;
+        }
+
+        var key = e.Key switch
+        {
+            Key.System => e.SystemKey,
+            Key.ImeProcessed => e.ImeProcessedKey,
+            _ => e.Key,
+        };
+        e.Handled = _viewModel.Record(KeyInterop.VirtualKeyFromKey(key), Shortcuts.ModifiersOf(Keyboard.Modifiers));
     }
 
     private bool Confirm(string title, string message) =>

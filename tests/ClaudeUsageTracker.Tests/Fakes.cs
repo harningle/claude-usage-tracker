@@ -26,6 +26,23 @@ internal sealed class ScriptedTransport(Func<Guid, ClaudeAiOperation, string?, B
         return Task.FromResult(respond(profileId, operation, organizationId));
     }
 
+    /// <summary>Answers the auto-start requests; none is expected unless a test sets it.</summary>
+    public Func<AutoStartStep, Guid, BrowserResponse> AutoStart { get; set; } =
+        (_, _) => throw new InvalidOperationException("No auto-start request was expected.");
+
+    public List<(AutoStartStep Step, Guid ConversationId)> AutoStartRequests { get; } = [];
+
+    public Task<BrowserResponse> SendAutoStartAsync(
+        Guid profileId, AutoStartStep step, string organizationId, Guid conversationId, CancellationToken cancellation)
+    {
+        lock (AutoStartRequests)
+        {
+            AutoStartRequests.Add((step, conversationId));
+        }
+
+        return Task.FromResult(AutoStart(step, conversationId));
+    }
+
     public static BrowserResponse Ok(string body) => new(200, "application/json", false, body, null, null);
 
     public static BrowserResponse Status(int status, string body = "{}") => new(status, "application/json", false, body, null, null);

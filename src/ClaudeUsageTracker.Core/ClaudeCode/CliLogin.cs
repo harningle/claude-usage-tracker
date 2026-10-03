@@ -103,6 +103,12 @@ public sealed record CliAccount(
     /// <summary>Upstream's account identity: <c>accountUuid</c>, else <c>emailAddress</c>.</summary>
     public string? Identity => AccountUuid ?? EmailAddress;
 
+    /// <summary>
+    /// The whole <c>oauthAccount</c> object as compact JSON, so an account switch can write back what Claude Code wrote,
+    /// unknown fields included (upstream kept it raw for the same reason).
+    /// </summary>
+    public string? RawJson { get; init; }
+
     /// <summary>Reads <c>oauthAccount</c> from a whole <c>.claude.json</c>; null when absent or unreadable.</summary>
     public static CliAccount? FromClaudeJson(string json)
     {
@@ -122,6 +128,9 @@ public sealed record CliAccount(
                 JsonRead.NonEmptyString(account, "emailAddress"),
                 JsonRead.NonEmptyString(account, "organizationName"),
                 JsonRead.NonEmptyString(account, "organizationUuid"))
+            {
+                RawJson = account.ToJsonString(),
+            }
             : null;
     }
 }

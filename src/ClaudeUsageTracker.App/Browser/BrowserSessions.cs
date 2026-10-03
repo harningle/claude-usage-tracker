@@ -77,6 +77,57 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
         }).Task.Unwrap().WaitAsync(cancellation);
     }
 
+    public Task<BrowserResponse> SendAutoStartAsync(
+        Guid profileId, AutoStartStep step, string organizationId, Guid conversationId, CancellationToken cancellation)
+    {
+        var (method, path, body, accept) = AutoStartRequest(step, organizationId, conversationId);
+        return dispatcher.InvokeAsync(async () =>
+        {
+            try
+            {
+                var core = await BackgroundAsync(profileId);
+                return await ParkAsync(core)
+                    ? await FetchAsync(core, path, method, body, accept)
+                    : new BrowserResponse(null, null, false, null, null, "navigation");
+            }
+            catch (Exception e) when (e is WebView2RuntimeNotFoundException or System.Runtime.InteropServices.COMException or InvalidOperationException)
+            {
+                Drop(profileId);
+                return new BrowserResponse(null, null, false, null, null, "network");
+            }
+        }).Task.Unwrap().WaitAsync(cancellation);
+    }
+
+    /// <summary>
+    /// The fixed request of an auto-start step: upstream's method, path and body. Only the checked organisation ID and
+    /// a GUID enter the path, and the body holds only constants and that GUID.
+    /// </summary>
+    public static (string Method, string Path, string? Body, string Accept) AutoStartRequest(
+        AutoStartStep step, string organizationId, Guid conversationId)
+    {
+        if (!OrganizationId().IsMatch(organizationId))
+        {
+            throw new ArgumentException("The organisation ID is not in the expected form.", nameof(organizationId));
+        }
+
+        var conversations = $"/api/organizations/{organizationId}/chat_conversations";
+        var id = conversationId.ToString("D");
+        return step switch
+        {
+            AutoStartStep.CreateConversation => ("POST", conversations,
+                new JsonObject { ["uuid"] = id, ["name"] = "" }.ToJsonString(), "application/json"),
+            AutoStartStep.Completion => ("POST", $"{conversations}/{id}/completion",
+                new JsonObject
+                {
+                    ["prompt"] = Core.Notifications.SessionAutoStart.Prompt,
+                    ["model"] = Core.Notifications.SessionAutoStart.Model,
+                    ["timezone"] = "UTC",
+                }.ToJsonString(), "text/event-stream"),
+            AutoStartStep.DeleteConversation => ("DELETE", $"{conversations}/{id}", null, "application/json"),
+            _ => throw new ArgumentOutOfRangeException(nameof(step), step, "Not an auto-start step."),
+        };
+    }
+
     /// <summary>The profile's WebView2 environment, shared by its background view and its sign-in window.</summary>
     public Task<CoreWebView2Environment> EnvironmentAsync(Guid profileId) =>
         SessionFor(profileId).Environment ??= CoreWebView2Environment.CreateAsync(null, FolderFor(profileId));
@@ -178,15 +229,20 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
     }
 
     /// <summary>
-    /// Sends one credentialed GET from the page and returns what came back. The page must be on the
-    /// claude.ai origin. Only the path, already built from an allowlisted operation, enters the script.
+    /// Sends one credentialed request from the page and returns what came back. The page must be on the
+    /// claude.ai origin. Only the path, already built from an allowlisted operation, and for the auto-start
+    /// requests their fixed method and body, enter the script, each as a JSON string literal.
     /// </summary>
-    public static async Task<BrowserResponse> FetchAsync(CoreWebView2 core, string path)
+    public static async Task<BrowserResponse> FetchAsync(
+        CoreWebView2 core, string path, string method = "GET", string? body = null, string accept = "application/json")
     {
         const string script = """
             (async () => {
               try {
-                const r = await fetch(__PATH__, { credentials: 'include', headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(30000) });
+                const init = { method: __METHOD__, credentials: 'include', headers: { 'Accept': __ACCEPT__ }, signal: AbortSignal.timeout(30000) };
+                const body = __BODY__;
+                if (body !== null) { init.headers['Content-Type'] = 'application/json'; init.body = body; }
+                const r = await fetch(__PATH__, init);
                 const text = await r.text();
                 return JSON.stringify({ status: r.status, contentType: r.headers.get('content-type'), cfMitigated: r.headers.get('cf-mitigated') !== null,
                                         retryAfter: r.headers.get('retry-after'), body: text.slice(0, 1048576) });
@@ -195,7 +251,11 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
             """;
         var parameters = new JsonObject
         {
-            ["expression"] = script.Replace("__PATH__", JsonSerializer.Serialize(path), StringComparison.Ordinal),
+            ["expression"] = script
+                .Replace("__PATH__", JsonSerializer.Serialize(path), StringComparison.Ordinal)
+                .Replace("__METHOD__", JsonSerializer.Serialize(method), StringComparison.Ordinal)
+                .Replace("__ACCEPT__", JsonSerializer.Serialize(accept), StringComparison.Ordinal)
+                .Replace("__BODY__", body is null ? "null" : JsonSerializer.Serialize(body), StringComparison.Ordinal),
             ["awaitPromise"] = true,
             ["returnByValue"] = true,
         };

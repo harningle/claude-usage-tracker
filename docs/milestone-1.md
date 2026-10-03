@@ -280,8 +280,8 @@ The planned sign-in, restart, renewal, isolation, Console, notification and tray
 | D2 | Notifications on a clean machine without the Singleton package (this PC has it installed) | M6 |
 | D3 | Statusline: how Claude Code actually spawns the command shell, rapid replacement/cancellation and end-to-end timing with the production helper (only the spike helper was timed) | M5 |
 | D4 | Self-contained output size (the notification spike was 470 files, 186 MB) | M6 packaging |
-| D5 | The extracted `Microsoft.WindowsAppRuntime.Insights.Resource.dll` workaround: build it into the app and re-check on each Windows App SDK update | M4, then M6 |
-| D6 | Stale notification registrations and `NotifyIconSettings` entries after a move: cleanup of the app's own stale entries | M4 (notifications), M6 (manual upgrade and cleanup) |
+| D5 | The extracted `Microsoft.WindowsAppRuntime.Insights.Resource.dll` workaround: build it into the app and re-check on each Windows App SDK update | Built into the app in M4 (2026-10-02; `Register()` succeeded in a fixture run, [milestone-4.md](milestone-4.md)); re-check at each Windows App SDK update and in M6 |
+| D6 | Stale notification registrations and `NotifyIconSettings` entries after a move: cleanup of the app's own stale entries | Notification registrations: removed at startup from M4 (only this app's, only for executables that no longer exist). `NotifyIconSettings` entries stay Explorer's; M6 (manual upgrade and cleanup) |
 | D7 | Upstream's `console.anthropic.com/api` base with an explicitly sent `platform.claude.com` key: untested, and moot while the port uses `platform.claude.com` | Only if `platform.claude.com` stops working |
 
 ### Running the isolation check again

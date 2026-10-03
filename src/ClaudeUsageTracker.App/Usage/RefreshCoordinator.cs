@@ -23,6 +23,9 @@ public sealed class RefreshCoordinator : IAsyncDisposable
     /// </summary>
     public static readonly TimeSpan BillingInterval = TimeSpan.FromMinutes(5);
 
+    /// <summary>An automatic check after a wake or reconnect is skipped when the profile was checked this recently (upstream: 10 s).</summary>
+    public static readonly TimeSpan CheckSoonDebounce = TimeSpan.FromSeconds(10);
+
     private readonly Func<UsageSourceKind, IUsageSource> _sources;
     private readonly UsageClient _client;
     private readonly ConsoleBillingSource _billing;
@@ -54,6 +57,12 @@ public sealed class RefreshCoordinator : IAsyncDisposable
 
     /// <summary>Raised on the UI thread after each service-status check; null when it could not be read.</summary>
     public event Action<ServiceStatus?>? StatusChanged;
+
+    /// <summary>
+    /// Raised on the UI thread when a check of this run has just fetched usage for a profile. Cached values from an
+    /// earlier run never raise it, so automation acts on fresh observations only.
+    /// </summary>
+    public event Action<Guid, CachedUsage>? UsageFetched;
 
     /// <summary>Starts polling a profile, or applies its changed links or interval.</summary>
     public void Watch(ProfileSettings profile)
@@ -122,6 +131,27 @@ public sealed class RefreshCoordinator : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// An automatic check now, as after a wake from sleep or a network or session reconnect (upstream's wake and
+    /// network-available refreshes). Unlike a manual refresh it does not resend a rejected login, and it is skipped
+    /// for a profile checked within <see cref="CheckSoonDebounce"/>, and for one whose check is running or has not
+    /// happened yet (a new profile checks at once anyway). A server-requested wait still holds.
+    /// </summary>
+    public void CheckSoon()
+    {
+        var now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            foreach (var worker in _workers.Values)
+            {
+                if (worker.State is { IsRefreshing: false, LastAttemptAt: { } last } && now - last >= CheckSoonDebounce)
+                {
+                    worker.Due();
+                }
+            }
+        }
+    }
+
     public ProfileUsageState? Current(Guid profileId)
     {
         lock (_gate)
@@ -161,6 +191,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
         private CancellationTokenSource _cycle = new();
         private TaskCompletionSource _wake = NewSignal();
         private bool _manualPending;
+        private bool _duePending;
         private string? _rejectedStamp;
         private DateTimeOffset? _billingLast;
         private DateTimeOffset _billingNotBefore;
@@ -218,6 +249,16 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             lock (_gate)
             {
                 SignalLocked(manual);
+            }
+        }
+
+        /// <summary>Ends the current wait without making the next check manual.</summary>
+        public void Due()
+        {
+            lock (_gate)
+            {
+                _duePending = true;
+                _wake.TrySetResult();
             }
         }
 
@@ -289,6 +330,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                     generation = _generation;
                     cycle = CancellationTokenSource.CreateLinkedTokenSource(lifetime, _cycle.Token);
                     _manualPending = false;
+                    _duePending = false;
                     _wake = NewSignal();
                 }
 
@@ -349,6 +391,11 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                         return true;
                     }
 
+                    if (_duePending)
+                    {
+                        return false;
+                    }
+
                     if (delayIsInterval)
                     {
                         due = started + _watch.Interval;
@@ -381,6 +428,11 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                     if (_manualPending)
                     {
                         return true;
+                    }
+
+                    if (_duePending)
+                    {
+                        return false;
                     }
 
                     // Woken by an interval change: re-time and keep waiting.
@@ -500,6 +552,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                         RetryNotBefore = null,
                         HistoryError = historyError,
                     });
+                    Announce(generation, cached);
                     return interval;
                 }
 
@@ -650,6 +703,15 @@ public sealed class RefreshCoordinator : IAsyncDisposable
 
             Publish(generation, state);
         }
+
+        /// <summary>Raises <see cref="UsageFetched"/> on the UI thread, unless a link change has superseded the result by then.</summary>
+        private void Announce(long generation, CachedUsage usage) => _owner._post(() =>
+        {
+            if (IsCurrent(generation))
+            {
+                _owner.UsageFetched?.Invoke(_profileId, usage);
+            }
+        });
 
         /// <summary>
         /// Notifies on the UI thread, checking the generation again when the notification runs: a link change

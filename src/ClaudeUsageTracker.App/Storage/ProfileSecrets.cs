@@ -15,8 +15,13 @@ namespace ClaudeUsageTracker.App.Storage;
 /// Folders that still hold the token a renewal used up and have to be given this copy's login. A newer login
 /// of the same account that Claude Code writes meanwhile replaces the copy's login and keeps the record.
 /// </param>
+/// <param name="oauthAccountJson">
+/// The account's <c>oauthAccount</c> object from <c>.claude.json</c>, as last seen with this login. Not secret, but
+/// kept with the login it describes so an account switch writes both together.
+/// </param>
 public sealed class CliSecret(
-    string oauthJson, CredentialOwnership ownership, string sourceConfigDirectory, DateTimeOffset savedAt, PendingWriteBack? pending = null)
+    string oauthJson, CredentialOwnership ownership, string sourceConfigDirectory, DateTimeOffset savedAt, PendingWriteBack? pending = null,
+    string? oauthAccountJson = null)
 {
     public string OAuthJson { get; } = oauthJson;
 
@@ -27,6 +32,8 @@ public sealed class CliSecret(
     public DateTimeOffset SavedAt { get; } = savedAt;
 
     public PendingWriteBack? Pending { get; } = pending;
+
+    public string? OAuthAccountJson { get; } = oauthAccountJson;
 
     /// <summary>The login as a credentials document, in the shape of <c>.credentials.json</c>.</summary>
     public string CredentialsJson => "{\"claudeAiOauth\":" + OAuthJson + "}";
@@ -140,7 +147,8 @@ public sealed class ProfileSecrets
                 String(cli, "ownership") == "appOwned" ? CredentialOwnership.AppOwned : CredentialOwnership.CliLinked,
                 String(cli, "sourceConfigDirectory") ?? "",
                 Time(cli["savedAt"]) ?? DateTimeOffset.UnixEpoch,
-                pending);
+                pending,
+                cli["oauthAccount"] is JsonObject account ? account.ToJsonString() : null);
         }
 
         set
@@ -158,6 +166,11 @@ public sealed class ProfileSecrets
                 ["savedAt"] = value.SavedAt.ToString("O", CultureInfo.InvariantCulture),
                 ["claudeAiOauth"] = JsonNode.Parse(value.OAuthJson),
             };
+            if (value.OAuthAccountJson is { } account)
+            {
+                cli["oauthAccount"] = JsonNode.Parse(account);
+            }
+
             if (value.Pending is { } pending)
             {
                 cli["pendingWriteBack"] = new JsonObject

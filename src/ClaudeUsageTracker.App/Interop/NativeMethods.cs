@@ -9,7 +9,14 @@ internal static class NativeMethods
     public const uint NotifyIconVersion4 = 4;
     public const int WmApp = 0x8000;
     public const int NinSelect = 0x0400, NinKeySelect = 0x0401, WmContextMenu = 0x007B;
-    public const int WmDpiChanged = 0x02E0, WmSettingChange = 0x001A;
+    public const int WmDpiChanged = 0x02E0, WmSettingChange = 0x001A, WmDisplayChange = 0x007E;
+    public const int WmHotkey = 0x0312, WmPowerBroadcast = 0x0218, WmWtsSessionChange = 0x02B1;
+    public const int PbtApmResumeSuspend = 0x7, PbtApmResumeAutomatic = 0x12, PbtPowerSettingChange = 0x8013;
+    public const int WtsConsoleConnect = 1, WtsConsoleDisconnect = 2, WtsRemoteConnect = 3, WtsRemoteDisconnect = 4;
+    public const int WtsSessionLock = 7, WtsSessionUnlock = 8;
+    public const uint ModNoRepeat = 0x4000;
+    public const int ErrorHotkeyAlreadyRegistered = 1409;
+    public static readonly Guid ConsoleDisplayState = new("6FE69556-704A-47A0-8F24-C28D936FDA47");
     public const int SmCxSmIcon = 49;
     public const uint MonitorDefaultToNearest = 2;
 
@@ -174,6 +181,42 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr MonitorFromRect(ref Rect rect, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterHotKey(IntPtr window, int id);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetKeyNameTextW(int lParam, [Out] char[] buffer, int size);
+
+    [DllImport("user32.dll")]
+    public static extern uint MapVirtualKeyW(uint code, uint mapType);
+
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool WTSRegisterSessionNotification(IntPtr window, uint flags);
+
+    [DllImport("wtsapi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool WTSUnRegisterSessionNotification(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr RegisterPowerSettingNotification(IntPtr recipient, ref Guid powerSetting, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterPowerSettingNotification(IntPtr handle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr RegisterSuspendResumeNotification(IntPtr recipient, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterSuspendResumeNotification(IntPtr handle);
 
     /// <summary>Shows a native popup menu and returns the chosen item's ID, or 0 when dismissed.</summary>
     /// <param name="checkedId">The item drawn with a check mark, or 0 for none.</param>

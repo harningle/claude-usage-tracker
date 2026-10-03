@@ -25,7 +25,8 @@ internal sealed class LinkHarness
         Log = new RequestLog(Path.Combine(root, "diagnostics"));
         Tokens = new OAuthTokenClient(new HttpClient(TokenHandler), time, Log);
         Guard = new CliProcessGuard(() => [.. Processes], () => Launchers);
-        Service = new CliLinkService(Secrets, time, userProfile, Lock, Tokens, Guard, () => CliStore.Inventory(userProfile, null, Known));
+        Switches = new CliSwitchRecords(Path.Combine(root, "cli-switch.json"), new SecretStore(Path.Combine(root, "secrets", "backups")));
+        Service = new CliLinkService(Secrets, time, userProfile, Lock, Tokens, Guard, () => CliStore.Inventory(userProfile, null, Known), Switches);
     }
 
     public ProfileSecretStore Secrets { get; }
@@ -50,6 +51,9 @@ internal sealed class LinkHarness
     public CliProcessGuard Guard { get; }
 
     public CliLinkService Service { get; }
+
+    /// <summary>The switch journal and encrypted backups.</summary>
+    public CliSwitchRecords Switches { get; }
 
     public int TokenRequests => TokenHandler.Requests.Count;
 

@@ -131,6 +131,18 @@ public sealed partial class FixtureMode
             });
             return Task.FromResult(new BrowserResponse(status, "application/json", false, body ?? "{}", null, null));
         }
+
+        public Task<BrowserResponse> SendAutoStartAsync(
+            Guid profileId, AutoStartStep step, string organizationId, Guid conversationId, CancellationToken cancellation)
+        {
+            var (status, body) = fixture.Read(step switch
+            {
+                AutoStartStep.CreateConversation => "claude-ai-auto-start-conversation",
+                AutoStartStep.Completion => "claude-ai-auto-start-completion",
+                _ => "claude-ai-auto-start-delete",
+            });
+            return Task.FromResult(new BrowserResponse(status, "application/json", false, body ?? "{}", null, null));
+        }
     }
 
     private sealed class FixtureSignIn : IBrowserSignIn

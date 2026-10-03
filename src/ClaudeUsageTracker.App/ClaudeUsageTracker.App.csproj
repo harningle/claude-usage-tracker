@@ -1,11 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Versioned Windows target: required by the Windows App SDK notifications added later. -->
+  <!--
+    Versioned Windows target: required by the Windows App SDK notifications. The Windows App SDK is
+    self-contained and unpackaged (plan.md section 2), which needs a runtime identifier.
+  -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +29,35 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
+
+  <!--
+    Local notifications through AppNotificationManager, as the Milestone 1 spike verified. Only the
+    Foundation package: no Singleton (push) package. PrivateAssets keeps it out of the test project, which
+    never posts notifications (its own Windows App SDK auto-initialisers would otherwise run in the test host).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.3.12" PrivateAssets="all" />
+    <!-- Foundation 2.3.12 asks for 2.1.8, which nuget.org does not list; pinning the version it resolves to keeps restore warning-free. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" PrivateAssets="all" />
+    <!-- Only for the MSIX below; its build assets are not imported. Version paired by the 2.5.1 metapackage. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <!--
+    Self-contained Windows App SDK 2.5.1 output lacks Microsoft.WindowsAppRuntime.Insights.Resource.dll (it
+    exists only inside the runtime MSIX), and AppNotificationManager.Register() then throws "Unable to load
+    resource dll" (Milestone 1, D5). Extract that one file next to the executable. Check again on every
+    Windows App SDK update whether the package ships it.
+  -->
+  <PropertyGroup>
+    <InsightsMsix>$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\win10-x64\Microsoft.WindowsAppRuntime.2.msix</InsightsMsix>
+  </PropertyGroup>
+  <Target Name="ExtractInsightsResourceAfterBuild" AfterTargets="Build">
+    <Unzip SourceFiles="$(InsightsMsix)" DestinationFolder="$(OutDir)" Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll" />
+  </Target>
+  <Target Name="ExtractInsightsResourceAfterPublish" AfterTargets="Publish">
+    <Unzip SourceFiles="$(InsightsMsix)" DestinationFolder="$(PublishDir)" Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll" />
+  </Target>
 
   <!--
     Upstream's Localizable.strings files, unchanged and looked up by upstream key, plus Windows.strings

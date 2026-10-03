@@ -644,4 +644,64 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         Assert.Equal("Bearer codex-at", handler.Requests.Single().Headers.Authorization?.ToString());
         Assert.Contains("codex-rt", File.ReadAllText(Path.Combine(home, "auth.json")), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task UsageFetchedIsRaisedForFreshUsageOnlyNeverForTheCache()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        Cache.Save(new CachedUsage
+        {
+            ProfileId = _profileId, ObservedAt = Start.AddHours(-3), Source = "oauthUsage", AccountIdentity = "acc-1",
+            Usage = new Core.Usage.UsageData { SessionPercentage = 99 },
+        });
+        var (coordinator, _) = Create((_, n) => n == 1 ? Json(HttpStatusCode.ServiceUnavailable, "{}") : Usage(12));
+        var fetched = new ConcurrentQueue<(Guid Id, double? Session)>();
+        coordinator.UsageFetched += (id, usage) => fetched.Enqueue((id, usage.Usage.SessionPercentage));
+
+        coordinator.Watch(Profile());
+        await UntilAsync(s => s.LastFailure is not null);
+        Assert.Empty(fetched);
+
+        coordinator.Refresh(_profileId);
+        await UntilAsync(s => s.LastSuccessAt is not null);
+        Assert.Equal([(_profileId, 12.0)], fetched.Select(f => (f.Id, f.Session ?? -1)));
+    }
+
+    [Fact]
+    public async Task CheckSoonChecksAtOnceAndIsDebounced()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var (coordinator, handler) = Create((_, _) => Usage(12));
+
+        coordinator.Watch(Profile(intervalSeconds: 300));
+        await UntilAsync(s => s.LastSuccessAt is not null && !s.IsRefreshing);
+
+        // Within the debounce, as when a resume and a network change arrive together.
+        coordinator.CheckSoon();
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Assert.Equal(1, UsageRequests(handler));
+
+        _time.Advance(RefreshCoordinator.CheckSoonDebounce);
+        coordinator.CheckSoon();
+        await UntilAsync(_ => UsageRequests(handler) == 2);
+        Assert.Equal(2, UsageRequests(handler));
+    }
+
+    [Fact]
+    public async Task CheckSoonNeverResendsARejectedLogin()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var (coordinator, handler) = Create((_, _) => Json(HttpStatusCode.Unauthorized, """{"error":{}}"""));
+
+        coordinator.Watch(Profile());
+        await UntilAsync(s => s.LastFailure == FetchFailure.CredentialsRejected && !s.IsRefreshing);
+        _time.Advance(RefreshCoordinator.CheckSoonDebounce);
+        coordinator.CheckSoon();
+        await UntilAsync(s => s.LastAttemptAt > Start);
+
+        // The login was looked at again, but the rejected token was not sent; a manual refresh may still retry it.
+        Assert.Equal(1, UsageRequests(handler));
+        coordinator.Refresh(_profileId);
+        await UntilAsync(_ => UsageRequests(handler) == 2);
+    }
 }

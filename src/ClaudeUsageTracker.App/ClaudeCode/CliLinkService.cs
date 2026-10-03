@@ -71,6 +71,12 @@ public enum LinkNotice
     /// renew anything.
     /// </summary>
     OtherCopyUnreadable,
+
+    /// <summary>
+    /// A switch of Claude Code's account did not finish, so the folder's login and account record may not belong
+    /// together. Nothing is mirrored from it or renewed until it is settled.
+    /// </summary>
+    SwitchIncomplete,
 }
 
 /// <param name="Credentials">The login to poll with, from the linked folder or the profile's own copy; null when none is usable.</param>
@@ -91,14 +97,15 @@ public sealed record LinkCheck(LinkStatus Status, CliSnapshot Snapshot, CliCrede
 /// becomes the tracker's own and is renewed by it. Every change to a copy happens under the app-wide
 /// credential lock.
 /// </summary>
-public sealed class CliLinkService(
+public sealed partial class CliLinkService(
     ProfileSecretStore secrets,
     TimeProvider time,
     string userProfile,
     CredentialLock credentialLock,
     OAuthTokenClient tokens,
     CliProcessGuard processes,
-    Func<IReadOnlyList<CliConfigDirectory>> inventory)
+    Func<IReadOnlyList<CliConfigDirectory>> inventory,
+    CliSwitchRecords switches)
 {
     /// <summary>A torn read during a CLI write is retried once after this delay.</summary>
     internal static readonly TimeSpan RereadDelay = TimeSpan.FromMilliseconds(250);
@@ -144,10 +151,16 @@ public sealed class CliLinkService(
     }
 
     /// <summary>Saves the snapshot's <c>claudeAiOauth</c> login as the profile's CLI-linked copy and verifies it.</summary>
+    /// <exception cref="SecretStoreException">The folder's switch is unfinished, so its login and account record may not belong together.</exception>
     public async Task WriteMirrorAsync(Guid profileId, CliSnapshot snapshot, CancellationToken cancellation)
     {
         using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
+            if (switches.Blocks(snapshot.Directory.Path))
+            {
+                throw new SecretStoreException(Localisation.Strings.Get("windows.cli.notice.switch_incomplete"));
+            }
+
             SaveCopy(profileId, MirrorOf(snapshot));
             Forget(profileId);
         }
@@ -189,6 +202,11 @@ public sealed class CliLinkService(
         var mirrorError = await SaveUnsavedAsync(profileId, cancellation).ConfigureAwait(false);
         var (copy, loadError) = LoadCopy(profileId);
         mirrorError ??= loadError;
+        if (switches.Blocks(directory.Path))
+        {
+            // An account switch of this folder did not finish: its login and account record may not belong together.
+            return FromCopy(LinkStatus.AccountUnverified, snapshot, copy, CredentialOwnership.Unresolved, mirrorError, LinkNotice.SwitchIncomplete);
+        }
 
         LinkNotice? notice = null;
         var handBackAfterMirror = false;
@@ -252,7 +270,8 @@ public sealed class CliLinkService(
         }
 
         if (mirrorError is null && OAuthObject(stored.RawJson) is { } oauth
-            && (copy is null || copy.OAuthJson != oauth || copy.Ownership != CredentialOwnership.CliLinked))
+            && (copy is null || copy.OAuthJson != oauth || copy.Ownership != CredentialOwnership.CliLinked
+                || (snapshot.Account?.RawJson is { } account && copy.OAuthAccountJson != account)))
         {
             mirrorError = await MirrorAsync(profileId, snapshot, cancellation).ConfigureAwait(false);
             if (handBackAfterMirror && mirrorError is null)
@@ -287,7 +306,7 @@ public sealed class CliLinkService(
         var unresolved = false;
         foreach (var other in inventory().Where(d => !SameDirectory(d.Path, snapshot.Directory.Path)).Select(Read))
         {
-            if (other.State is CliLoginState.Unreadable or CliLoginState.Invalid)
+            if (other.State is CliLoginState.Unreadable or CliLoginState.Invalid || switches.Blocks(other.Directory.Path))
             {
                 unresolved = true;
             }
@@ -345,7 +364,7 @@ public sealed class CliLinkService(
                 return FromCopy(status, snapshot, current, CredentialOwnership.CliLinked, mirrorError, notice);
             }
 
-            copy = new CliSecret(current.OAuthJson, CredentialOwnership.AppOwned, current.SourceConfigDirectory, time.GetUtcNow());
+            copy = new CliSecret(current.OAuthJson, CredentialOwnership.AppOwned, current.SourceConfigDirectory, time.GetUtcNow(), null, current.OAuthAccountJson);
             if (Persist(profileId, copy) is { } error)
             {
                 // Ownership that is not on disk would be forgotten at the next start; stay linked until it saves.
@@ -395,7 +414,9 @@ public sealed class CliLinkService(
                 return Result(LinkStatus.LoginRejected, null);
             }
 
-            if ((MayNotRenew(profileId, refreshToken) ? LinkNotice.RenewalFailed : HandBackBlocks(refreshToken)) is { } blocked)
+            if ((MayNotRenew(profileId, refreshToken) ? LinkNotice.RenewalFailed
+                    : switches.Blocks(null) ? LinkNotice.SwitchIncomplete
+                    : HandBackBlocks(refreshToken)) is { } blocked)
             {
                 return Result(LinkStatus.RefreshFailed, null, blocked);
             }
@@ -404,7 +425,7 @@ public sealed class CliLinkService(
             switch (outcome.Result)
             {
                 case RefreshResult.Succeeded:
-                    var renewed = Renewed(copy.CredentialsJson, refreshToken, outcome, CredentialOwnership.AppOwned, copy.SourceConfigDirectory, null);
+                    var renewed = Renewed(copy.CredentialsJson, refreshToken, outcome, CredentialOwnership.AppOwned, copy.SourceConfigDirectory, null, copy.OAuthAccountJson);
                     mirrorError = Persist(profileId, renewed) ?? mirrorError;
                     ShareRenewal(profileId, refreshToken, renewed);
                     return Result(LinkStatus.Ready, CliCredentials.Parse(renewed.CredentialsJson));
@@ -480,7 +501,9 @@ public sealed class CliLinkService(
             {
                 case RefreshResult.Succeeded:
                     var pending = new PendingWriteBack(refreshToken, time.GetUtcNow(), [.. holders.Select(h => h.Directory.Path)]);
-                    var renewed = Renewed(fresh.Credentials!.RawJson, refreshToken, outcome, CredentialOwnership.CliLinked, snapshot.Directory.Path, pending);
+                    var renewed = Renewed(
+                        fresh.Credentials!.RawJson, refreshToken, outcome, CredentialOwnership.CliLinked, snapshot.Directory.Path, pending,
+                        fresh.Account?.RawJson ?? LoadCopy(profileId).Copy?.OAuthAccountJson);
                     // Saved before it is handed back, so a crash in between can be reconciled at the next start. If
                     // it cannot be saved it is still handed back: the folder is where Claude Code looks.
                     mirrorError = Persist(profileId, renewed);
@@ -529,7 +552,7 @@ public sealed class CliLinkService(
         {
             var directory = known.FirstOrDefault(d => SameDirectory(d.Path, path))
                             ?? new CliConfigDirectory(CliStore.Normalise(path), false, userProfile);
-            if (processes.ActivityFor(directory) != StoreActivity.Idle)
+            if (processes.ActivityFor(directory) != StoreActivity.Idle || switches.Blocks(path))
             {
                 remaining.Add(path);
                 continue;
@@ -571,7 +594,7 @@ public sealed class CliLinkService(
 
         var settled = new CliSecret(
             copy.OAuthJson, copy.Ownership, copy.SourceConfigDirectory, copy.SavedAt,
-            remaining.Count == 0 ? null : new PendingWriteBack(pending.ConsumedRefreshToken, pending.CreatedAt, remaining));
+            remaining.Count == 0 ? null : new PendingWriteBack(pending.ConsumedRefreshToken, pending.CreatedAt, remaining), copy.OAuthAccountJson);
         if (remaining.Count != pending.Targets.Count || HasUnsaved(profileId))
         {
             Persist(profileId, settled);
@@ -616,7 +639,9 @@ public sealed class CliLinkService(
         {
             if (LoadCopy(other).Copy is { } copy && RefreshTokenOf(copy) == consumedToken)
             {
-                Persist(other, new CliSecret(renewed.OAuthJson, copy.Ownership, copy.SourceConfigDirectory, time.GetUtcNow(), copy.Pending));
+                Persist(other, new CliSecret(
+                    renewed.OAuthJson, copy.Ownership, copy.SourceConfigDirectory, time.GetUtcNow(), copy.Pending,
+                    copy.OAuthAccountJson ?? renewed.OAuthAccountJson));
             }
         }
     }
@@ -653,7 +678,9 @@ public sealed class CliLinkService(
 
             try
             {
-                SaveCopy(profileId, new CliSecret(current.OAuthJson, CredentialOwnership.CliLinked, current.SourceConfigDirectory, time.GetUtcNow(), current.Pending));
+                SaveCopy(profileId, new CliSecret(
+                    current.OAuthJson, CredentialOwnership.CliLinked, current.SourceConfigDirectory, time.GetUtcNow(), current.Pending,
+                    current.OAuthAccountJson));
                 return null;
             }
             catch (Exception e) when (IsStorageFailure(e))
@@ -666,7 +693,7 @@ public sealed class CliLinkService(
     /// <summary>The copy after a successful grant: the old login with the new tokens and expiry.</summary>
     private CliSecret Renewed(
         string credentialsJson, string sentRefreshToken, ClaudeRefreshOutcome outcome, CredentialOwnership ownership, string source,
-        PendingWriteBack? pending)
+        PendingWriteBack? pending, string? accountJson)
     {
         var response = outcome.Response!;
         if (response.RefreshToken is { } rotated && rotated != sentRefreshToken)
@@ -679,7 +706,7 @@ public sealed class CliLinkService(
 
         var merged = ClaudeCliCredentials.MergeRefreshedCredentials(credentialsJson, response, outcome.At)
                      ?? throw new InvalidOperationException("The login that was renewed is not a Claude Code login.");
-        return new CliSecret(OAuthObject(merged)!, ownership, source, time.GetUtcNow(), pending);
+        return new CliSecret(OAuthObject(merged)!, ownership, source, time.GetUtcNow(), pending, accountJson);
     }
 
     /// <summary>Copies the folder's current login into the profile's file, under the lock. Returns the error, if any.</summary>
@@ -693,7 +720,8 @@ public sealed class CliLinkService(
             {
                 // Only the same account is mirrored, so a pending hand-back stays: the folders it lists still hold
                 // a used-up token of this account, and now get this newer login.
-                SaveCopy(profileId, MirrorOf(snapshot, LoadCopy(profileId).Copy?.Pending));
+                var existing = LoadCopy(profileId).Copy;
+                SaveCopy(profileId, MirrorOf(snapshot, existing?.Pending, existing?.OAuthAccountJson));
                 return null;
             }
             catch (Exception e) when (IsStorageFailure(e))
@@ -703,9 +731,10 @@ public sealed class CliLinkService(
         }
     }
 
-    private CliSecret MirrorOf(CliSnapshot snapshot, PendingWriteBack? pending = null) =>
+    /// <param name="knownAccount">The account record already kept, used when the folder has none.</param>
+    private CliSecret MirrorOf(CliSnapshot snapshot, PendingWriteBack? pending = null, string? knownAccount = null) =>
         new(OAuthObject(snapshot.Credentials?.RawJson) ?? throw new InvalidOperationException("The snapshot has no claudeAiOauth login to mirror."),
-            CredentialOwnership.CliLinked, snapshot.Directory.Path, time.GetUtcNow(), pending);
+            CredentialOwnership.CliLinked, snapshot.Directory.Path, time.GetUtcNow(), pending, snapshot.Account?.RawJson ?? knownAccount);
 
     /// <summary>The profile's result when only its copy can be used: its token while unexpired, otherwise nothing.</summary>
     private LinkCheck FromCopy(
@@ -839,6 +868,11 @@ public sealed class CliLinkService(
         if (IsRejected(refreshToken))
         {
             return new LinkCheck(LinkStatus.LoginRejected, snapshot, null, mirrorError) { Notice = notice };
+        }
+
+        if (switches.Blocks(null))
+        {
+            return Waiting(LinkNotice.SwitchIncomplete);
         }
 
         if (HandBackBlocks(refreshToken) is { } why)

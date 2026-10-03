@@ -43,6 +43,15 @@ public sealed class AppSettings
     /// </summary>
     public List<PendingCleanup> PendingCleanups { get; set; } = [];
 
+    /// <summary>
+    /// Upstream <c>autoSwitchProfileEnabled</c>: when the active profile's session reaches 100 %, activate the next
+    /// profile with capacity. Off by default, as upstream.
+    /// </summary>
+    public bool AutoSwitchProfileEnabled { get; set; }
+
+    /// <summary>Global keyboard shortcuts (upstream <c>ShortcutManager</c>); none by default, as upstream.</summary>
+    public ShortcutSettings Shortcuts { get; set; } = new();
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 
@@ -170,6 +179,16 @@ public sealed class ProfileSettings
     /// <summary>The Codex login this profile follows, or null.</summary>
     public CodexLink? Codex { get; set; }
 
+    /// <summary>Upstream <c>notificationSettings</c>, with its defaults for a profile that has none.</summary>
+    public NotificationSettings NotificationSettings { get; set; } = new();
+
+    /// <summary>
+    /// Upstream <c>autoStartSessionEnabled</c>: send one short message through the profile's claude.ai session when
+    /// its session window has not started. It uses the account's usage, so it is off by default and only ever sent
+    /// by this opt-in, never by usage polling.
+    /// </summary>
+    public bool AutoStartSessionEnabled { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 
@@ -288,6 +307,64 @@ public sealed class CodexLink
 
     [JsonIgnore]
     public string? Identity => AccountId ?? Email;
+}
+
+/// <summary>Port of upstream <c>NotificationSettings</c> with its <c>init</c> defaults: on, all three thresholds, the default sound.</summary>
+public sealed class NotificationSettings
+{
+    public bool Enabled { get; set; } = true;
+
+    public bool Threshold75Enabled { get; set; } = true;
+
+    public bool Threshold90Enabled { get; set; } = true;
+
+    public bool Threshold95Enabled { get; set; } = true;
+
+    /// <summary>
+    /// <c>default</c>, <c>none</c> or a Windows notification sound (<c>im</c>, <c>mail</c>, <c>reminder</c>, <c>sms</c>).
+    /// Upstream's other values name macOS sounds; one of those is kept as written and plays the default sound.
+    /// </summary>
+    public string SoundName { get; set; } = "default";
+
+    public List<int> CustomThresholds { get; set; } = [];
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+
+    [JsonIgnore]
+    public Core.Notifications.AlertThresholds Thresholds =>
+        new(Enabled, Threshold75Enabled, Threshold90Enabled, Threshold95Enabled, CustomThresholds);
+}
+
+/// <summary>One global shortcut: a Windows virtual-key code and <c>RegisterHotKey</c> modifier flags.</summary>
+public sealed class KeyCombo
+{
+    public const int Alt = 0x1, Control = 0x2, Shift = 0x4, Windows = 0x8;
+
+    public int VirtualKey { get; set; }
+
+    /// <summary>A combination of <see cref="Alt"/>, <see cref="Control"/>, <see cref="Shift"/> and <see cref="Windows"/>.</summary>
+    public int Modifiers { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+
+    public bool SameKeys(KeyCombo? other) => other is not null && other.VirtualKey == VirtualKey && other.Modifiers == Modifiers;
+}
+
+/// <summary>Upstream <c>ShortcutAction</c>'s four actions, each with an optional shortcut.</summary>
+public sealed class ShortcutSettings
+{
+    public KeyCombo? TogglePopover { get; set; }
+
+    public KeyCombo? Refresh { get; set; }
+
+    public KeyCombo? OpenSettings { get; set; }
+
+    public KeyCombo? NextProfile { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
 /// <summary>Port of upstream <c>MultiProfileDisplayConfig</c> with its <c>init</c> defaults.</summary>

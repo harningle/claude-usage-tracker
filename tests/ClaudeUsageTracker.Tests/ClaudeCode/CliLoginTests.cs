@@ -119,8 +119,12 @@ public class CliLoginTests
              "organizationUuid":"org-1","organizationName":"ExampleOrg","billingType":"stripe"}}
             """);
 
-        Assert.Equal(new CliAccount("acc-1", "user@example.com", "ExampleOrg", "org-1"), account);
+        Assert.Equal(new CliAccount("acc-1", "user@example.com", "ExampleOrg", "org-1") { RawJson = account?.RawJson }, account);
         Assert.Equal("acc-1", account?.Identity);
+        // The whole object is kept for an account switch, unknown members included.
+        Assert.Equal(
+            """{"accountUuid":"acc-1","emailAddress":"user@example.com","organizationUuid":"org-1","organizationName":"ExampleOrg","billingType":"stripe"}""",
+            account?.RawJson);
     }
 
     [Fact]

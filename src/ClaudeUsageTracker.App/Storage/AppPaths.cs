@@ -31,4 +31,13 @@ public sealed class AppPaths(string root)
 
     /// <summary>One WebView2 user-data folder per profile; browser sessions live there, managed by WebView2.</summary>
     public string BrowserDirectory => Path.Combine(Root, "browser");
+
+    /// <summary>What notifications and auto-start remembered; non-secret.</summary>
+    public string AutomationFile => Path.Combine(Root, "automation.json");
+
+    /// <summary>The record of a Claude Code account switch in progress; non-secret (folder and profile IDs only).</summary>
+    public string CliSwitchJournalFile => Path.Combine(Root, "cli-switch.json");
+
+    /// <summary>The notification icon, drawn by the app at startup (no image file ships with the app).</summary>
+    public string NotificationIconFile => Path.Combine(Root, "notification-icon.png");
 }

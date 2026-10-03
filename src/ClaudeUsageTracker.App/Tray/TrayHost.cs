@@ -50,7 +50,13 @@ public sealed class TrayHost : IDisposable
 
     public IntPtr Handle => _source.Handle;
 
-    /// <summary>Raised when the taskbar's DPI or the Windows colour mode changes, so icons can be redrawn.</summary>
+    /// <summary>Lets other window features (hotkeys, power and session notifications) see this window's messages.</summary>
+    public void AddHook(HwndSourceHook hook) => _source.AddHook(hook);
+
+    /// <summary>
+    /// Raised when the taskbar's DPI, the display configuration (as when a remote desktop session connects) or the
+    /// Windows colour mode changes, so icons can be redrawn.
+    /// </summary>
     public event EventHandler? AppearanceChanged;
 
     /// <summary>Square icon size in physical pixels for the taskbar's current DPI.</summary>
@@ -111,7 +117,7 @@ public sealed class TrayHost : IDisposable
 
             AppearanceChanged?.Invoke(this, EventArgs.Empty);
         }
-        else if (message == NativeMethods.WmDpiChanged
+        else if (message is NativeMethods.WmDpiChanged or NativeMethods.WmDisplayChange
                  || (message == NativeMethods.WmSettingChange
                      && Marshal.PtrToStringUni(lParam) == "ImmersiveColorSet"))
         {
