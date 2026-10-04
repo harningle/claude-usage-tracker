@@ -26,6 +26,14 @@ public sealed class RefreshCoordinator : IAsyncDisposable
     /// <summary>An automatic check after a wake or reconnect is skipped when the profile was checked this recently (upstream: 10 s).</summary>
     public static readonly TimeSpan CheckSoonDebounce = TimeSpan.FromSeconds(10);
 
+    /// <summary>The <see cref="CachedUsage.Source"/> of usage fetched from a source.</summary>
+    internal static string SourceName(UsageSourceKind kind) => kind switch
+    {
+        UsageSourceKind.ClaudeAi => "claudeAi",
+        UsageSourceKind.Codex => "codex",
+        _ => "oauthUsage",
+    };
+
     private readonly Func<UsageSourceKind, IUsageSource> _sources;
     private readonly UsageClient _client;
     private readonly ConsoleBillingSource _billing;
@@ -652,13 +660,6 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                 MirrorError = fetch.StorageError ?? State.MirrorError,
             });
         }
-
-        private static string SourceName(UsageSourceKind kind) => kind switch
-        {
-            UsageSourceKind.ClaudeAi => "claudeAi",
-            UsageSourceKind.Codex => "codex",
-            _ => "oauthUsage",
-        };
 
         private string? RejectedStamp()
         {

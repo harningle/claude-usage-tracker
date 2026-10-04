@@ -311,7 +311,7 @@
 "windows.integration.no_helper" = "This build of the app does not include the helper.";
 "windows.integration.problem.manifest" = "The record of installed integrations can't be read, so nothing is changed: %@";
 "windows.integration.problem.helper_missing" = "The helper is missing: %@";
-"windows.integration.problem.helper_modified" = "The helper is not the file the tracker installed: %@";
+"windows.integration.problem.helper_modified" = "Another file has taken the helper's place, and the tracker will not overwrite it. Move it away, then choose Repair: %@";
 "windows.integration.problem.helper_repair" = "An update of the helper was interrupted: %@";
 "windows.integration.problem.launcher_missing" = "A launcher is missing: %@";
 "windows.integration.problem.launcher_replaced" = "Another file has taken a launcher's place, and the tracker will not overwrite it: %@";

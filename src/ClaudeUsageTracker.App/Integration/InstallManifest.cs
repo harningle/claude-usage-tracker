@@ -75,6 +75,9 @@ public sealed class RetainedFile
     /// <summary>For a launcher image: the folder its running sessions use, so they stay attributed to it.</summary>
     public string? ConfigDirectory { get; set; }
 
+    /// <summary>The hash the file had when the tracker installed it; sessions are attributed only while it still matches.</summary>
+    public string? Sha256 { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 }

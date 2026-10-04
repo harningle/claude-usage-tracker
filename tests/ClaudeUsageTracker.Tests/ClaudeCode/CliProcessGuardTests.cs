@@ -1,3 +1,4 @@
+using System.IO;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Interop;
 
@@ -19,13 +20,18 @@ public class CliProcessGuardTests
     private static readonly CliConfigDirectory Work = new(WorkFolder, false, @"C:\Users\user");
     private static readonly CliConfigDirectory Other = new(OtherFolder, false, @"C:\Users\user");
 
-    private static readonly Dictionary<string, string> Launchers = new() { [Launcher] = WorkFolder };
+    private const string LauncherHash = "0f1e2d3c";
+    private static readonly Dictionary<string, LauncherImage> Launchers = new() { [Launcher] = new LauncherImage(WorkFolder, LauncherHash) };
 
     private static ProcessEntry Claude(int pid, int parent, DateTime? created = null, bool? owned = true) =>
         new(pid, parent, "claude.exe", owned, @"C:\Users\user\.local\bin\claude.exe", created ?? Started.AddMinutes(1));
 
     private static StoreActivity Judge(CliConfigDirectory directory, params ProcessEntry[] table) =>
-        new CliProcessGuard(() => table, () => Launchers).ActivityFor(directory);
+        JudgeWithImage(directory, _ => LauncherHash, table);
+
+    /// <param name="imageHash">What the file at a launcher's path hashes to now.</param>
+    private static StoreActivity JudgeWithImage(CliConfigDirectory directory, Func<string, string> imageHash, params ProcessEntry[] table) =>
+        new CliProcessGuard(() => table, () => Launchers, imageHash: imageHash).ActivityFor(directory);
 
     [Fact]
     public void NoClaudeCodeMeansEveryFolderIsIdle()
@@ -55,6 +61,29 @@ public class CliProcessGuardTests
         Assert.Equal(StoreActivity.InUse, Judge(Work, launcher, claude));
         Assert.Equal(StoreActivity.Idle, Judge(DefaultFolder, launcher, claude));
         Assert.Equal(StoreActivity.Idle, Judge(Other, launcher, claude));
+    }
+
+    [Fact]
+    public void AnotherFileAtTheLaunchersPathVouchesForNothing()
+    {
+        var launcher = new ProcessEntry(10, 1, "claude-work.exe", true, Launcher, Started);
+        var claude = Claude(20, 10);
+
+        // Something else took the launcher's place and started Claude Code: it may use any folder, the default included.
+        Assert.Equal(StoreActivity.Unknown, JudgeWithImage(DefaultFolder, _ => "another program", launcher, claude));
+        Assert.Equal(StoreActivity.Unknown, JudgeWithImage(Work, _ => "another program", launcher, claude));
+        // An image that cannot be read is not vouched for either.
+        Assert.Equal(StoreActivity.Unknown, JudgeWithImage(DefaultFolder, _ => throw new IOException("in use"), launcher, claude));
+    }
+
+    [Fact]
+    public void ALauncherImageWithoutARecordedHashVouchesForNothing()
+    {
+        // As a retained image recorded before hashes were kept.
+        var unrecorded = new Dictionary<string, LauncherImage> { [Launcher] = new LauncherImage(WorkFolder, null) };
+        var table = new[] { new ProcessEntry(10, 1, "claude-work.exe", true, Launcher, Started), Claude(20, 10) };
+
+        Assert.Equal(StoreActivity.Unknown, new CliProcessGuard(() => table, () => unrecorded, imageHash: _ => LauncherHash).ActivityFor(DefaultFolder));
     }
 
     [Fact]

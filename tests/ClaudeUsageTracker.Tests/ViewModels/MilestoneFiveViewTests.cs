@@ -477,10 +477,10 @@ public sealed class MilestoneFiveViewTests : IDisposable
     {
         var defaultFolder = new CliConfigDirectory(@"C:\Users\u\.claude", true, @"C:\Users\u");
         var launcherFolder = new CliConfigDirectory(@"C:\Users\u\.claude-work", false, @"C:\Users\u");
-        var launchers = new Dictionary<string, string> { [@"C:\Users\u\.local\bin\claude-work.exe"] = launcherFolder.Path };
+        var launchers = new Dictionary<string, LauncherImage> { [@"C:\Users\u\.local\bin\claude-work.exe"] = new(launcherFolder.Path, "recorded") };
         var observed = new List<string>();
         List<ProcessEntry> table = [];
-        var guard = new CliProcessGuard(() => table, () => launchers, folder => observed.Contains(folder, StringComparer.OrdinalIgnoreCase));
+        var guard = new CliProcessGuard(() => table, () => launchers, folder => observed.Contains(folder, StringComparer.OrdinalIgnoreCase), _ => "recorded");
 
         // No process and no observation: idle.
         Assert.Equal(StoreActivity.Idle, guard.ActivityFor(defaultFolder));

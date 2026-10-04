@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json.Nodes;
+using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Integration;
+using ClaudeUsageTracker.App.Interop;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.Core.Integration;
 using ClaudeUsageTracker.Core.Launchers;
@@ -97,13 +99,10 @@ public sealed class IntegrationServiceTests : IDisposable
     }
 
     [Fact]
-    public void AMissingOrReplacedHelperIsNoticedAndRepaired()
+    public void AMissingHelperIsNoticedAndRepaired()
     {
         var service = Service();
         service.InstallHelper();
-
-        File.WriteAllText(service.HelperPath, "something else");
-        Assert.Equal(HelperState.Modified, service.Helper());
 
         File.Delete(service.HelperPath);
         Assert.Equal(HelperState.Missing, service.Helper());
@@ -111,6 +110,29 @@ public sealed class IntegrationServiceTests : IDisposable
         Assert.Equal(InstallOutcome.Installed, service.InstallHelper().Outcome);
         Assert.Equal("helper build 1", File.ReadAllText(service.HelperPath));
         Assert.Equal(HelperState.Installed, service.Helper());
+    }
+
+    [Fact]
+    public void AHelperTheTrackerDidNotInstallIsNeverReplaced()
+    {
+        var service = Service();
+        service.InstallHelper();
+
+        // A file that has taken the helper's place is neither replaced nor renamed aside to be deleted later.
+        File.WriteAllText(service.HelperPath, "something else");
+        Assert.Equal(HelperState.Modified, service.Helper());
+        Assert.Equal(InstallOutcome.Failed, service.InstallHelper().Outcome);
+        Assert.Equal("something else", File.ReadAllText(service.HelperPath));
+        Assert.Empty(service.Manifest.Retained);
+        Assert.Equal([HelperInfo.FileName], Directory.EnumerateFiles(Path.Combine(_data, "bin")).Select(Path.GetFileName));
+
+        // Nor is a file at the helper's path that no record describes.
+        File.Delete(Path.Combine(_data, "install.json"));
+        var fresh = Service();
+        Assert.Equal(HelperState.NotInstalled, fresh.Helper());
+        Assert.Equal(InstallOutcome.Failed, fresh.InstallHelper().Outcome);
+        Assert.Equal("something else", File.ReadAllText(fresh.HelperPath));
+        Assert.Null(fresh.Manifest.Helper);
     }
 
     [Fact]
@@ -165,8 +187,14 @@ public sealed class IntegrationServiceTests : IDisposable
 
         var restarted = Service();
         Assert.Equal(HelperState.RepairRequired, restarted.Helper());
-        Assert.Null(restarted.Recover());
+        // The old image is still open, as a running one would be: it stays recorded, with the hash it was installed with.
+        using (new FileStream(attempt.Retained, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Assert.Null(restarted.Recover());
+            Assert.Equal(old, Assert.Single(restarted.Manifest.Retained).Sha256);
+        }
 
+        restarted.CleanRetained();
         Assert.Equal("helper build 2", File.ReadAllText(restarted.HelperPath));
         Assert.Equal(HelperState.Installed, restarted.Helper());
         Assert.NotEqual(old, restarted.Manifest.Helper!.Sha256);
@@ -311,7 +339,8 @@ public sealed class IntegrationServiceTests : IDisposable
         using var session = Process.Start(new ProcessStartInfo(launcher, "/d /c ping -n 30 127.0.0.1 >nul") { UseShellExecute = false, CreateNoWindow = true })!;
         try
         {
-            Assert.Equal(folder, service.LauncherImages[launcher]);
+            var firstBuild = FileInstaller.Sha256Of(launcher);
+            Assert.Equal(new LauncherImage(folder, firstBuild), service.LauncherImages[launcher]);
 
             // An upgrade: the helper and the launcher copy are replaced while the session runs.
             File.AppendAllText(_bundle, "new build");
@@ -319,8 +348,19 @@ public sealed class IntegrationServiceTests : IDisposable
             Assert.False(session.HasExited);
             Assert.Equal(FileInstaller.Sha256Of(_bundle), FileInstaller.Sha256Of(launcher));
             var retained = Assert.Single(service.Manifest.Retained);
-            Assert.Equal(folder, service.LauncherImages[retained.Path]);
-            Assert.Equal(folder, service.LauncherImages[launcher]);
+            // The renamed-aside image keeps the hash it was installed with, so its running session stays vouched for.
+            Assert.Equal(new LauncherImage(folder, firstBuild), service.LauncherImages[retained.Path]);
+            Assert.Equal(new LauncherImage(folder, FileInstaller.Sha256Of(launcher)), service.LauncherImages[launcher]);
+            var started = DateTime.UtcNow.AddMinutes(-1);
+            foreach (var image in new[] { retained.Path, launcher })
+            {
+                ProcessEntry[] table =
+                [
+                    new(10, 1, "claude-work.exe", true, image, started),
+                    new(11, 10, CliProcessGuard.ImageName, true, @"C:\native\claude.exe", started.AddSeconds(1)),
+                ];
+                Assert.Equal(folder, Assert.Single(CliProcessGuard.Classify(table, service.LauncherImages, FileInstaller.Sha256Of)).ConfigDirectory);
+            }
 
             // Removal while sessions run from both images: each keeps its attribution until it ends.
             using var newer = Process.Start(new ProcessStartInfo(launcher, "/d /c ping -n 30 127.0.0.1 >nul") { UseShellExecute = false, CreateNoWindow = true })!;
@@ -331,11 +371,11 @@ public sealed class IntegrationServiceTests : IDisposable
                 Assert.False(newer.HasExited);
                 Assert.False(File.Exists(launcher));
                 Assert.Equal(2, service.Manifest.Retained.Count);
-                Assert.All(service.Manifest.Retained, image => Assert.Equal(folder, service.LauncherImages[image.Path]));
+                Assert.All(service.Manifest.Retained, image => Assert.Equal(new LauncherImage(folder, FileInstaller.Sha256Of(image.Path)), service.LauncherImages[image.Path]));
                 Assert.True(Directory.Exists(folder));
 
                 // The record survives a restart of the tracker.
-                Assert.Equal(folder, Service().LauncherImages[retained.Path]);
+                Assert.Equal(new LauncherImage(folder, firstBuild), Service().LauncherImages[retained.Path]);
             }
             finally
             {

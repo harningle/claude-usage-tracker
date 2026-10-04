@@ -86,7 +86,7 @@ public sealed partial class FixtureMode
 
     /// <summary>A process guard that sees no Claude Code process, so no real process is ever read.</summary>
     public static CliProcessGuard ProcessGuard() =>
-        new(() => Array.Empty<ProcessEntry>(), () => new Dictionary<string, string>());
+        new(() => Array.Empty<ProcessEntry>(), () => new Dictionary<string, LauncherImage>());
 
     private (int Status, string? Body) Read(string name)
     {

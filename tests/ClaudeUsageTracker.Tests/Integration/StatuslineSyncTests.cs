@@ -56,12 +56,14 @@ public sealed class StatuslineSyncTests : IDisposable
         return profile;
     }
 
-    private void Fetched(ProfileSettings profile, double session, DateTimeOffset? at = null) => _fetched[profile.Id] = new CachedUsage
+    /// <param name="account">The account it was fetched for; the profile's linked account unless given.</param>
+    private void Fetched(ProfileSettings profile, double session, DateTimeOffset? at = null, string source = "oauthUsage", string? account = null) =>
+        _fetched[profile.Id] = new CachedUsage
     {
         ProfileId = profile.Id,
         ObservedAt = at ?? Now,
-        Source = "oauthUsage",
-        AccountIdentity = profile.CliLink?.Identity,
+        Source = source,
+        AccountIdentity = account ?? profile.CliLink?.Identity,
         Usage = new UsageData
         {
             SessionPercentage = session, SessionResetTime = Now.AddHours(2), WeeklyPercentage = 12, WeeklyResetTime = Now.AddDays(3),
@@ -89,6 +91,92 @@ public sealed class StatuslineSyncTests : IDisposable
         Assert.Equal((1.5m, 20m, "USD"), (cache.CostUsed, cache.CostLimit, cache.CostCurrency));
         Assert.Equal(StatuslinePaths.Normalise(DefaultFolder), cache.ConfigDirectory);
         Assert.Single(CacheFiles());
+    }
+
+    [Fact]
+    public void UsageFromAnotherSourceOrForAnotherAccountIsNotPassedOn()
+    {
+        SignIn(DefaultFolder, "acct-a", isDefault: true);
+        var profile = Profile("Personal", DefaultFolder, "acct-a", isDefault: true);
+
+        // claude.ai's last result, from before that link was removed: the profile now uses Claude Code, not yet read.
+        Fetched(profile, 77, source: "claudeAi", account: "org-1");
+        Sync();
+        Assert.Equal(("Personal", null, null), (_files.ReadCache(DefaultFolder)!.ProfileName, _files.ReadCache(DefaultFolder)!.SessionPercentage, _files.ReadCache(DefaultFolder)!.ObservedAt));
+
+        // Only a Claude Code result counts, whatever account another source's result names.
+        Fetched(profile, 55, source: "claudeAi");
+        Sync();
+        Assert.Null(_files.ReadCache(DefaultFolder)!.SessionPercentage);
+
+        // A Claude Code result read while the profile followed another account.
+        Fetched(profile, 66, account: "acct-old");
+        Sync();
+        Assert.Null(_files.ReadCache(DefaultFolder)!.SessionPercentage);
+
+        // A result of the folder's own login is passed on.
+        Fetched(profile, 42);
+        Sync();
+        Assert.Equal(42d, _files.ReadCache(DefaultFolder)!.SessionPercentage);
+    }
+
+    [Fact]
+    public void RelinkingTheProfileToAnotherAccountDropsTheFormerAccountsUsage()
+    {
+        SignIn(DefaultFolder, "acct-a", isDefault: true);
+        var profile = Profile("Personal", DefaultFolder, "acct-a", isDefault: true);
+        Fetched(profile, 42);
+        Sync();
+        Assert.Equal(42d, _files.ReadCache(DefaultFolder)!.SessionPercentage);
+
+        // The folder is signed in to another account and the profile follows it now; nothing has been fetched for it yet,
+        // and the former account's result is still the profile's latest.
+        SignIn(DefaultFolder, "acct-b", isDefault: true);
+        profile.CliLink = new CliLink { ConfigDirectory = DefaultFolder, IsDefaultDirectory = true, AccountUuid = "acct-b", EmailAddress = "acct-b@example.com" };
+        Sync();
+
+        var cache = _files.ReadCache(DefaultFolder)!;
+        Assert.Equal("Personal", cache.ProfileName);
+        Assert.Equal((null, null, null, null), (cache.ObservedAt, cache.SessionPercentage, cache.WeeklyPercentage, cache.CostUsed));
+
+        Fetched(profile, 7);
+        Sync();
+        Assert.Equal(7d, _files.ReadCache(DefaultFolder)!.SessionPercentage);
+    }
+
+    [Fact]
+    public void ARelinkWhoseWriteFailedStillDropsTheFormerAccountsUsage()
+    {
+        SignIn(DefaultFolder, "acct-a", isDefault: true);
+        var profile = Profile("Personal", DefaultFolder, "acct-a", isDefault: true);
+        Fetched(profile, 42);
+        Sync();
+
+        SignIn(DefaultFolder, "acct-b", isDefault: true);
+        profile.CliLink = new CliLink { ConfigDirectory = DefaultFolder, IsDefaultDirectory = true, AccountUuid = "acct-b", EmailAddress = "acct-b@example.com" };
+        // The file cannot be replaced while it is held open this way, so the former account's values stay in it.
+        using (new FileStream(Assert.Single(CacheFiles()), FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Assert.True(Record.Exception(Sync) is IOException or UnauthorizedAccessException);
+        }
+
+        Assert.Equal(42d, _files.ReadCache(DefaultFolder)!.SessionPercentage);
+        Sync();
+        Assert.Null(_files.ReadCache(DefaultFolder)!.SessionPercentage);
+    }
+
+    [Fact]
+    public void UsageAnEarlierRunWroteIsNotCarriedOver()
+    {
+        SignIn(DefaultFolder, "acct-a", isDefault: true);
+        var profile = Profile("Personal", DefaultFolder, "acct-a", isDefault: true);
+        Fetched(profile, 42);
+        Sync();
+
+        // The file does not say whose usage it holds, so a new run starts it empty until its own first fetch.
+        new StatuslineSync(_files, directory => CliStore.Read(directory, Now), _home).Sync(_settings, _ => null);
+
+        Assert.Equal(("Personal", null), (_files.ReadCache(DefaultFolder)!.ProfileName, _files.ReadCache(DefaultFolder)!.SessionPercentage));
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json.Nodes;
+using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.Core.Integration;
 using ClaudeUsageTracker.Core.Launchers;
@@ -63,7 +64,7 @@ public sealed class IntegrationService
     private readonly InstallManifestStore _store;
     private readonly TimeProvider _time;
     private readonly Lazy<string?> _bundledHash;
-    private volatile IReadOnlyDictionary<string, string> _launcherImages = new Dictionary<string, string>();
+    private volatile IReadOnlyDictionary<string, LauncherImage> _launcherImages = new Dictionary<string, LauncherImage>();
 
     /// <param name="bundledHelper">The helper this build carries, or null when it carries none.</param>
     public IntegrationService(string dataRoot, string userProfile, string? bundledHelper, TimeProvider time)
@@ -102,8 +103,11 @@ public sealed class IntegrationService
 
     public string BinDirectory => LauncherPaths.BinDirectory(_userProfile);
 
-    /// <summary>Each launcher image, retained ones included, with the Claude Code folder its sessions use. Safe to read from any thread.</summary>
-    public IReadOnlyDictionary<string, string> LauncherImages => _launcherImages;
+    /// <summary>
+    /// Each launcher image, retained ones included, with the Claude Code folder its sessions use and the hash it was
+    /// installed with. Safe to read from any thread.
+    /// </summary>
+    public IReadOnlyDictionary<string, LauncherImage> LauncherImages => _launcherImages;
 
     /// <summary>The folders of installed launchers: known Claude Code folders even before a profile is linked to them.</summary>
     public IReadOnlyList<string> LauncherDirectories => [.. Manifest.Launchers.Select(l => l.ConfigDirectory)];
@@ -129,6 +133,7 @@ public sealed class IntegrationService
         {
             try
             {
+                var previous = RecordedHash(attempt);
                 var outcome = FileInstaller.Recover(attempt);
                 if (outcome == RecoveryOutcome.Completed)
                 {
@@ -137,7 +142,7 @@ public sealed class IntegrationService
 
                 if (attempt.Retained is { } retained && File.Exists(retained))
                 {
-                    Manifest.Retained.Add(new RetainedFile { Path = retained, ConfigDirectory = attempt.ConfigDirectory });
+                    Manifest.Retained.Add(new RetainedFile { Path = retained, ConfigDirectory = attempt.ConfigDirectory, Sha256 = previous });
                 }
 
                 Manifest.Pending = null;
@@ -221,6 +226,12 @@ public sealed class IntegrationService
         if (state == HelperState.NewerInstalled)
         {
             return new InstallResult(InstallOutcome.Installed, null, null);
+        }
+
+        if (state is HelperState.Modified || (state is HelperState.NotInstalled && File.Exists(HelperPath)))
+        {
+            // As for launchers: an existing file is replaced only when it is the very file the tracker installed.
+            return new InstallResult(InstallOutcome.Failed, null, $"{HelperPath} exists and is not the helper the tracker installed. It was not changed.");
         }
 
         if (state != HelperState.Installed)
@@ -339,7 +350,7 @@ public sealed class IntegrationService
                     return e.Message;
                 }
 
-                Manifest.Retained.Add(new RetainedFile { Path = retained, ConfigDirectory = record.ConfigDirectory });
+                Manifest.Retained.Add(new RetainedFile { Path = retained, ConfigDirectory = record.ConfigDirectory, Sha256 = record.Sha256 });
             }
         }
 
@@ -553,6 +564,7 @@ public sealed class IntegrationService
 
     private InstallResult Install(string source, string canonical, PendingInstall attempt)
     {
+        var previous = RecordedHash(attempt);
         InstallResult result;
         try
         {
@@ -572,7 +584,7 @@ public sealed class IntegrationService
             Record(attempt);
             if (result.Retained is { } retained)
             {
-                Manifest.Retained.Add(new RetainedFile { Path = retained, ConfigDirectory = attempt.ConfigDirectory });
+                Manifest.Retained.Add(new RetainedFile { Path = retained, ConfigDirectory = attempt.ConfigDirectory, Sha256 = previous });
             }
 
             Manifest.Pending = null;
@@ -581,6 +593,11 @@ public sealed class IntegrationService
 
         return result;
     }
+
+    /// <summary>The hash recorded for the file an install replaces: the one that is renamed aside.</summary>
+    private string? RecordedHash(PendingInstall attempt) => attempt.LauncherSlug is { } slug
+        ? Manifest.Launchers.Find(l => string.Equals(l.Slug, slug, StringComparison.OrdinalIgnoreCase))?.Sha256
+        : Manifest.Helper?.Sha256;
 
     /// <summary>Writes a completed install into the manifest's helper or launcher record.</summary>
     private void Record(PendingInstall attempt)
@@ -628,17 +645,17 @@ public sealed class IntegrationService
 
     private void Publish()
     {
-        var images = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var images = new Dictionary<string, LauncherImage>(StringComparer.OrdinalIgnoreCase);
         foreach (var launcher in Manifest.Launchers)
         {
-            images[launcher.Path] = launcher.ConfigDirectory;
+            images[launcher.Path] = new LauncherImage(launcher.ConfigDirectory, launcher.Sha256);
         }
 
         foreach (var retained in Manifest.Retained)
         {
             if (retained.ConfigDirectory is { } directory)
             {
-                images[retained.Path] = directory;
+                images[retained.Path] = new LauncherImage(directory, retained.Sha256);
             }
         }
 

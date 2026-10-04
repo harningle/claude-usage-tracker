@@ -1,3 +1,5 @@
+using System.IO;
+using ClaudeUsageTracker.App.Integration;
 using ClaudeUsageTracker.App.Interop;
 
 namespace ClaudeUsageTracker.App.ClaudeCode;
@@ -20,30 +22,40 @@ public enum StoreActivity
 /// The config directory of the app-owned launcher that verifiably started it, or null when it was started
 /// any other way and so counts as using the shared default.
 /// </param>
-/// <param name="Unknown">Its owner, creation time or parent could not be read.</param>
+/// <param name="Unknown">Its owner, creation time or parent could not be read, or its parent could not be verified.</param>
 public sealed record CliProcess(int Pid, string? ConfigDirectory, bool Unknown);
+
+/// <summary>An app-owned launcher image from the install manifest.</summary>
+/// <param name="ConfigDirectory">The folder its sessions use.</param>
+/// <param name="Sha256">The hash recorded when the tracker put the file there, or null when none was recorded.</param>
+public sealed record LauncherImage(string ConfigDirectory, string? Sha256);
 
 /// <summary>
 /// The conservative process guard for credential takeover and, later, account switching (plan.md
 /// section 2). A <c>claude.exe</c> belongs to a profile only when its live parent is an app-owned launcher
-/// image from the install manifest and that parent was created before it, which rules out a reused parent
-/// PID. Every other <c>claude.exe</c> counts as using the default folder, and also any folder that no
-/// launcher owns, because it may have been started with <c>CLAUDE_CONFIG_DIR</c> set. Nothing here reads a
-/// process's environment. The launcher images come from the install manifest, retained ones included; with
-/// no launcher installed, any running Claude Code blocks every takeover.
+/// image from the install manifest, the file at that path is still the one the tracker installed, and that
+/// parent was created before it, which rules out a reused parent PID. Every other <c>claude.exe</c> counts as
+/// using the default folder, and also any folder that no launcher owns, because it may have been started with
+/// <c>CLAUDE_CONFIG_DIR</c> set. Nothing here reads a process's environment. The launcher images come from the
+/// install manifest, retained ones included; with no launcher installed, any running Claude Code blocks every
+/// takeover.
 /// </summary>
 /// <param name="sessionObserved">
 /// Whether the activity HUD has a live session that uses, or may use, a folder. It can only add to what the
 /// processes show: a folder the processes leave idle counts as in use while a session is observed there. An
 /// empty HUD proves nothing, so it never makes a folder idle.
 /// </param>
+/// <param name="imageHash">The SHA-256 of a file; the real file's unless a test supplies another.</param>
 public sealed class CliProcessGuard(
-    Func<IReadOnlyList<ProcessEntry>> capture, Func<IReadOnlyDictionary<string, string>> launcherImages, Func<string, bool>? sessionObserved = null)
+    Func<IReadOnlyList<ProcessEntry>> capture, Func<IReadOnlyDictionary<string, LauncherImage>> launcherImages,
+    Func<string, bool>? sessionObserved = null, Func<string, string>? imageHash = null)
 {
     public const string ImageName = "claude.exe";
 
-    /// <summary>The guard over real processes and an install manifest of launcher image path to config directory.</summary>
-    public static CliProcessGuard ForThisPc(Func<IReadOnlyDictionary<string, string>> launcherImages, Func<string, bool>? sessionObserved = null) =>
+    private readonly Func<string, string> _imageHash = imageHash ?? FileInstaller.Sha256Of;
+
+    /// <summary>The guard over real processes and the install manifest's launcher images, keyed by path.</summary>
+    public static CliProcessGuard ForThisPc(Func<IReadOnlyDictionary<string, LauncherImage>> launcherImages, Func<string, bool>? sessionObserved = null) =>
         new(() => ProcessTable.Capture(ImageName), launcherImages, sessionObserved);
 
     /// <summary>Takes a fresh process snapshot and judges one config directory.</summary>
@@ -61,12 +73,13 @@ public sealed class CliProcessGuard(
             return StoreActivity.Unknown;
         }
 
-        var activity = ActivityFor(Classify(table, launchers), directory, launchers);
+        var activity = ActivityFor(Classify(table, launchers, _imageHash), directory, launchers);
         return activity == StoreActivity.Idle && sessionObserved?.Invoke(directory.Path) == true ? StoreActivity.InUse : activity;
     }
 
     /// <summary>Attributes each current-user <c>claude.exe</c> in a snapshot.</summary>
-    public static IReadOnlyList<CliProcess> Classify(IReadOnlyList<ProcessEntry> table, IReadOnlyDictionary<string, string> launcherImages)
+    public static IReadOnlyList<CliProcess> Classify(
+        IReadOnlyList<ProcessEntry> table, IReadOnlyDictionary<string, LauncherImage> launcherImages, Func<string, string> imageHash)
     {
         var processes = new List<CliProcess>();
         foreach (var process in table.Where(p => string.Equals(p.ImageName, ImageName, StringComparison.OrdinalIgnoreCase)))
@@ -97,18 +110,51 @@ public sealed class CliProcessGuard(
             else
             {
                 var launcher = launcherImages.FirstOrDefault(l => string.Equals(l.Key, parentPath, StringComparison.OrdinalIgnoreCase));
-                // A parent created after its "child" is a different process that reused the PID.
-                var verified = launcher.Key is not null && parentCreated <= created;
-                processes.Add(new CliProcess(process.Pid, verified ? launcher.Value : null, Unknown: false));
+                if (launcher.Key is null || parentCreated > created)
+                {
+                    // Not a launcher; or a parent created after its "child", a different process that reused the PID.
+                    processes.Add(new CliProcess(process.Pid, null, Unknown: false));
+                }
+                else if (!IsInstalledImage(parentPath, launcher.Value.Sha256, imageHash))
+                {
+                    // Another file has taken the launcher's place: which folder its session uses cannot be known.
+                    processes.Add(new CliProcess(process.Pid, null, Unknown: true));
+                }
+                else
+                {
+                    processes.Add(new CliProcess(process.Pid, launcher.Value.ConfigDirectory, Unknown: false));
+                }
             }
         }
 
         return processes;
     }
 
+    /// <summary>
+    /// Whether the file at a running launcher's path is still the one the tracker installed. A running image
+    /// cannot be rewritten, only renamed, and a renamed one reports its new path, so the file there now is the
+    /// one the process runs.
+    /// </summary>
+    private static bool IsInstalledImage(string path, string? recorded, Func<string, string> imageHash)
+    {
+        if (recorded is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(imageHash(path), recorded, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Judges one config directory against classified processes.</summary>
     public static StoreActivity ActivityFor(
-        IReadOnlyList<CliProcess> processes, CliConfigDirectory directory, IReadOnlyDictionary<string, string> launcherImages)
+        IReadOnlyList<CliProcess> processes, CliConfigDirectory directory, IReadOnlyDictionary<string, LauncherImage> launcherImages)
     {
         if (processes.Any(p => p.Unknown))
         {
@@ -120,7 +166,7 @@ public sealed class CliProcessGuard(
             return StoreActivity.InUse;
         }
 
-        var launcherOwned = launcherImages.Values.Any(d => SameDirectory(d, directory.Path));
+        var launcherOwned = launcherImages.Values.Any(image => SameDirectory(image.ConfigDirectory, directory.Path));
         return processes.Any(p => p.ConfigDirectory is null) && (directory.IsDefault || !launcherOwned)
             ? StoreActivity.InUse
             : StoreActivity.Idle;

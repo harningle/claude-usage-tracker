@@ -69,7 +69,7 @@ New and changed parts, in outline:
 
 ## Automated tests
 
-1,285 pass (942 at the end of Milestone 4), with no build warnings and none skipped once the helper is published. New suites:
+1,292 pass (942 at the end of Milestone 4; 1,285 before the code review below), with no build warnings and none skipped once the helper is published. New suites:
 
 - `StatuslineRendererTests`, `StatuslineUsageTests`, `StatuslineInputTests`, `StatuslineCommandTests`: upstream's script output for each component and colour mode, pace tiers, reset rounding; the precedence of fresh cache, stdin and stale cache; a cache under another folder's key never used; damaged configuration failing loudly; reading while the tracker replaces the file; branch from a worktree.
 - `StatuslineSyncTests`, `ShellEnvironmentTests`: each folder follows its own account, after a switch too; no cache for an unknown or signed-out folder; nothing from an earlier run passed off as fetched; Git Bash found where Claude Code looks for it.
@@ -78,7 +78,7 @@ New and changed parts, in outline:
 - `HudServiceTests`, `HudOrderingTests`: listener first, hooks removed before the listener stops, the secret encrypted, port reuse and repair, and the ordering rules (late starts, duplicates, parallel tools, ended sessions, prompts).
 - `FileInstallerTests`, `IntegrationServiceTests`, `IntegrationCoordinatorTests`: installs and each interruption point, a running image replaced without ending it, no downgrade, launchers and their ownership, status line consent and restore, repair, a damaged manifest that stops everything.
 - `MilestoneFiveViewTests`: the settings pages, the launcher card, the HUD texts, ANSI rendering of the preview, and the process guard with the HUD.
-- `LauncherProcessTests` (needs the published helper; skipped otherwise): arguments and exit codes directly and under each shell, Ctrl+C and Ctrl+Break, a missing `claude.exe`, a launcher outside `.local\bin`, the status line command through Git Bash and PowerShell from a path with spaces and `&`, and status lines during ten upgrades (about 270 lines, 0 to 2 failing in the rename gap).
+- `LauncherProcessTests` (needs the published helper; skipped otherwise): arguments and exit codes directly and under each shell, Ctrl+C and Ctrl+Break, a missing `claude.exe`, a launcher outside `.local\bin`, the status line command through Git Bash and PowerShell from a path with spaces and `&`, and status lines during ten upgrades between two builds of the helper (270 to 290 lines, 0 to 2 failing in the rename gap).
 
 **Mutation check.** Eleven guards were each broken in turn and their suites run:
 
@@ -95,6 +95,26 @@ New and changed parts, in outline:
 - the launcher cancelling Ctrl+C in itself
 
 Each break made at least one test fail. One needed its test sharpened first: a duplicate at the top level was refused anyway, so a nested duplicate was added.
+
+## Code review
+
+A review of the commit (`a1fed15`) on 2026-10-04 found three defects, and follow-up reviews a fourth and a flaw in its first fix. Each was confirmed against the code and now has a test that fails without its fix. All ten parts of the fixes were removed or reversed in turn; one test needed sharpening first.
+
+1. **[P1] A replaced launcher could vouch for a session.** The process guard attributed a `claude.exe` to a launcher's folder by its parent's path alone.
+   - The failure: another program put at a launcher's path could start Claude Code on the default folder. That folder then counted as idle, so a takeover or switch could write the login while the session ran.
+   - The fix: every launcher image now carries the hash the tracker installed it with, renamed-aside images included (after an upgrade, a removal while running, or recovery at start-up). The guard hashes the file at a running launcher's path before attributing anything to it. A file that does not match, cannot be read, or has no recorded hash makes every folder "unknown", which blocks every takeover and switch.
+   - Cost: the file is hashed only while a launcher session runs.
+   - Tests: `AnotherFileAtTheLaunchersPathVouchesForNothing` and `ALauncherImageWithoutARecordedHashVouchesForNothing`. Real hashes are checked through the guard in `ARunningLauncherSurvivesRemovalAndUpgradeAndStaysAttributedToItsFolder` and the interrupted-install test.
+2. **[P2] Repair replaced a helper the tracker had not installed.** A file that had taken the helper's place, or one at the helper's path with no record, was renamed aside and then deleted as a retained image. That contradicted the rule this log states.
+   - The fix: the launchers' rule now applies. Such a file is left as it is, and the problem tells you to move it away before Repair (`AHelperTheTrackerDidNotInstallIsNeverReplaced`, `RepairNeverOverwritesWhatIsNoLongerTheTrackers`).
+   - The upgrade test used to force its reinstalls by spoiling the recorded hash, which now correctly counts as a file the tracker did not install. It now alternates two real builds.
+3. **[P2] The status line could show another source's usage.** The sync checked only the profile's current source, not where the last fetched usage came from. After a claude.ai link was removed, that link's last result was written as Claude Code usage until the next check.
+   - The fix: usage reaches the cache only when it was read from Claude Code and for the account the folder is signed in to (`UsageFromAnotherSourceOrForAnotherAccountIsNotPassedOn`).
+4. **[P2] A relinked profile kept the former account's usage.** An existing cache was reused whenever its profile matched.
+   - The failure: after the profile was relinked to another account in the same folder, the new account's first status lines showed the former account's values, as fresh while they were recent. The fix for 3 had only stopped the former account's result from being written again.
+   - Storing the account in the file would break its no-identity rule. Instead the tracker remembers, for each folder, the profile and account whose usage it wrote there during this run.
+   - The fix: a relink to another account starts the values empty (`RelinkingTheProfileToAnotherAccountDropsTheFormerAccountsUsage`). So does a new run, since nothing says whose usage an earlier run left (`UsageAnEarlierRunWroteIsNotCarriedOver`).
+   - A further review of that fix found that the account was remembered before the file was written. A write that failed during a relink left the former account's values in the file, now recorded as the new account's. The account is now recorded only once the write has succeeded (`ARelinkWhoseWriteFailedStillDropsTheFormerAccountsUsage`, which holds the file open so the write fails).
 
 ## Manual checks in fixture mode
 
@@ -189,7 +209,9 @@ Against the targets (warm p95 below 100 ms, first run below 300 ms), every runne
 
 - **SessionStart is still skipped** for HTTP hooks on 2.1.288, so an idle session appears at its first prompt, as for upstream.
 - **A Notification after a minute of idleness** marks the session "Needs input" and keeps the HUD up. That is upstream's reducer on the same CLI.
-- **The rename gap.** During an upgrade a status line can fail once (0 to 2 of about 270 in the test). Claude Code then shows a blank line until its next update.
+- **The rename gap.** During an upgrade a status line can fail once (0 to 2 of 270 to 290 in the test). Claude Code then shows a blank line until its next update.
+- **The status line after a start.** When the tracker starts, the cache holds no usage until its first check of that profile, normally within seconds. Until then the line takes usage from Claude Code itself, or shows "~".
+- **The status line while the tracker is closed.** The helper does not know whose usage the cache holds. If Claude Code signs in to another account then, the line shows the former account's last values for as long as they are fresh (twice the polling interval). After that, Claude Code's own usage comes first, and the old values appear only, labelled "(stale)", when Claude Code reports none. The next start of the tracker removes the cache.
 - **A crash leaves the hooks installed** until the tracker starts again. Each tool call then costs a few milliseconds more (+3.7 ms p95 against the fake API).
 - **Hook payloads reach whatever holds the port** while the tracker is closed. This is accepted for single-user PCs (plan section 1).
 - **Claude Code installed with npm** (`claude.cmd`) is not found by launchers; native Claude Code is the supported target.

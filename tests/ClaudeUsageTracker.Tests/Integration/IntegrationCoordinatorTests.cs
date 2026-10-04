@@ -235,10 +235,11 @@ public sealed class IntegrationCoordinatorTests : IDisposable
 
         Assert.Equal([IntegrationProblemKind.HelperModified, IntegrationProblemKind.LauncherReplaced], Problems);
 
-        // The helper lives in the tracker's own folder and is reinstalled; the launcher's place is not taken back.
-        Assert.Equal([IntegrationProblemKind.LauncherReplaced], Coordinator.Repair().Select(p => p.Kind));
+        // Neither place is taken back: each file stays as it is and stays reported.
+        Assert.Equal([IntegrationProblemKind.HelperModified, IntegrationProblemKind.LauncherReplaced], Coordinator.Repair().Select(p => p.Kind));
         Assert.Equal("someone else's file now", File.ReadAllText(launcher));
-        Assert.Equal("helper build 1", File.ReadAllText(_harness.Service.HelperPath));
+        Assert.Equal("tampered", File.ReadAllText(_harness.Service.HelperPath));
+        Assert.Empty(_harness.Service.Manifest.Retained);
     }
 
     [Fact]

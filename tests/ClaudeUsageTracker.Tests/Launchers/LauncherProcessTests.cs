@@ -377,7 +377,12 @@ public sealed partial class LauncherProcessTests : IDisposable
         Assert.SkipUnless(File.Exists(PublishedHelper), PublishHint);
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var data = Path.Combine(_temp.Path, "data");
-        var service = new IntegrationService(data, _home, PublishedHelper, time);
+        // Two builds of the helper that differ only in bytes after the program, so each is an upgrade of the other.
+        string[] builds = [Path.Combine(_temp.Path, "build-a.exe"), Path.Combine(_temp.Path, "build-b.exe")];
+        File.Copy(PublishedHelper, builds[0]);
+        File.Copy(PublishedHelper, builds[1]);
+        File.AppendAllText(builds[1], "build b");
+        var service = new IntegrationService(data, _home, builds[0], time);
         Assert.Equal(InstallOutcome.Installed, service.InstallHelper().Outcome);
         var environment = Environment_();
         using var stop = new CancellationTokenSource();
@@ -415,15 +420,14 @@ public sealed partial class LauncherProcessTests : IDisposable
             }
         })).ToArray();
 
-        // Ten upgrades meanwhile: each renames the running image aside and promotes a new copy.
+        // Ten upgrades meanwhile, as by alternating builds of the app: each renames the running image aside and promotes a new copy.
         var upgrades = 0;
         for (var i = 0; i < 10; i++)
         {
             await Task.Delay(100, TestContext.Current.CancellationToken);
-            service.Manifest.Helper!.Sha256 = "changed";
-            service.Store.Save(service.Manifest);
-            // The record no longer matches the file, so the service installs the bundled helper again.
-            if (service.InstallHelper().Outcome == InstallOutcome.Installed)
+            var upgrade = new IntegrationService(data, _home, builds[(i + 1) % 2], time);
+            Assert.Equal(HelperState.UpdateAvailable, upgrade.Helper());
+            if (upgrade.InstallHelper().Outcome == InstallOutcome.Installed)
             {
                 upgrades++;
             }
@@ -431,6 +435,7 @@ public sealed partial class LauncherProcessTests : IDisposable
 
         stop.Cancel();
         await Task.WhenAll(sessions);
+        service = new IntegrationService(data, _home, builds[0], time);
 
         Assert.Equal(10, upgrades);
         Assert.True(runs > 20, $"Only {runs} status lines ran.");

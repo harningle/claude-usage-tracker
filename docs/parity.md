@@ -184,7 +184,7 @@ Recorded on 2026-09-30.
     - Windows has no `exec`, so it waits for Claude Code and returns its exit code. It cancels Ctrl+C and Ctrl+Break in itself, so the shell prompt cannot return while Claude Code runs.
     - PATH is never edited; the card warns when `.local\bin` is not on it.
     - As upstream, removal keeps the login folder.
-47. **The status line reads no login and fetches nothing.** Upstream installed `statusline-command.sh` and `fetch-claude-usage.swift` in `~/.claude`; the latter could carry the session key and fetched claude.ai usage on every update. The port's helper renders upstream's script output from Claude Code's stdin and a non-secret file per Claude Code folder. The tracker writes that file only from usage fetched with that folder's own verified login. The usage source is chosen in this order:
+47. **The status line reads no login and fetches nothing.** Upstream installed `statusline-command.sh` and `fetch-claude-usage.swift` in `~/.claude`; the latter could carry the session key and fetched claude.ai usage on every update. The port's helper renders upstream's script output from Claude Code's stdin and a non-secret file per Claude Code folder. The tracker writes that file only from usage it read from Claude Code with that folder's own verified login, never another source's. The file names no account, so the usage values start empty at each start of the tracker and after a relink to another account. The usage source is chosen in this order:
     - the tracker's cache while it is at most twice the polling interval old
     - otherwise Claude Code's `rate_limits` on stdin
     - otherwise the stale cache labelled "(stale)", never after its reset
@@ -204,7 +204,7 @@ Recorded on 2026-09-30.
     - An ended session is revived only by a new SessionStart or prompt.
     - Any event with a `cwd` names the session.
     - The session's Claude Code folder is taken from `transcript_path`.
-51. **HUD sessions only add to the switching guard.** Process attribution stays authoritative. A launcher's `claude.exe` belongs to the launcher's folder, retained images included, and a HUD session can only turn an idle folder into one in use. An empty HUD proves nothing.
+51. **HUD sessions only add to the switching guard.** Process attribution stays authoritative. A launcher's `claude.exe` belongs to the launcher's folder, retained images included, but only while the file at the launcher's path still has the hash the tracker installed it with. Anything else there makes every folder "unknown". A HUD session can only turn an idle folder into one in use; an empty HUD proves nothing.
 52. **An installed footprint with upgrades and repair.** Upstream rewrote its scripts in place. The port installs one helper at a fixed per-user path and records it and each launcher in `install.json`:
     - Upgrades stage, verify and rename aside, so running launchers keep their image. An interrupted install is settled at the next start.
     - A newer helper is never downgraded, and a file the tracker did not install is never overwritten.

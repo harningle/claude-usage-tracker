@@ -24,7 +24,10 @@ internal sealed class LinkHarness
         TokenHandler = tokens ?? new ScriptedHandler((_, _) => throw new InvalidOperationException("No token request was expected."));
         Log = new RequestLog(Path.Combine(root, "diagnostics"));
         Tokens = new OAuthTokenClient(new HttpClient(TokenHandler), time, Log);
-        Guard = new CliProcessGuard(() => [.. Processes], () => Launchers);
+        // The launcher images here are paths only, standing for files whose hash is the recorded one.
+        Guard = new CliProcessGuard(
+            () => [.. Processes], () => Launchers.ToDictionary(l => l.Key, l => new LauncherImage(l.Value, "recorded"), StringComparer.OrdinalIgnoreCase),
+            imageHash: _ => "recorded");
         Switches = new CliSwitchRecords(Path.Combine(root, "cli-switch.json"), new SecretStore(Path.Combine(root, "secrets", "backups")));
         Service = new CliLinkService(Secrets, time, userProfile, Lock, Tokens, Guard, () => CliStore.Inventory(userProfile, null, Known), Switches);
     }

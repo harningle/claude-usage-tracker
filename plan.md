@@ -252,7 +252,11 @@ Status (2026-10-03): implemented, with 942 automated tests, a mutation check of 
 
 Status (2026-10-03): implemented. The evidence so far:
 
-- 1,285 automated tests, including real launcher and helper processes under the three shells in a pseudo console.
+- 1,292 automated tests, including real launcher and helper processes under the three shells in a pseudo console.
+- A code review of the commit and a follow-up: four defects, fixed with tests.
+  - A replaced launcher could vouch for a session, so launcher images are now verified by hash.
+  - Repair replaced a helper the tracker had not installed.
+  - The status line could show another source's usage, or a relinked profile's former account.
 - A mutation check of eleven guards.
 - Manual checks in fixture mode: status line Apply, hooks and HUD, a launcher.
 - Real-CLI runs against a fake Messages API on 2.1.288 (no usage).
