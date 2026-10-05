@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using ClaudeUsageTracker.App.Automation;
@@ -283,6 +284,11 @@ public partial class SettingsWindow : Window
         if (sender is TextBox { Tag: Guid id } box)
         {
             _viewModel.RenameProfile(id, box.Text);
+            // The row stays, so show the name as saved: trimmed, or the old one if the new one was refused.
+            if (_viewModel.Profiles.FirstOrDefault(p => p.Id == id) is { } row)
+            {
+                box.Text = row.Name;
+            }
         }
     }
 
@@ -316,9 +322,11 @@ public partial class SettingsWindow : Window
 
     private void OnToggleDisplayed(object sender, RoutedEventArgs e)
     {
-        if (sender is CheckBox { Tag: Guid id })
+        if (sender is CheckBox { Tag: Guid id } box)
         {
             _viewModel.ToggleDisplayed(id);
+            // A refused change (the last displayed profile) leaves the row as it was; the switch shows that again.
+            box.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateTarget();
         }
     }
 

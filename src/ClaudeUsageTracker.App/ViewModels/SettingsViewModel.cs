@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -31,7 +32,31 @@ public sealed record DetailRow(string Label, string Value) : ListItem;
 public sealed record CredentialView(
     WizardRoute Route, bool IsLinked, string StatusTitle, string? StatusDetail, IReadOnlyList<DetailRow> Details, string SetupLabel, string? Notice);
 
-public sealed record ProfileRow(Guid Id, string Name, string ProviderName, bool IsActive, bool IsDisplayed, bool CanDelete) : ListItem;
+/// <summary>
+/// A profile in Manage Profiles and in the multi-profile selection. A row stays the same object while its profile exists
+/// and its values change in place, so an edit does not rebuild the lists: rebuilding them on Tab from a profile's name
+/// took the keyboard focus out of the window (Milestone 6).
+/// </summary>
+public sealed class ProfileRow(Guid id) : ObservableObject
+{
+    private string _name = "";
+    private string _providerName = "";
+    private bool _isActive;
+    private bool _isDisplayed;
+    private bool _canDelete;
+
+    public Guid Id { get; } = id;
+
+    public string Name { get => _name; internal set => Set(ref _name, value); }
+
+    public string ProviderName { get => _providerName; internal set => Set(ref _providerName, value); }
+
+    public bool IsActive { get => _isActive; internal set => Set(ref _isActive, value); }
+
+    public bool IsDisplayed { get => _isDisplayed; internal set => Set(ref _isDisplayed, value); }
+
+    public bool CanDelete { get => _canDelete; internal set => Set(ref _canDelete, value); }
+}
 
 /// <summary>A request of the network log, as text. It holds only what <see cref="RequestLogEntry"/> holds.</summary>
 public sealed record LogRow(string Time, string Operation, string Request, string Status, string Duration, string? Error) : ListItem;
@@ -83,6 +108,7 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly ProfileService _profiles;
     private readonly RequestLog _log;
     private readonly SettingsIntegrations _integrations;
+    private readonly ObservableCollection<ProfileRow> _profileRows = [];
     private ProfileUsageState? _state;
     private CliSnapshot? _snapshot;
     private CliSwitchView? _cliSwitch;
@@ -652,10 +678,43 @@ public sealed class SettingsViewModel : ObservableObject
 
     // Manage Profiles, upstream ManageProfilesView.
 
-    public IReadOnlyList<ProfileRow> Profiles => _settings.Profiles
-        .Select(p => new ProfileRow(
-            p.Id, p.Name, p.ProviderKind.Descriptor().DisplayName, p.Id == Profile?.Id, p.IsSelectedForDisplay, _settings.Profiles.Count > 1))
-        .ToList();
+    /// <summary>
+    /// The profiles in their order. Each read brings the same collection up to date in place, adding, moving and removing
+    /// rows and updating their values, so the lists bound to it keep their controls (see <see cref="ProfileRow"/>).
+    /// </summary>
+    public IReadOnlyList<ProfileRow> Profiles
+    {
+        get
+        {
+            for (var i = 0; i < _settings.Profiles.Count; i++)
+            {
+                var profile = _settings.Profiles[i];
+                var at = _profileRows.ToList().FindIndex(r => r.Id == profile.Id);
+                if (at < 0)
+                {
+                    _profileRows.Insert(i, new ProfileRow(profile.Id));
+                }
+                else if (at != i)
+                {
+                    _profileRows.Move(at, i);
+                }
+
+                var row = _profileRows[i];
+                row.Name = profile.Name;
+                row.ProviderName = profile.ProviderKind.Descriptor().DisplayName;
+                row.IsActive = profile.Id == Profile?.Id;
+                row.IsDisplayed = profile.IsSelectedForDisplay;
+                row.CanDelete = _settings.Profiles.Count > 1;
+            }
+
+            while (_profileRows.Count > _settings.Profiles.Count)
+            {
+                _profileRows.RemoveAt(_profileRows.Count - 1);
+            }
+
+            return _profileRows;
+        }
+    }
 
     /// <summary>Why the last profile action did not happen.</summary>
     public string? ProfileError { get => _profileError; private set => Set(ref _profileError, value); }

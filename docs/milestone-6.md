@@ -9,7 +9,7 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
 | Plan item | Status | Evidence |
 | --- | --- | --- |
 | Localisation | **Replaced by English only** (your decision, plan section 1). The unused 14-language list and its tests were removed. Upstream's other `.lproj` files are not shipped, and the frameworks' own text stays English (`SatelliteResourceLanguages=en`) | Automated (every key the app uses exists in the English tables); parity difference 54 |
-| Accessibility | Every control a user can operate in the popover, each settings page and the wizard's steps has an accessible name that is more than an icon glyph, and can be reached with Tab. The audit found nothing to fix | Automated (`AccessibilityTests`), mutation-checked; the fixture-mode checks below drove every step through these names |
+| Accessibility | Every control a user can operate has an accessible name that is more than an icon glyph or a type name. This covers the popover, each settings page and the wizard's steps, including the selectable lists and their choices. On every settings page, Tab reaches every control, a list through its choices, and arrow keys change the choice in every list. Your review found that the first version of the audit skipped the lists; extended, it found one keyboard defect, now fixed (defect 3) | Automated (`AccessibilityTests`, with key presses sent through WPF's input system), mutation-checked; the fixture-mode checks below drove every step through these names |
 | Source and image comparisons | Done against `popover.png`, frames of `settings.gif`, `statusline.png` and `icon.jpg` | Source/image: [parity.md](parity.md#source-and-image-comparison) |
 | Full parity matrix with verification limits | Every upstream feature listed with its status; new differences 54 to 56; difference 7 completed with the Support, Mobile App, sponsor and heartbeat omissions | [parity.md](parity.md#upstream-features), [verification limits](parity.md#verification-limits) |
 | Self-contained Windows x64 build with the helper | `dotnet publish` of the app; WebView2 prerequisite documented | Manual in fixture mode (below); [personal-use.md](personal-use.md) |
@@ -33,6 +33,7 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
 
 - **Browser route** (`Browser/BrowserSessions.cs`): requests on a view that is not yet on claude.ai share one navigation. A test can now park the view on its own page.
 - **Localisation**: `Core/Localisation/SupportedLanguages.cs` and its tests removed; comments in `Strings.cs` updated.
+- **Manage Profiles** (`ViewModels/SettingsViewModel.cs`, `Views/SettingsWindow.xaml.cs`): a profile's row stays the same object and changes in place (defect 3). After a rename, the box shows the name as saved, and a refused display change puts its switch back.
 - **Project** (`ClaudeUsageTracker.App.csproj`):
   - `SelfContained` under `dotnet publish`.
   - English satellites only.
@@ -50,7 +51,7 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
 
 ## Automated tests
 
-1,295 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus 4 new:
+1,299 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus 8 new:
 
 - **`TheFirstCheckOnANewViewSucceedsAndNavigatesOnce`.**
   - The setup: a real WebView2 context on its own dispatcher thread, parked on a page of a small HTTP server on 127.0.0.1, sends the three requests of a usage check at once.
@@ -58,11 +59,26 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
   - After the fix all three return 200 and the page is loaded once. Five runs in a row passed and left no browser process or folder behind.
   - It needs no account and no network; without the WebView2 Runtime it is skipped.
 - **`EveryPopoverControlIsNamedAndReachable`, `EverySettingsPageIsNamedAndReachable`, `EveryWizardStepIsNamedAndReachable`.**
-  - What is checked: each window is laid out off screen with synthetic data and its visual tree walked. Every visible button, toggle, text box, combo box or slider must have a UI Automation name with a character outside the icon font's private-use range. If enabled, it must also be focusable and a tab stop.
+  - What is checked: each window is laid out off screen with synthetic data and its visual tree walked. Every visible button, toggle, text box, combo box, slider, list and list choice must have a UI Automation name. The name needs a character outside the icon font's private-use range, and must not be the type name that a bound record gives a choice nothing else names. If enabled, the control must also be focusable and a tab stop, except a list, which is entered through its choices.
   - Template parts of a control (a scroll bar's arrows, a combo box's drop-down button) are left to that control.
   - Coverage: the popover; every settings page, with the Codex page under a Codex profile; and the wizard's provider choice, Claude Code found and not found, claude.ai key, organisation choice, review and Codex steps. Each step is asserted to be reached.
   - A page where no control is checked fails, so a window that did not lay out cannot pass.
-  - **Mutation check:** two deliberate breakages were each caught, then undone: the Refresh button without its name (it then exposes only the glyph U+E72C) and the History tab with `IsTabStop=False`.
+- **`TabReachesEveryControlOfEverySettingsPage`.** The settings window shows every optional part: the API metric, notifications, and two profiles in multi-profile display. Tab presses go through WPF's input system as a keyboard sends them, round each page from its first tab stop. They must reach every enabled control the audit above finds, a list through one of its choices, and must never drop the focus to the window.
+- **`ArrowKeysChangeTheChoiceInEveryList`.**
+  - The behaviour: from the selected choice, the arrow key that points at a neighbouring choice selects it, and the opposite key selects the first again.
+  - The lists: the three icon-style lists, the notification sound, the status line's colours and the multi-profile style.
+  - Every list in the window must be exercised, so one that the settings hide fails rather than passing unchecked.
+- **`RenamingFromTheKeyboardKeepsTheFocusAndShowsTheSavedName`, `ARefusedDisplayChangeShowsTheProfileStillDisplayed`.** These cover what the rebuilt rows used to give for free:
+  - Tab from a renamed profile moves on, and the box shows the trimmed name, or the old one when a blank name is refused.
+  - Hiding the last displayed profile with Space is refused, and its switch shows it displayed.
+- **Mutation check.** Eight deliberate breakages were each caught, then undone:
+  - the Refresh button without its name (it then exposes only the glyph U+E72C)
+  - the History tab with `IsTabStop=False`
+  - the style choices without their names (they then expose the record's type name)
+  - the sound list with `SelectionMode="Multiple"`, where arrows move without selecting
+  - the colour choices with `IsTabStop=False`
+  - the profile rows rebuilt at every read, which brings back defect 3
+  - the rename box not refreshed, and the refused switch not reset
 
 ## Defects found
 
@@ -75,6 +91,11 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
    - The cause: the SDK gives a `PackageReference` with `PrivateAssets="all"` and no `Publish` metadata `Publish="false"` (`Microsoft.NET.Sdk.Shared.targets`). The project used `PrivateAssets` to keep the Windows App SDK out of the test host, so a publish left out 20 of its files: 17 projection assemblies, the notification projection among them, its background-task DLL and its two bootstrap DLLs.
    - The fix: `Publish="true"` on the two packages. The publish now holds every file of the build output except the app's empty resource index (`ClaudeUsageTracker.App.pri`), which the app does not use; notifications register without it.
    - Before this milestone the app had only been built, never published, so no earlier check could see it.
+3. **On Manage Profiles, Tab from a profile's name dropped the keyboard focus to the window** (found by the extended audit, after your review).
+   - The effect: everything below the first name box (the other rows, Delete, the multi-profile switches and its style list) could not be reached with Tab. By the same cause, Space on a profile's display switch would lose the focus too.
+   - The cause: leaving the box commits the rename, and every settings edit raises a change for every property. `Profiles` built new row objects each time, and rows compare by reference, so both lists bound to it rebuilt every row. That included the control Tab was moving to, whose removal left the focus with the window.
+   - The fix: the rows stay the same objects and change in place, so the lists keep their controls.
+   - Checked by `TabReachesEveryControlOfEverySettingsPage`, which failed with "Tab from TextBox drops the keyboard focus to the window" before the fix and passes after it.
 
 ## Delivery checks in fixture mode
 

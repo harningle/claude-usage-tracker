@@ -66,8 +66,8 @@ public class ViewControlTests
     [Fact]
     public void ListItemsCompareByReference()
     {
-        var first = new ProfileRow(Guid.Empty, "Work", "Anthropic", false, true, true);
-        var same = new ProfileRow(Guid.Empty, "Work", "Anthropic", false, true, true);
+        var first = new ProfileRow(Guid.Empty);
+        var same = new ProfileRow(Guid.Empty);
 
         Assert.NotEqual(first, same);
         Assert.Equal(first, first);

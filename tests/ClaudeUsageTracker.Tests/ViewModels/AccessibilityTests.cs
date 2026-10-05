@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -86,6 +87,160 @@ public sealed class AccessibilityTests : IDisposable
         window.Close();
     });
 
+    /// <summary>
+    /// Keyboard entry, with Tab presses sent through WPF's input system as a keyboard sends them: going round each
+    /// settings page from its first tab stop, Tab reaches every control a user can operate there, a list through one of
+    /// its choices, and never drops the keyboard focus back to the window. The settings show every optional part.
+    /// </summary>
+    [Fact]
+    public Task TabReachesEveryControlOfEverySettingsPage() => WpfApplication.Run(() =>
+    {
+        var (window, _) = FullSettingsWindow();
+        var problems = new List<string>();
+        foreach (var section in Enum.GetValues<SettingsSection>().Where(s => s != SettingsSection.Codex))
+        {
+            window.Navigate(section);
+            Settle();
+            var reached = TabRound(window);
+            for (var i = 1; i < reached.Count; i++)
+            {
+                if (reached[i] is Window && reached[i - 1] is FrameworkElement before)
+                {
+                    problems.Add($"{section}: Tab from {Describe(before)} drops the keyboard focus to the window");
+                }
+            }
+
+            var controls = new List<FrameworkElement>();
+            Operable(window, controls);
+            foreach (var control in controls.Where(c => c.IsEnabled && c is not ListBoxItem))
+            {
+                if (!reached.Any(e => ReferenceEquals(e, control) || (e is ListBoxItem item && ReferenceEquals(ItemsControl.ItemsControlFromItemContainer(item), control))))
+                {
+                    problems.Add($"{section}: Tab never reaches {Describe(control)} \"{AutomationProperties.GetName(control)}\"");
+                }
+            }
+        }
+
+        Assert.Empty(problems);
+        window.Close();
+    });
+
+    /// <summary>
+    /// The selectable lists (the icon styles, the notification sound, the status line's colours, the multi-profile style):
+    /// from the selected choice, the arrow key that points at a neighbouring choice selects it, and the opposite key
+    /// selects the first again. Every list in the window must be exercised, so one that the test's settings hide fails
+    /// instead of passing unchecked.
+    /// </summary>
+    [Fact]
+    public Task ArrowKeysChangeTheChoiceInEveryList() => WpfApplication.Run(() =>
+    {
+        var (window, _) = FullSettingsWindow();
+        var lists = LogicalDescendants<ListBox>(window).ToList();
+        var exercised = new HashSet<ListBox>();
+        var problems = new List<string>();
+        foreach (var section in Enum.GetValues<SettingsSection>().Where(s => s != SettingsSection.Codex))
+        {
+            window.Navigate(section);
+            Settle();
+            foreach (var list in lists.Where(l => l.IsVisible))
+            {
+                window.Activate();
+                problems.AddRange(ArrowKeys(list).Select(p => $"{section}: the list \"{AutomationProperties.GetName(list)}\" {p}"));
+                exercised.Add(list);
+            }
+        }
+
+        Assert.Empty(problems);
+        Assert.NotEmpty(lists);
+        Assert.Equal(lists.Count, exercised.Count);
+        window.Close();
+    });
+
+    /// <summary>
+    /// Renaming from the keyboard on Manage Profiles: Tab from a profile's name moves on to the next control, and the
+    /// box then shows the name as saved, trimmed, or the previous name when a blank one is refused. The rows are not
+    /// rebuilt, so this no longer comes from a fresh box.
+    /// </summary>
+    [Fact]
+    public Task RenamingFromTheKeyboardKeepsTheFocusAndShowsTheSavedName() => WpfApplication.Run(() =>
+    {
+        var (window, settings) = FullSettingsWindow();
+        window.Navigate(SettingsSection.ManageProfiles);
+        Settle();
+        window.Activate();
+        var box = RenameBoxes(window).First();
+
+        Assert.True(box.Focus());
+        box.Text = "  Renamed  ";
+        Press(Key.Tab);
+        Assert.Equal("Renamed", settings.Profiles[0].Name);
+        Assert.Equal("Renamed", box.Text);
+        Assert.IsNotType<Window>(Keyboard.FocusedElement);
+        Assert.Same(box, RenameBoxes(window).First());
+
+        Assert.True(box.Focus());
+        box.Text = "   ";
+        Press(Key.Tab);
+        Assert.Equal("Renamed", settings.Profiles[0].Name);
+        Assert.Equal("Renamed", box.Text);
+        window.Close();
+    });
+
+    /// <summary>
+    /// Hiding the last displayed profile with Space is refused (upstream: at least one), and its switch shows it displayed
+    /// again instead of keeping the key press.
+    /// </summary>
+    [Fact]
+    public Task ARefusedDisplayChangeShowsTheProfileStillDisplayed() => WpfApplication.Run(() =>
+    {
+        var (window, settings) = FullSettingsWindow();
+        window.Navigate(SettingsSection.ManageProfiles);
+        Settle();
+        window.Activate();
+        var switches = new List<FrameworkElement>();
+        Operable(window, switches);
+        var displayed = switches.OfType<CheckBox>().Where(c => c.Tag is Guid).ToList();
+        Assert.Equal(settings.Profiles.Count, displayed.Count);
+
+        CheckBox? refused = null;
+        foreach (var check in displayed.Where(c => c.IsChecked == true))
+        {
+            Assert.True(check.Focus());
+            Press(Key.Space);
+            if (settings.Profiles.Single(p => p.Id == (Guid)check.Tag).IsSelectedForDisplay)
+            {
+                refused = check;
+                break;
+            }
+        }
+
+        Assert.NotNull(refused);
+        Assert.True(refused.IsChecked);
+        window.Close();
+    });
+
+    private static List<TextBox> RenameBoxes(Window window)
+    {
+        var controls = new List<FrameworkElement>();
+        Operable(window, controls);
+        return [.. controls.OfType<TextBox>().Where(t => t.Tag is Guid)];
+    }
+
+    /// <summary>The settings window with every optional part shown: API metric, notifications, several profiles displayed.</summary>
+    private (SettingsWindow Window, AppSettings Settings) FullSettingsWindow()
+    {
+        var profile = new ProfileSettings { Name = "Work", Console = new ConsoleLink() };
+        var settings = new AppSettings
+        {
+            Profiles = [profile, new ProfileSettings { Name = "Home" }], ActiveProfileId = profile.Id, IsMultiProfile = true,
+        };
+        var model = SettingsModel(settings);
+        model.SessionEnabled = model.WeekEnabled = model.ApiEnabled = model.NotificationsEnabled = true;
+        var window = new SettingsWindow(model);
+        Show(window);
+        return (window, settings);
+    }
+
     [Fact]
     public Task EveryWizardStepIsNamedAndReachable() => WpfApplication.Run(() =>
     {
@@ -128,6 +283,37 @@ public sealed class AccessibilityTests : IDisposable
     /// <summary>Shows the window off screen, lets it lay out, and lists the controls that fail.</summary>
     private static List<string> Audit(Window window)
     {
+        Show(window);
+        var controls = new List<FrameworkElement>();
+        Operable(window, controls);
+        var problems = new List<string>();
+        foreach (var control in controls)
+        {
+            var name = UIElementAutomationPeer.CreatePeerForElement(control)?.GetName();
+            if (!IsMeaningful(name, control.DataContext))
+            {
+                problems.Add($"{Describe(control)} has no accessible name" + (string.IsNullOrEmpty(name) ? "" : $" (only \"{Escape(name)}\")"));
+            }
+
+            // A list is entered through its choices, which are its tab stops; TabReachesEveryControlOfEverySettingsPage
+            // and ArrowKeysChangeTheChoiceInEveryList press the keys.
+            if (control is not ListBox && control.IsEnabled && !(control.Focusable && KeyboardNavigation.GetIsTabStop(control)))
+            {
+                problems.Add($"{Describe(control)} cannot be reached with Tab");
+            }
+        }
+
+        if (controls.Count == 0)
+        {
+            // A window that did not lay out would otherwise pass without a single check.
+            problems.Add("no control was checked");
+        }
+
+        return problems;
+    }
+
+    private static void Show(Window window)
+    {
         if (!window.IsVisible)
         {
             window.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -138,52 +324,135 @@ public sealed class AccessibilityTests : IDisposable
         }
 
         Settle();
-        var problems = new List<string>();
-        var count = 0;
-        Walk(window, problems, ref count);
-        if (count == 0)
+    }
+
+    /// <summary>Where Tab takes the keyboard focus, from the window's first tab stop until it comes round to it again.</summary>
+    private static List<IInputElement> TabRound(Window window)
+    {
+        window.Activate();
+        window.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+        Settle();
+        var first = Keyboard.FocusedElement ?? throw new InvalidOperationException("The window cannot take the keyboard focus.");
+        var reached = new List<IInputElement> { first };
+        for (var i = 0; i < 500; i++)
         {
-            // A window that did not lay out would otherwise pass without a single check.
-            problems.Add("no control was checked");
+            Press(Key.Tab);
+            if (Keyboard.FocusedElement is not { } focused || ReferenceEquals(focused, first))
+            {
+                break;
+            }
+
+            reached.Add(focused);
+        }
+
+        return reached;
+    }
+
+    /// <summary>
+    /// Moves the selection to the neighbouring choice with the arrow key that points at it, then back with the opposite
+    /// key, starting from the selected choice.
+    /// </summary>
+    private static List<string> ArrowKeys(ListBox list)
+    {
+        var items = Enumerable.Range(0, list.Items.Count).Select(i => (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(i)).ToList();
+        if (items.Count < 2)
+        {
+            return [$"has {items.Count} choices"];
+        }
+
+        var from = Math.Max(list.SelectedIndex, 0);
+        var to = from + 1 < items.Count ? from + 1 : from - 1;
+        if (!items[from].Focus())
+        {
+            return ["cannot take the keyboard focus"];
+        }
+
+        var problems = new List<string>();
+        var offset = items[to].TranslatePoint(new Point(0, 0), items[from]);
+        var key = Math.Abs(offset.Y) < items[from].RenderSize.Height / 2 ? offset.X > 0 ? Key.Right : Key.Left : offset.Y > 0 ? Key.Down : Key.Up;
+        Press(key);
+        if (list.SelectedIndex != to)
+        {
+            problems.Add($"selects choice {list.SelectedIndex} instead of {to} with {key}");
+        }
+
+        var back = key switch { Key.Right => Key.Left, Key.Left => Key.Right, Key.Down => Key.Up, _ => Key.Down };
+        Press(back);
+        if (list.SelectedIndex != from)
+        {
+            problems.Add($"selects choice {list.SelectedIndex} instead of {from} with {back}");
         }
 
         return problems;
     }
 
-    private static void Walk(DependencyObject node, List<string> problems, ref int count)
+    /// <summary>Presses a key where the keyboard focus is, through WPF's input system as a keyboard does.</summary>
+    private static void Press(Key key)
     {
-        if (node is FrameworkElement { IsVisible: true } element && IsOperable(element) && element.TemplatedParent is not Control)
+        var focused = Keyboard.FocusedElement as DependencyObject ?? throw new InvalidOperationException("Nothing has the keyboard focus.");
+        var source = PresentationSource.FromDependencyObject(focused) ?? throw new InvalidOperationException("The focused element is not shown.");
+        foreach (var routed in new[] { Keyboard.PreviewKeyDownEvent, Keyboard.PreviewKeyUpEvent })
         {
-            count++;
-            var name = UIElementAutomationPeer.CreatePeerForElement(element)?.GetName();
-            if (!IsMeaningful(name))
+            InputManager.Current.ProcessInput(new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key) { RoutedEvent = routed });
+        }
+
+        Settle();
+    }
+
+    private static IEnumerable<T> LogicalDescendants<T>(DependencyObject node) where T : DependencyObject
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>())
+        {
+            if (child is T match)
             {
-                problems.Add($"{Describe(element)} has no accessible name" + (string.IsNullOrEmpty(name) ? "" : $" (only \"{Escape(name)}\")"));
+                yield return match;
             }
 
-            if (element.IsEnabled && !(element.Focusable && KeyboardNavigation.GetIsTabStop(element)))
+            foreach (var descendant in LogicalDescendants<T>(child))
             {
-                problems.Add($"{Describe(element)} cannot be reached with Tab");
+                yield return descendant;
             }
+        }
+    }
+
+    /// <summary>
+    /// The visible controls a user can operate, in the visual tree under <paramref name="node"/>: buttons of every kind,
+    /// text and password boxes, combo boxes, sliders, lists and their choices. Parts of a control's own template are left
+    /// to that control.
+    /// </summary>
+    private static void Operable(DependencyObject node, List<FrameworkElement> found)
+    {
+        if (node is FrameworkElement { IsVisible: true } element && element.TemplatedParent is not Control
+            && element is ButtonBase or TextBoxBase or PasswordBox or ComboBox or Slider or ListBox or ListBoxItem)
+        {
+            found.Add(element);
         }
 
         for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
         {
-            Walk(VisualTreeHelper.GetChild(node, i), problems, ref count);
+            Operable(VisualTreeHelper.GetChild(node, i), found);
         }
     }
 
-    private static bool IsOperable(FrameworkElement element) =>
-        element is ButtonBase or TextBoxBase or PasswordBox or ComboBox or Slider;
+    /// <summary>
+    /// Text a screen reader can say: not empty, not only private-use icon glyphs (Segoe Fluent Icons), and not the type
+    /// name that a bound record or object gives a list item or button nothing else names.
+    /// </summary>
+    private static bool IsMeaningful(string? name, object? data) =>
+        name is not null
+        && name.Any(c => !char.IsWhiteSpace(c) && c is not (>= '\uE000' and <= '\uF8FF'))
+        && !(data is { } bound and not string
+             && (name == bound.GetType().FullName || name.StartsWith(bound.GetType().Name + " {", StringComparison.Ordinal)));
 
-    /// <summary>Text a screen reader can say: not empty and not only private-use icon glyphs (Segoe Fluent Icons).</summary>
-    private static bool IsMeaningful(string? name) =>
-        name is not null && name.Any(c => !char.IsWhiteSpace(c) && c is not (>= '\uE000' and <= '\uF8FF'));
-
-    /// <summary>The control's type and name, and the nearest named element it is in.</summary>
+    /// <summary>The control's type and name, and the list or the nearest named element it is in.</summary>
     private static string Describe(FrameworkElement element)
     {
         var text = string.IsNullOrEmpty(element.Name) ? element.GetType().Name : $"{element.GetType().Name} {element.Name}";
+        if (element is ListBoxItem item && ItemsControl.ItemsControlFromItemContainer(item) is { } list)
+        {
+            return $"{text} of the list \"{AutomationProperties.GetName(list)}\"";
+        }
+
         for (var parent = VisualTreeHelper.GetParent(element); parent is not null; parent = VisualTreeHelper.GetParent(parent))
         {
             if (parent is FrameworkElement { Name.Length: > 0 } named)
