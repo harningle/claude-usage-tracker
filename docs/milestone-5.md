@@ -69,7 +69,7 @@ New and changed parts, in outline:
 
 ## Automated tests
 
-1,292 pass (942 at the end of Milestone 4; 1,285 before the code review below), with no build warnings and none skipped once the helper is published. New suites:
+1,296 pass (942 at the end of Milestone 4; 1,285 before the code review below), with no build warnings and none skipped once the helper is published. New suites:
 
 - `StatuslineRendererTests`, `StatuslineUsageTests`, `StatuslineInputTests`, `StatuslineCommandTests`: upstream's script output for each component and colour mode, pace tiers, reset rounding; the precedence of fresh cache, stdin and stale cache; a cache under another folder's key never used; damaged configuration failing loudly; reading while the tracker replaces the file; branch from a worktree.
 - `StatuslineSyncTests`, `ShellEnvironmentTests`: each folder follows its own account, after a switch too; no cache for an unknown or signed-out folder; nothing from an earlier run passed off as fetched; Git Bash found where Claude Code looks for it.
@@ -98,7 +98,7 @@ Each break made at least one test fail. One needed its test sharpened first: a d
 
 ## Code review
 
-A review of the commit (`a1fed15`) on 2026-10-04 found three defects, and follow-up reviews a fourth and a flaw in its first fix. Each was confirmed against the code and now has a test that fails without its fix. All ten parts of the fixes were removed or reversed in turn; one test needed sharpening first.
+A review of the commit (`a1fed15`) on 2026-10-04 found three defects. Follow-up reviews found a fourth, a flaw in its first fix, and on 2026-10-05 two more in the status line entry. Each was confirmed against the code and now has a test that fails without its fix. All fourteen parts of the fixes were removed or reversed in turn; one test needed sharpening first.
 
 1. **[P1] A replaced launcher could vouch for a session.** The process guard attributed a `claude.exe` to a launcher's folder by its parent's path alone.
    - The failure: another program put at a launcher's path could start Claude Code on the default folder. That folder then counted as idle, so a takeover or switch could write the login while the session ran.
@@ -115,6 +115,12 @@ A review of the commit (`a1fed15`) on 2026-10-04 found three defects, and follow
    - Storing the account in the file would break its no-identity rule. Instead the tracker remembers, for each folder, the profile and account whose usage it wrote there during this run.
    - The fix: a relink to another account starts the values empty (`RelinkingTheProfileToAnotherAccountDropsTheFormerAccountsUsage`). So does a new run, since nothing says whose usage an earlier run left (`UsageAnEarlierRunWroteIsNotCarriedOver`).
    - A further review of that fix found that the account was remembered before the file was written. A write that failed during a relink left the former account's values in the file, now recorded as the new account's. The account is now recorded only once the write has succeeded (`ARelinkWhoseWriteFailedStillDropsTheFormerAccountsUsage`, which holds the file open so the write fails).
+5. **[P2] A status line command the user had changed was overwritten without asking.** Any command containing the helper's path counted as the tracker's, so `<helper> statusline && echo custom` was silently reset to the plain command, and its custom part was lost without a backup.
+   - The fix: only a command the tracker writes, exactly, for either shell, or the one it recorded writing in that folder, is the tracker's. Anything else, a changed command included, is replaced only with consent and put back on removal (`ACommandTheUserChangedIsTheirsEvenWhenItStillRunsTheHelper`).
+6. **[P2] A failed save of `install.json` lost the status line that Apply replaced.** The backup of the replaced line was saved only after Claude Code's settings had been changed. With the manifest locked, the original was gone, and Reset after a restart deleted the entry instead of putting it back.
+   - The fix: the backup is saved before the line is replaced. If it cannot be saved, nothing is replaced. If the line then cannot be written, or has changed since it was read, the backup is withdrawn again (`AStatusLineIsReplacedOnlyOnceItsBackupIsSaved`).
+   - The check against a value changed between the read and the write has no test, because nothing can change the file at that moment from a test.
+   - Both cases were first raised as probe tests in the working tree, which these tests replace.
 
 ## Manual checks in fixture mode
 

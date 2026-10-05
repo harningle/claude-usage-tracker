@@ -372,7 +372,7 @@ public sealed class IntegrationService
                 var entry = ClaudeSettingsFile.Read(ClaudeSettingsFile.PathFor(folder))?["statusLine"];
                 var command = StatuslineSettings.CommandOf(entry);
                 var status = entry is null ? StatuslineInstallStatus.NotInstalled
-                    : !StatuslineSettings.IsOwned(entry, HelperPath) ? StatuslineInstallStatus.Foreign
+                    : !IsOwnStatusline(entry, folder) ? StatuslineInstallStatus.Foreign
                     : command == expected ? StatuslineInstallStatus.Installed
                     : StatuslineInstallStatus.Outdated;
                 result.Add(new StatuslineFolder(folder, status, command ?? entry?.ToJsonString(), null));
@@ -404,23 +404,33 @@ public sealed class IntegrationService
         RemoveStatuslineFrom([.. Manifest.Statuslines.Select(s => s.ConfigDirectory).Where(written => !folders.Any(folder => SamePath(folder, written)))]);
         foreach (var folder in folders)
         {
-            string? replaced = null;
             var written = false;
+            string? backup = null;
+            (string Command, string? Replaced)? previous = null;
             try
             {
+                // Another status line that the user agreed to replace is recorded on disk before it is replaced, so
+                // that removal can put it back whatever fails after.
+                if (replaceForeignIn.Contains(folder, StringComparer.OrdinalIgnoreCase)
+                    && ClaudeSettingsFile.Read(ClaudeSettingsFile.PathFor(folder))?["statusLine"] is { } foreign && !IsOwnStatusline(foreign, folder))
+                {
+                    var json = foreign.ToJsonString();
+                    previous = RecordReplaced(folder, expected, json);
+                    backup = json;
+                }
+
                 ClaudeSettingsFile.Update(ClaudeSettingsFile.PathFor(folder), settings =>
                 {
-                    replaced = null;
                     written = false;
                     var current = settings["statusLine"];
-                    if (current is not null && !StatuslineSettings.IsOwned(current, HelperPath))
+                    if (current is not null && !IsOwnStatusline(current, folder))
                     {
-                        if (!replaceForeignIn.Contains(folder, StringComparer.OrdinalIgnoreCase))
+                        // Only the very value the user agreed to replace, and whose backup is saved; one changed since is left alone.
+                        if (backup is null || current.ToJsonString() != backup)
                         {
                             return false;
                         }
 
-                        replaced = current.ToJsonString();
                         settings["statusLine"] = StatuslineSettings.Entry(expected);
                     }
                     else if (current is JsonObject own)
@@ -446,11 +456,17 @@ public sealed class IntegrationService
             }
             catch (Exception e) when (e is ClaudeSettingsException or IOException or UnauthorizedAccessException)
             {
+                // The file is replaced as a whole or not at all, so nothing of this attempt reached it.
                 problems[folder] = e.Message;
-                continue;
+                written = false;
             }
 
-            if (written)
+            if (backup is not null && !written)
+            {
+                // Nothing was replaced after all, so the backup is withdrawn with the next save.
+                Restore(folder, previous);
+            }
+            else if (written)
             {
                 var entry = Manifest.Statuslines.Find(s => SamePath(s.ConfigDirectory, folder));
                 if (entry is null)
@@ -459,7 +475,6 @@ public sealed class IntegrationService
                 }
 
                 entry.Command = expected;
-                entry.Replaced = replaced ?? entry.Replaced;
             }
         }
 
@@ -493,7 +508,7 @@ public sealed class IntegrationService
             {
                 ClaudeSettingsFile.Update(ClaudeSettingsFile.PathFor(folder), settings =>
                 {
-                    if (!StatuslineSettings.IsOwned(settings["statusLine"], HelperPath))
+                    if (!IsOwnStatusline(settings["statusLine"], folder))
                     {
                         return false;
                     }
@@ -523,6 +538,63 @@ public sealed class IntegrationService
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// Whether a folder's status line is the tracker's: a command it writes for the installed helper, or the one it
+    /// recorded writing there. Anything else, a command the user changed included, is not.
+    /// </summary>
+    private bool IsOwnStatusline(JsonNode? statusLine, string folder) =>
+        StatuslineSettings.IsOwned(statusLine, HelperPath)
+        || (StatuslineSettings.CommandOf(statusLine) is { } command
+            && Manifest.Statuslines.Find(s => SamePath(s.ConfigDirectory, folder)) is { Command.Length: > 0 } entry && command == entry.Command);
+
+    /// <summary>
+    /// Saves the status line about to be replaced in a folder. When it cannot be saved, nothing is recorded and the
+    /// caller replaces nothing.
+    /// </summary>
+    /// <returns>The folder's record before, or null when it had none.</returns>
+    private (string Command, string? Replaced)? RecordReplaced(string folder, string command, string replaced)
+    {
+        var entry = Manifest.Statuslines.Find(s => SamePath(s.ConfigDirectory, folder));
+        (string Command, string? Replaced)? before = entry is null ? null : (entry.Command, entry.Replaced);
+        if (entry is null)
+        {
+            Manifest.Statuslines.Add(entry = new StatuslineEntry { ConfigDirectory = folder });
+        }
+
+        entry.Command = command;
+        entry.Replaced = replaced;
+        try
+        {
+            Save();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Restore(folder, before);
+            throw;
+        }
+
+        return before;
+    }
+
+    /// <summary>Puts a folder's record back as it was, or removes it when there was none.</summary>
+    private void Restore(string folder, (string Command, string? Replaced)? before)
+    {
+        var entry = Manifest.Statuslines.Find(s => SamePath(s.ConfigDirectory, folder));
+        if (entry is null)
+        {
+            return;
+        }
+
+        if (before is { } previous)
+        {
+            (entry.Command, entry.Replaced) = previous;
+        }
+        else
+        {
+            Manifest.Statuslines.Remove(entry);
+        }
     }
 
     // Internals

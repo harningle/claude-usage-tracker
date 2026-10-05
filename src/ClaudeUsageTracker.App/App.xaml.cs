@@ -44,6 +44,7 @@ public partial class App : Application
     private EventWaitHandle? _showSignal;
     private RegisteredWaitHandle? _signalWait;
     private AppPaths _paths = null!;
+    private int _failed;
     private SettingsStore _store = null!;
     private AppSettings _settings = null!;
     private RequestLog _log = null!;
@@ -956,10 +957,20 @@ public partial class App : Application
 
     private void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        // Fail loud: show the error type and message (never request or credential data), then quit.
-        MessageBox.Show($"{e.Exception.GetType().Name}: {e.Exception.Message}", Strings.Get("app.name"),
-            MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
+        if (Interlocked.Exchange(ref _failed, 1) == 1)
+        {
+            // The first error is on screen already. A dialog for each repeat would open inside the one before until
+            // the stack ran out, ending the app without a trace.
+            return;
+        }
+
+        // Fail loud: show the error type and message (never request or credential data), keep its type and where it
+        // was thrown for diagnosis, then quit.
+        var record = _paths is null ? null : CrashRecord.Write(_paths.DiagnosticsDirectory, e.Exception, DateTimeOffset.UtcNow);
+        var text = $"{e.Exception.GetType().Name}: {e.Exception.Message}";
+        MessageBox.Show(record is null ? text : text + "\n\n" + Strings.Format("windows.crash.record", record), Strings.Get("app.name"),
+            MessageBoxButton.OK, MessageBoxImage.Error);
         Shutdown(3);
     }
 }

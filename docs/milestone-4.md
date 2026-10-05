@@ -240,9 +240,37 @@ The user left the tracker (commit `211376a`) running overnight with auto-start s
   - The retries themselves were a second defect: one request every five minutes without limit, to a service that kept refusing. A renewal the service answers with a failure now doubles the wait each time (5, 10, 20 and 40 minutes, then an hour); one that got no answer at all (offline, a timeout) still waits five minutes, so a network outage does not delay the renewal afterwards. A success starts over. It applies to Claude Code logins and pasted Codex credentials alike (`RenewalBackoffTests`, `RenewalsTheServiceKeepsRefusingWaitLongerEachTime`, `ARenewalWithoutAnAnswerIsRetriedAfterFiveMinutesEachTime`). A refresh by hand does not shorten the wait; restarting the tracker does.
 - **Not checked: the waiting message and the idle takeover of Claude Code's folder.** They need Claude Code signed in to the polled profile's account, which it was not.
 
+### The night of 2026-10-04
+
+The user left the tracker running overnight, built from `7a8f7ff` (Milestone 5 and its review fixes). Claude Code was signed in to the polled profile's account, and one Claude Code window was left idle. Its login was due to expire at 09:10.
+
+- **Claude Code renewed its own login while idle.** `.credentials.json` was rewritten at 09:05:35, five minutes before the expiry, with a new expiry of 17:05. The request log has no `claudeTokenRefresh`, so the tracker renewed nothing. An idle interactive Claude Code 2.1.288 therefore never lets its login expire, and the waiting state cannot arise that way. It would need Claude Code unable to renew in time, for example offline or with the PC asleep.
+- **Polling followed the renewal.** In the log (16:11 the evening before to 12:31): 652 usage reads, all 200, none failing around 09:05 to 09:10. The only failures were claude.ai's first check after each start, the known start-up race.
+- **Auto-start** started a session three times (19:25, 04:37 and 09:32), each after the previous window had ended, and deleted its conversation each time.
+- **Not checked: the waiting message and the idle takeover.** In the morning the user opened Claude Code before looking at the popover, as above, and its login was fresh anyway.
+- **The tracker crashed** when the user opened Settings → Debug Tools at about 12:31, half a minute after starting Claude Code.
+  - The user saw numerous error windows. Windows recorded a stack overflow (`0xc00000fd`).
+  - That is how the error handler failed: it showed each unhandled error in a modal message box, whose message loop let the next error open another box inside it, until the stack ran out. The overflow ended the app before any of their text could be kept.
+  - The handler now shows only the first error. It also saves that error's type and where it was thrown, never its message, to `diagnostics\crash.log` (`CrashRecordTests`).
+  - The error itself is still unknown. Debug Tools did not fail in fixture mode with a copy of the user's request log, with hardware or software rendering, with the page left open, or when the log was cleared.
+  - At 23:13 the same day, the user opened Debug Tools in the rebuilt tracker without any error. No crash record or crash event exists. If the error comes back, the record will show where it was thrown.
+
+### The night of 2026-10-05
+
+The user closed every Claude Code window before bed and left the tracker (started 23:12) running overnight. Claude Code was signed in to the polled profile's account (Jazzy Jaguar).
+
+- **The idle takeover passed: the first live renewal of Claude Code's own login, with its write-back.**
+  - At 08:59:09 the tracker sent one `claudeTokenRefresh`, which got 200. `.credentials.json` was rewritten in the same second, with a new expiry of 16:59. No `claude.exe` ran until the user started one at 15:22.
+  - The file kept every member Claude Code writes: `accessToken`, `refreshToken`, `expiresAt`, `refreshTokenExpiresAt`, `scopes`, `subscriptionType`, `rateLimitTier`. `.claude.json` still named the same account. Only member names were inspected, never values.
+  - `claude` then started without `/login`. There was exactly one renewal, so no refresh token was sent twice.
+- **Polling was unbroken across the renewal.** From 01:05 to 15:23 there were 1,696 usage reads, all 200; from 08:50 to 09:10, 40 of 40. The log has no failure of any kind.
+- **Auto-start** started a session at 04:12, 09:12 and 14:12, each with all three requests accepted. Windows showed its notifications and upstream's 5-hour reset notifications.
+- **Debug Tools** shows the newest 200 requests, about half an hour, so the morning's renewal was no longer on the page by the afternoon. The exported log or the file holds it.
+- **The waiting message stays unchecked live.** An open Claude Code renews its own login before it expires (the night of 2026-10-04), so the state would need Claude Code unable to renew, for example offline. It is covered by automated tests only.
+
 ## Live checks to do
 
-These touch the real accounts or Windows sign-in, so they are yours to run. Checks 3, 4 and 6 passed on 2026-10-02 and check 8 on 2026-10-03 (above), and the click in 1 and the sign-in in 2; the rest remain. Quit any running tracker first, then start this build: `dotnet run --project src/ClaudeUsageTracker.App`. Settings → Debug Tools shows every request.
+These touch the real accounts or Windows sign-in, so they are yours to run. Checks 3, 4 and 6 passed on 2026-10-02 and check 8 on 2026-10-03 (above), and the click in 1 and the sign-in in 2; the rest remain. The takeover of Claude Code's folder needs no Claude Code running when its login expires, since an open Claude Code renews it itself (the night of 2026-10-04). It passed on the night of 2026-10-05. Quit any running tracker first, then start this build: `dotnet run --project src/ClaudeUsageTracker.App`. Settings → Debug Tools shows every request.
 
 1. **Notifications** (registration, click routing and an on-screen click passed, above). Keep the app running: when a session passes 75 %, expect one notification "<profile> - Usage Info" with the sound chosen. It should not come again after quitting and restarting. Click it: the popover should open on that profile.
 2. **Launch at login** (the entry and a sign-in passed, above). Switch it off again in Task Manager → Startup apps: the page should say so.

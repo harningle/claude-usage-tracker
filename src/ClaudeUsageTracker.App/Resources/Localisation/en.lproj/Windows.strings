@@ -189,6 +189,7 @@
 "windows.multiprofile.square_note" = "Windows tray icons are square, so the profile name and the values are in each icon's tooltip.";
 "windows.debug.subtitle" = "Network requests for troubleshooting";
 "windows.debug.note" = "Every request is logged with its operation, route, status and timing only, never its address parameters, headers, cookies, bodies or account data, so logging is always on. The export holds the same fields.";
+"windows.crash.record" = "The type of this error and where it happened, without its message, are saved in %@.";
 
 /* MARK: - Milestone 4: notifications */
 "windows.notification.session_info.title" = "Usage Info";

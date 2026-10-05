@@ -326,12 +326,13 @@ public static class StatuslineSettings
             : $"& '{path.Replace("'", "''")}' statusline";
     }
 
-    /// <summary>Whether a <c>statusLine</c> value runs the tracker's helper at <paramref name="helperPath"/>.</summary>
+    /// <summary>
+    /// Whether a <c>statusLine</c> value is one the tracker writes for the helper at <paramref name="helperPath"/>:
+    /// exactly its command for either shell. A command the user changed is theirs, even if it still runs the helper.
+    /// </summary>
     public static bool IsOwned(JsonNode? statusLine, string helperPath) =>
         CommandOf(statusLine) is { } command
-        && (command == Command(helperPath, gitBash: true) || command == Command(helperPath, gitBash: false)
-            || command.Contains(helperPath.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase)
-            || command.Contains(helperPath, StringComparison.OrdinalIgnoreCase));
+        && (command == Command(helperPath, gitBash: true) || command == Command(helperPath, gitBash: false));
 
     public static string? CommandOf(JsonNode? statusLine) =>
         statusLine is JsonObject entry && entry["command"] is JsonValue value && value.TryGetValue(out string? command) ? command : null;

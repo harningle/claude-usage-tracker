@@ -451,6 +451,51 @@ public sealed class IntegrationServiceTests : IDisposable
     }
 
     [Fact]
+    public void ACommandTheUserChangedIsTheirsEvenWhenItStillRunsTheHelper()
+    {
+        var service = Service();
+        var custom = StatuslineSettings.Command(service.HelperPath, gitBash: true) + " && echo custom";
+        WriteSettings(Folder(), new JsonObject { ["statusLine"] = StatuslineSettings.Entry(custom) }.ToJsonString());
+
+        var refused = Assert.Single(service.ApplyStatusline([Folder()], gitBash: true, []));
+        Assert.Equal(StatuslineInstallStatus.Foreign, refused.Status);
+        Assert.Equal(custom, StatuslineSettings.CommandOf(Settings(Folder())["statusLine"]));
+
+        // Replaced only with consent, and put back by the removal.
+        Assert.Equal(StatuslineInstallStatus.Installed, Assert.Single(service.ApplyStatusline([Folder()], gitBash: true, [Folder()])).Status);
+        Assert.Null(Service().RemoveStatusline([Folder()]));
+        Assert.Equal(custom, StatuslineSettings.CommandOf(Settings(Folder())["statusLine"]));
+    }
+
+    [Fact]
+    public void AStatusLineIsReplacedOnlyOnceItsBackupIsSaved()
+    {
+        var service = Service();
+        service.InstallHelper();
+        WriteSettings(Folder(), """{"statusLine":{"type":"command","command":"my-original-line"}}""");
+
+        // The manifest cannot be saved: the line is not replaced, so nothing is lost when the backup is.
+        using (new FileStream(service.Store.Path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Assert.True(Record.Exception(() => service.ApplyStatusline([Folder()], gitBash: true, [Folder()])) is IOException or UnauthorizedAccessException);
+        }
+
+        Assert.Equal("my-original-line", StatuslineSettings.CommandOf(Settings(Folder())["statusLine"]));
+        Assert.Null(Service().RemoveStatusline([Folder()]));
+        Assert.Equal("my-original-line", StatuslineSettings.CommandOf(Settings(Folder())["statusLine"]));
+
+        // The backup is saved but the line cannot be written: the backup is withdrawn again.
+        var again = Service();
+        using (new FileStream(ClaudeSettingsFile.PathFor(Folder()), FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Assert.NotNull(Assert.Single(again.ApplyStatusline([Folder()], gitBash: true, [Folder()])).Problem);
+        }
+
+        Assert.Equal("my-original-line", StatuslineSettings.CommandOf(Settings(Folder())["statusLine"]));
+        Assert.Empty(Service().Manifest.Statuslines);
+    }
+
+    [Fact]
     public void RemovalTakesOutOnlyTheTrackersOwnEntry()
     {
         var service = Service();
