@@ -14,6 +14,23 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
 
+  <!--
+    dotnet publish makes the personal build (Milestone 6): .NET is self-contained too, so the published folder
+    needs no installed runtime. Builds stay framework-dependent, because the test project cannot reference a
+    self-contained executable.
+  -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <!--
+    The port is English only (accepted 2026-10-05), so the frameworks' own text, such as a text box's context
+    menu, stays English too. Leaving out their 13 other languages saves 156 files and 8.7 MB of the published build.
+  -->
+  <PropertyGroup>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ClaudeUsageTracker.Core\ClaudeUsageTracker.Core.csproj" />
   </ItemGroup>
@@ -34,11 +51,13 @@
     Local notifications through AppNotificationManager, as the Milestone 1 spike verified. Only the
     Foundation package: no Singleton (push) package. PrivateAssets keeps it out of the test project, which
     never posts notifications (its own Windows App SDK auto-initialisers would otherwise run in the test host).
+    PrivateAssets alone would also leave them out of a publish, whose app then fails at start for want of the
+    projection assemblies (Milestone 6), so Publish puts them back.
   -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.3.12" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.3.12" PrivateAssets="all" Publish="true" />
     <!-- Foundation 2.3.12 asks for 2.1.8, which nuget.org does not list; pinning the version it resolves to keeps restore warning-free. -->
-    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" PrivateAssets="all" Publish="true" />
     <!-- Only for the MSIX below; its build assets are not imported. Version paired by the 2.5.1 metapackage. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" ExcludeAssets="all" PrivateAssets="all" GeneratePathProperty="true" />
   </ItemGroup>
@@ -60,19 +79,25 @@
   </Target>
 
   <!--
-    The NativeAOT helper the app installs for the status line and the launchers (plan.md section 2). It is
-    published on its own (dotnet publish src/ClaudeUsageTracker.Helper -c Release -r win-x64), because NativeAOT
-    needs the C++ build tools and takes far longer than a build. When that output exists it is copied to helper\
-    beside the app, where the app looks for it; without it the app says that this build has no helper.
+    The NativeAOT helper the app installs for the status line and the launchers (plan.md section 2). For a build
+    it is published on its own (dotnet publish src/ClaudeUsageTracker.Helper -c Release -r win-x64), because
+    NativeAOT needs the C++ build tools and takes far longer than a build. When that output exists it is copied to
+    helper\ beside the app, where the app looks for it; without it the app says that this build has no helper.
+    Publishing the app publishes the helper first, so a personal build always carries a current one: the helper's
+    version number alone would not show that a copy published from an older checkout is out of date.
   -->
   <PropertyGroup>
+    <HelperProject>$(MSBuildThisFileDirectory)..\ClaudeUsageTracker.Helper\ClaudeUsageTracker.Helper.csproj</HelperProject>
     <PublishedHelper>$(ArtifactsPath)\publish\ClaudeUsageTracker.Helper\release_win-x64\ClaudeUsageTracker.Helper.exe</PublishedHelper>
   </PropertyGroup>
   <Target Name="CopyHelperAfterBuild" AfterTargets="Build" Condition="Exists('$(PublishedHelper)')">
     <Copy SourceFiles="$(PublishedHelper)" DestinationFolder="$(OutDir)helper" SkipUnchangedFiles="true" />
   </Target>
-  <Target Name="CopyHelperAfterPublish" AfterTargets="Publish" Condition="Exists('$(PublishedHelper)')">
-    <Copy SourceFiles="$(PublishedHelper)" DestinationFolder="$(PublishDir)helper" SkipUnchangedFiles="true" />
+  <Target Name="PublishHelperBeforePublish" BeforeTargets="PrepareForPublish">
+    <Exec Command="dotnet publish &quot;$(HelperProject)&quot; -c Release -r win-x64 &quot;-p:ArtifactsPath=$(ArtifactsPath)&quot;" />
+  </Target>
+  <Target Name="CopyHelperAfterPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(PublishedHelper)" DestinationFolder="$(PublishDir)helper" />
   </Target>
 
   <!--

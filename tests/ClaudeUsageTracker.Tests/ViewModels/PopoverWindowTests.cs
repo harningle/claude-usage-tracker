@@ -31,18 +31,8 @@ public class PopoverWindowTests
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public Task EachOpeningIsPlacedByTheHeightOfTheProfileItShows() => OnStaThread(() =>
+    public Task EachOpeningIsPlacedByTheHeightOfTheProfileItShows() => WpfApplication.Run(() =>
     {
-        // A plain application object holding only the app's styles and light theme. Never the app's own App
-        // class: its startup would run, and that is the real tray app polling the real account.
-        var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        foreach (var dictionary in new[] { "Themes/Styles.xaml", "Themes/Light.xaml" })
-        {
-            application.Resources.MergedDictionaries.Add(new ResourceDictionary
-            {
-                Source = new Uri($"pack://application:,,,/ClaudeUsageTracker.App;component/{dictionary}"),
-            });
-        }
         var tall = new ProfileSettings { Name = "Tall", Console = new ConsoleLink() };
         var codex = new ProfileSettings { Name = "Short", Provider = Provider.Codex.RawValue(), Codex = new CodexLink() };
         var settings = new AppSettings { Profiles = [tall, codex], IsMultiProfile = true };
@@ -127,25 +117,5 @@ public class PopoverWindowTests
         {
             Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
         }
-    }
-
-    private static Task OnStaThread(Action action)
-    {
-        var done = new TaskCompletionSource();
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-                done.SetResult();
-            }
-            catch (Exception e)
-            {
-                done.SetException(e);
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        return done.Task;
     }
 }

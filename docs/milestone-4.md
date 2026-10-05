@@ -193,7 +193,7 @@ Screenshots (fixture data): the General page's auto-start and notification cards
 - **The Console expiry warning is posted by the running app** during the last 24 hours. Windows does not hold a scheduled notification, so it is missed if the app is not running then.
 - **The switch queue is not kept across a restart**, so a waiting switch must be asked for again after one.
 - **The real-CLI hook gate**: Claude Code updated itself to 2.1.287. The plan asks for the gate to be measured again when the minimum supported version changes; Milestone 5 did so on 2.1.288 (G5, [milestone-5.md](milestone-5.md#g5-the-hook-gate)).
-- **Open defect: the first claude.ai check after each start fails with "network".** The next check, a minute later, succeeds. It has been seen at every start since Milestone 3, so it is a start-up race in the claude.ai browser route. It costs one missed check per start and is not fixed yet.
+- **Fixed in Milestone 6: the first claude.ai check after each start failed with "network".** The next check, a minute later, succeeded. A usage check sends three requests at once, and on the new browser view each started its own navigation; the second cancelled the first, whose completion failed all three ([milestone-6.md](milestone-6.md#defects-found)). The fix has not been seen live yet.
 - **Open question: what made Debug Tools fail on 2026-10-04.** The tracker crashed then with a stack overflow, now prevented (the night of 2026-10-04). The error underneath was not seen again, and fixture mode could not reproduce it. If it recurs, `diagnostics\crash.log` names its type and where it was thrown.
 
 ## Live checks so far

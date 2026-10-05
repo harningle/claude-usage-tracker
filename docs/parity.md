@@ -20,12 +20,14 @@ The session auto-start passed live on 2026-10-03. An auto-switch at a real 100 %
 
 Milestone 5's launchers, status line, hooks and HUD are verified by automated tests (including real NativeAOT processes under three shells), by manual checks with synthetic fixture data, and by runs of the real Claude Code against a local fake Messages API, which use no account ([milestone-5.md](milestone-5.md)). The user's live checks on 2026-10-03 also passed: the status line in the real Claude Code folders, the HUD with real sessions (over full-screen windows and virtual desktops too), and a launcher under PowerShell, Command Prompt and Git Bash.
 
+Milestone 6 made the port English only by the user's decision (difference 54), added an automated accessibility audit, and fixed the claude.ai start-up race. It also validated the published personal build (difference 55) in fixture mode on this PC, with no SDK in its environment ([milestone-6.md](milestone-6.md)). A clean PC has not been tried. "Upstream features" below lists every upstream feature with its status, "Source and image comparison" compares the upstream media, and "Verification limits" gathers what remains unverified.
+
 ## Environment and references
 
 Recorded on 2026-09-30.
 
 - Upstream licence: MIT, "Copyright (c) 2025 Claude Usage Tracker Contributors", preserved in [LICENSE](../LICENSE).
-- Claude Code 2.1.285, native install at `%USERPROFILE%\.local\bin\claude.exe`, from `claude --version`. No credential or configuration files were read. By Milestone 1 (2026-09-30) it had auto-updated to 2.1.286, the version all Milestone 1 measurements use, and by Milestone 5 (2026-10-03) to 2.1.288, which its measurements use.
+- Claude Code 2.1.285, native install at `%USERPROFILE%\.local\bin\claude.exe`, from `claude --version`. No credential or configuration files were read. By Milestone 1 (2026-09-30) it had auto-updated to 2.1.286, the version all Milestone 1 measurements use, and by Milestone 5 (2026-10-03) to 2.1.288, which its measurements use. By Milestone 6 (2026-10-05) it was 2.1.289, which has not been measured.
 - .NET SDK 10.0.401, pinned in [global.json](../global.json) with patch roll-forward. Tests use xUnit v3 4.0.1 on Microsoft.Testing.Platform.
 - Public references: [Claude Code statusline](https://code.claude.com/docs/en/statusline), [Claude Code hooks](https://code.claude.com/docs/en/hooks), [.NET artifacts output layout](https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output), [Microsoft.Testing.Platform configuration](https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-config). Further references are in plan.md.
 
@@ -44,16 +46,17 @@ Recorded on 2026-09-30.
 | Claude Code credential merge after refresh | 0 and 3 | Merge ported; Milestone 3 adds the guarded idle takeover and write-back | Automated; live: the idle takeover renewed Claude Code's expired login and wrote it back with every member on 2026-10-05 | Differences 3 and 13 |
 | Activity HUD events, tool mapping, session reducer | 0 and 5 | Core logic ported; Milestone 5 adds the plan's ordering rules and the session's folder | Automated | Differences 5 and 50 |
 | Launcher slugs | 0 and 5 | Naming ported; Milestone 5 installs the launchers | Automated | Differences 9 and 46 |
-| Supported languages | 0 | List ported | Automated | Explicit `zh-cn` to `zh-Hans` mapping; resources in Milestone 6; flag emoji rendering on Windows unverified |
-| UI text | 2 | Upstream English `Localizable.strings` embedded unchanged and looked up by key; port-only text in `Windows.strings`; other languages in Milestone 6 | Automated (every key used exists) | Differences 21 and 22 |
+| Supported languages | 0, retired in 6 | The list ported in Milestone 0 was removed with the decision to support English only | None needed | Difference 54 |
+| UI text | 2 and 6 | Upstream English `Localizable.strings` embedded unchanged and looked up by key; port-only text in `Windows.strings`; English only | Automated (every key used exists) | Differences 21, 22 and 54 |
 | Tray, popover, settings window, setup wizard | 1 spike, then 2 and 3 | Milestone 2: single instance, tray icons and menu, popover, sidebar settings, the Claude Code wizard route; checked live by the user on 2026-10-01, including hardware rendering, dark mode, mixed DPI, keyboard selection, Explorer restart, full screen and virtual desktops. Milestone 3: profile switcher, API cards, multi-profile icons, every credential page, History, Manage Profiles, Debug Tools and the claude.ai, Console and Codex wizard routes; checked live by the user on 2026-10-01 except the Console | Automated (including a real-window placement test); manual with fixture data; live account (manual) | Differences 14-20, 23 and 28-37; plan section 2 |
 | CLI linking and read-only OAuth usage | 1 gate, then 2 | Implemented: file linking with account checks, encrypted mirror of the CLI-owned login, read-only polling with backoff and `Retry-After`. Live setup, polling, restart and an account change checked on 2026-10-01; the overnight soak (G3) and the waiting state are pending | Automated; manual with fixture data; live account (manual) | Differences 11-13, 16, 24 and 27 |
-| Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Implemented on the decided transports: claude.ai through each profile's own WebView2 context (same-origin `fetch`), the Console through `HttpClient` at `platform.claude.com`. Sign-in, pasted keys, organisation choice, reconnect and expiry, monthly/daily/per-key/per-model costs. The gate's 30-minute renewal soak and two-account isolation passed in Milestone 1 (spike) | Automated; manual with fixture data; signed-out WebView2 smoke check; live: claude.ai passed on 2026-10-01, Console not yet checked | Differences 30, 31 and 37; plan section 2 |
+| Browser sign-in, organisations, Console billing, API costs | 1 gate, then 3 | Implemented on the decided transports: claude.ai through each profile's own WebView2 context (same-origin `fetch`), the Console through `HttpClient` at `platform.claude.com`. Sign-in, pasted keys, organisation choice, reconnect and expiry, monthly/daily/per-key/per-model costs. The gate's 30-minute renewal soak and two-account isolation passed in Milestone 1 (spike). Milestone 6 fixed the failure of the first claude.ai check after each start: a usage check's three requests share one navigation of a new view | Automated (from Milestone 6, `BrowserSessionsTests` with a real WebView2 runtime against a loopback page); manual with fixture data; signed-out WebView2 smoke check; live: claude.ai passed on 2026-10-01, Console not yet checked; the start-up fix not yet seen live | Differences 30, 31 and 37; plan section 2 |
 | Profiles, secure storage, credential ownership | 2 and 3 | Profile lifecycle, multi-profile display and simultaneous polling; one versioned DPAPI bundle per profile; CLI-linked, app-owned and unresolved ownership under one credential lock; parent-snapshot process guard; recoverable removal | Automated; manual with fixture data; live pending | DPAPI files replace Keychain; differences 13, 17, 28, 29 and 36 |
 | History persistence, charts, CSV/JSON export, network log | 3 | Implemented | Automated; manual with fixture data | Differences 33-35 |
 | Notifications, automation, safe CLI switching | 1 spike, then 4 | Spike: unpackaged self-contained registration and posting (one extracted runtime DLL), cold activation and running-instance clicks verified. Milestone 4: threshold and reset notifications for every polled profile with Windows sounds and click routing, stale-registration cleanup, launch at login, global shortcuts, checks on resume, network and session changes, opt-in session auto-start, profile auto-switch, and the guarded "Use in Claude Code" switch of the shared login | Automated; manual with fixture data (notifications in Windows' history, shortcuts, launch-at-login scratch key, a switch of a fixture folder); live: notification clicks, launch at login across a sign-in, shortcuts across an Explorer restart, network and sleep, a switch of Claude Code's account and back, one session auto-start; a real auto-switch pending | Differences 29 and 38-45; after a move, notifications posted from the old path still do nothing when clicked, but their registration is now removed at the next start |
 | Launchers, statusline, hooks and HUD | 1 gate, then 5 | Milestone 1: helper timing passed and HTTP chosen for all eight events, as upstream. Milestone 5: per-profile launchers, the NativeAOT status line helper and its non-secret cache, the installed helper with its manifest, rename-aside upgrades and repair, the eight HTTP hooks in every known folder while the tracker runs, the floating HUD, and HUD sessions for the switching guard. The SessionStart entry is still inert on CLI 2.1.288, as it is for upstream | Automated (including real launcher and helper processes under PowerShell, Command Prompt and Git Bash); manual with fixture data; real CLI 2.1.288 against a fake Messages API (hook gate, Notification, interactive sessions and reload, status line shell, cancellation and timing); Milestone 1 live account (40 Haiku tool calls, stopped listener); live (the user, 2026-10-03): status line Apply and Reset, the HUD and its hooks, a launcher under three shells; the switch beside a launcher session not yet exercised | Differences 46-53 |
-| Localisation, accessibility, packaging | 6 and 7 | Not started | None | Plan section 3 |
+| Accessibility | 2 to 6 | Every control a user can operate in the popover, each settings page and the wizard's steps has an accessible name that is more than an icon glyph and can be reached with Tab | Automated (`AccessibilityTests`, which caught both deliberate breakages in a mutation check); manual: keyboard selection and Tab into the popover (Milestone 2); the fixture-mode delivery checks drove every step by accessible name | No screen-reader session (Narrator) has been run; differences 19 and 49 |
+| Personal build | 6 | `dotnet publish` of the app publishes the helper, then the app: Release, self-contained .NET 10.0.12 and Windows App SDK, the helper in `helper\`, the frameworks' English text only. 326 files, 184 MiB, 73 MiB zipped. Manual upgrade by replacing the folder; removal documented in [personal-use.md](personal-use.md) | Manual in fixture mode with no SDK in the environment: start, setup, notification registration, move, missing helper and repair, an upgrade beside a running launcher, a refused rename, no downgrade, removal ([milestone-6.md](milestone-6.md)); a clean PC not yet | Difference 55; installer, signing and updates in Milestone 7 |
 
 ## Deliberate differences so far
 
@@ -63,7 +66,11 @@ Recorded on 2026-09-30.
 4. **Explicit time inputs.** Reset-time, pace and refresh-age calculations take the time zone and current time as arguments instead of reading machine state, so tests do not depend on the test machine.
 5. **HUD task text is not localised in Core.** A task carries upstream's localisation key plus its argument (file name, command or message); the App formats it, so the upstream string resources can be reused.
 6. **Only helpers upstream production uses are ported.** Not ported: the relaxed validator configuration, `sanitizeForStorage`, `validateResult`, the session-key `String` extensions, `buildResult` and the dictionary query-parameter builder. Upstream's own code never calls them.
-7. **No promotional prompts.** The GitHub-star prompt, support reminder and feedback prompt are omitted, as plan.md requires.
+7. **No promotional prompts or telemetry.** Omitted, as plan.md requires:
+    - the GitHub-star prompt, the support reminder and the feedback prompt
+    - the Support page (a donation link) and the sidebar's sponsor slot
+    - the Mobile App page, whose "Notify Me" form posted to the author's analytics endpoint
+    - `HeartbeatService`, which posted the app version to the same endpoint once a day
 8. **Bare origin URLs.** A base URL whose only path is `/` builds without the trailing slash, because `System.Uri` cannot distinguish the two.
 9. **Launcher ownership from a manifest.** Slug collisions are checked against an owner map, which the install manifest provides (Milestone 5), instead of a marker line in a shell script.
 10. **Unreadable Codex credentials are never replaced.** Codex `auth.json` serialisation creates a new document only when there is no existing content. Existing content that is malformed or not a JSON object throws, rather than being silently replaced by a new document as upstream does.
@@ -112,11 +119,12 @@ Recorded on 2026-09-30.
     - Dragging the header detaches the popover, the same gesture as upstream; any tray click then closes it.
     - Opened from the keyboard, focus moves into the popover; upstream cleared focus.
 20. **Settings window.** Standard Windows chrome replaces upstream's borderless window and traffic-light buttons, and only the sections whose features exist are listed (from Milestone 4: Claude.ai, API Console, CLI Account or Codex Account, Appearance, General, History, Settings, Manage Profiles, Shortcuts, Popover, Debug Tools and About).
+    - Not ported: upstream's Language page (difference 54), its Updates page (there is no updater before Milestone 7), and its Mobile App and Support pages (difference 7). Debug Tools is in the App list; the bottom bar holds About and Quit.
     - About identifies the Windows port and links the original project, this repository and its issues. It omits the GitHub star link, the feedback form, the contributors fetch and the update check.
     - Removing the CLI account asks for confirmation, which upstream did not.
     - Re-sync runs the wizard's test and review instead of copying the login immediately.
-21. **Upstream strings, Windows wording.** Upstream's English strings are used unchanged, by key. Where they describe macOS ("menu bar", "like macOS battery"), the port uses its own `windows.*` strings. Text that upstream hard-coded in English ("Today", "Tomorrow", "Status Unknown", the icon style names) is also in `Windows.strings`, ready for Milestone 6.
-22. **Dates in the UI language.** Upstream formatted month names in the system locale inside English sentences. The port formats them in the UI language (English, `en-GB`, for now), while the 12/24-hour choice still follows the user's regional format.
+21. **Upstream strings, Windows wording.** Upstream's English strings are used unchanged, by key. Where they describe macOS ("menu bar", "like macOS battery"), the port uses its own `windows.*` strings. Text that upstream hard-coded in English ("Today", "Tomorrow", "Status Unknown", the icon style names) is also in `Windows.strings`.
+22. **Dates in the UI language.** Upstream formatted month names in the system locale inside English sentences. The port formats them in the UI language (English, `en-GB`), while the 12/24-hour choice still follows the user's regional format.
 23. **Single instance.** Upstream relied on macOS for this. The port uses a per-user mutex, and a second launch opens the running instance's popover.
 24. **Account metadata per directory.** Upstream read `oauthAccount` from the first `.claude.json` that existed, so a `CLAUDE_CONFIG_DIR` without its own file was labelled with the default login's account. The port reads `%USERPROFILE%\.claude.json` for the default directory and `<dir>\.claude.json` for any other, as Claude Code 2.1.286 does on Windows ([milestone-2.md](milestone-2.md#verified-facts)).
 25. **Usage parsing.** In addition to difference 1:
@@ -213,6 +221,88 @@ Recorded on 2026-09-30.
     - Upstream also required a claude.ai session key, which the helper does not use.
     - Upstream saved each later choice only at the next Apply. Here, once applied, a choice on the page reaches the status line at once.
     - A Claude Code folder that becomes known later (a new launcher, a linked folder) gets the line too.
+54. **English only.** The user decided on 2026-10-05 to support English only, replacing the plan's localisation of Milestone 6. Upstream ships 13 further languages: German, Spanish, French, Italian, Japanese, Korean, Portuguese, Brazilian Portuguese, Turkish, Ukrainian, Vietnamese, and Simplified (`zh-ch.lproj`) and Traditional Chinese. They have 820 keys each, complete, and one Korean string lacks its placeholder. In the port:
+    - None of those files ships, and upstream's Language page with its restart prompt is not ported.
+    - Upstream chose the language from the system and kept it in `appLanguage` (and `selectedLanguageCode`); the port has no such setting.
+    - The frameworks' own text, such as a text box's context menu, is English too, because the build leaves out their other languages (`SatelliteResourceLanguages`).
+    - Dates and numbers inside UI text use `en-GB` (difference 22), while the 12/24-hour choice follows the user's regional format.
+55. **A personal build instead of upstream's release.** Upstream's releases are signed with an Apple Developer certificate, notarised, and updated through a Sparkle appcast (its `RELEASING.md`). The port's personal build is the folder `dotnet publish` makes ([personal-use.md](personal-use.md)):
+    - It is self-contained and unsigned, and it updates only when you replace the folder.
+    - It publishes the NativeAOT helper before the app every time, so the folder never carries a helper left over from an older checkout. The helper's version number would not show one.
+    - It needs no .NET, Windows App SDK runtime package or push-notification (Singleton) package on the PC.
+    - Its data stays in `%LOCALAPPDATA%\ClaudeUsageTracker` whichever folder it runs from.
+    - The installer, signing and update mechanism belong to Milestone 7.
+56. **Currency amounts.** Upstream formatted amounts with the Mac's regional currency format, so its own screenshot shows "US$0.03" outside the United States. The port writes the currency's symbol for USD, EUR, GBP and JPY ("$12.34") and the ISO code otherwise ("CHF 12.34"), with two decimals as upstream, and the number in the UI language's format.
+
+## Upstream features
+
+Every feature of the pinned upstream source, by its views and services, and where it stands in the port. "Live" means checked with a real account through the app; the feature status table above has the full evidence.
+
+| Upstream feature | Upstream source | In the port | Live |
+| --- | --- | --- | --- |
+| Menu bar icons: five styles, per-metric and multi-profile icons, monochrome | `MenuBarIconRenderer`, `StatusBarUIManager`, `MenuBarManager` | Tray icons (M2, M3); difference 18 | Yes |
+| Popover: cards, profile switcher, status, refresh, settings, detaching | `PopoverContentView` | M2 and M3; differences 15 and 19 | Yes |
+| Polling and refresh | `UsageRefreshCoordinator` | M2; difference 16 | Yes, overnight |
+| Setup wizard | `SetupWizardView` | M2 and M3; differences 14 and 37 | Claude Code, claude.ai and Codex routes; not the Console |
+| claude.ai credentials | `PersonalUsageView`, `ClaudeAPIService` | M3 through WebView2; difference 30 | Yes |
+| API Console billing and costs | `APIBillingView`, `ConsoleAuthWebView`, `ClaudeAPIService+ConsoleAPI` | M3; difference 31 | **No** |
+| Claude Code account, mirroring, takeover | `CLIAccountView`, `ClaudeCodeSyncService` | M2 to M4; differences 11 to 13, 24, 28 and 45 | Yes, including the takeover |
+| Codex account | `CodexAccountView`, `Providers/` | M3; differences 2, 10 and 32 | Yes |
+| Appearance and icon styles | `AppearanceSettingsView`, `IconStylePicker` | M2 | Yes |
+| General: interval, notifications, thresholds, sounds, auto-start, launcher card | `GeneralSettingsView`, `TerminalLauncherSection` | M2 to M5; differences 38, 39 and 46 | Yes, except a threshold alert on real usage |
+| History and charts | `UsageHistoryView`, `UsageCharts`, `UsageHistoryService` | M3; differences 34 and 35 | Export only |
+| App settings, launch at login | `AppSettingsView`, `LaunchAtLoginManager` | M4; difference 43 | Yes |
+| Manage Profiles, multi-profile display, auto-switch | `ManageProfilesView`, `ProfileManager` | M3 and M4; differences 17 and 40 | Profiles yes; an auto-switch at a real 100 % **no** |
+| Language page and translations | `LanguageSettingsView`, `LanguageManager`, 14 `.lproj` folders | **Not ported:** English only (difference 54) | Not applicable |
+| Claude Code status line | `ClaudeCodeView`, `StatuslineService` | M5; differences 47 and 53 | Yes |
+| Notch HUD and its hooks | `NotchHUD/`, `NotchHUDSettingsView` | M5 as a floating HUD; differences 48 to 51 | Yes |
+| Shortcuts | `ShortcutsSettingsView`, `ShortcutManager` | M4; difference 42 | Yes |
+| Popover settings | `PopoverSettingsView` | M3 | Not separately |
+| Network log | `DebugNetworkLogView`, `NetworkLoggerService` | M3; difference 33 | Yes |
+| About | `AboutView`, `GitHubService` | M2 without the contributors fetch; difference 20 | Not separately |
+| Updates | `UpdatesSettingsView`, `UpdateManager` (Sparkle) | **Not in the personal build;** Milestone 7; difference 55 | Not applicable |
+| Support page, sponsor slot, Mobile App page | `SupportView`, `SponsorSlotCard`, `MobileAppView` | **Omitted** (difference 7) | Not applicable |
+| GitHub-star, support-reminder and feedback prompts, daily heartbeat | `GitHubStarPromptView`, `SupportReminderService`, `FeedbackPromptView`, `HeartbeatService` | **Omitted** (difference 7) | Not applicable |
+| Notifications | `NotificationManager` | M4; difference 38 | Yes |
+| Session auto-start | `AutoStartSessionService` | M4; difference 39 | Yes |
+| Wake and network handling | `NetworkMonitor`, `AppDelegate` | M4; difference 44 | Yes |
+| Service status | `ClaudeStatusService` | M2 | Yes |
+| Terminal launchers | `TerminalLauncherService` | M5; difference 46 | Yes |
+| Keychain storage and migrations | `KeychainService`, `KeychainMigrationService`, `MigrationService`, `ProfileMigrationService` | **Replaced:** one DPAPI file per profile; macOS data is not imported | Yes (the files) |
+| System logging | `LoggingService` (os.log) | **Replaced** by the allowlisted request log and the crash record; difference 33 | Yes |
+| Validators, URL building, status colours, pace, names | `SessionKeyValidator`, `URLBuilder`, `UsageStatusCalculator`, `PaceStatus`, `FunnyNameGenerator` | M0; differences 6 and 8 | Through the features above |
+
+## Source and image comparison
+
+Without a Mac, appearance is compared with upstream's source and its media (plan section 1). The media are upstream's illustrations and are not tied to the pinned commit: `settings.gif` predates the status line's colour modes, for example. The port's images come from fixture mode and are labelled. Windows here is in light mode for apps, so they are light, while upstream's are dark; dark mode was checked by hand in Milestone 2. Recorded 2026-10-05.
+
+- **Popover** (`.github/popover.png` against [media/popover-api-fixture.png](media/popover-api-fixture.png) and [media/popover-fixture-light.png](media/popover-fixture-light.png)):
+  - The same: the header (profile name with its drop-down, the status dot and text, refresh and settings at the right, a rule), the card order, titles, subtitles, the Weekly chip, right-aligned percentages in the status colour, bars with the elapsed-time marker, the API Credits amounts (used at the left, remaining at the right), and the API Cost card with its total, daily bars and three axis labels. With more than one API key the cost card lists keys with a chevron, otherwise models, as upstream's `APICostCard` does; the fixture has two keys.
+  - Different: there is no arrow, because the window is anchored to the tray icon instead of a menu bar item. Upstream's image shows the "both" time display ("Resets in 4h 8m (Today 07:00)"); the pinned default, which the port keeps, is the reset time alone. The fixture's 39 % session is red with the purple runaway marker, because pace colouring judges it against the elapsed share of the window, as upstream would; upstream's image, at another point in its window, is green. Amounts follow difference 56. The fixture label is fixture mode's.
+- **Settings** (frames of `.github/settings.gif` against [media/settings-claude-cli-fixture.png](media/settings-claude-cli-fixture.png), [media/settings-notifications-fixture.png](media/settings-notifications-fixture.png) and [media/settings-shortcuts-fixture.png](media/settings-shortcuts-fixture.png)):
+  - The same: the sidebar layout (the Active Profile switcher at the top, Credentials with a dot for each linked credential, the profile's Settings, the App list, the accent-filled selection), card styling, toggles, and the Claude CLI page's live preview, components in upstream's order, Apply and Reset. Appearance offers the same five icon styles, and Manage Profiles the same four multi-profile styles and display switches.
+  - Different: Windows chrome instead of the traffic lights, and the App list of difference 20. Upstream's image of the Claude CLI page asks for a claude.ai session key, which the port's helper does not need (difference 53).
+- **Status line** (`.github/statusline.png` against the helper's output and the live preview): the same components in the same order, the grey ` │ ` separator, upstream's element colours (blue directory, green branch, yellow model, magenta profile, cyan context, usage coloured by threshold), the bar and the reset arrow. The terminal's font draws the glyphs.
+- **Icons** (`.github/icon.jpg`, upstream's five menu bar styles in colour and monochrome): the port draws the same five styles in square tray form, without the "Claude" label (difference 18). Upstream's app icon and other artwork are not redistributed.
+
+## Verification limits
+
+What is not verified, so that no claim goes beyond the evidence:
+
+- **No Mac.** There is no side-by-side runtime comparison; appearance rests on the source and the media above.
+- **Account types.** Pro and Team accounts are verified; Max and Enterprise are not (difference 11).
+- **Live checks still open:**
+  - the Console
+  - refresh failure in the two-account check
+  - an auto-switch at a real 100 % and a threshold alert on real usage
+  - remote desktop
+  - a switch beside a launcher-only session
+  - a helper upgrade with real Claude Code (exercised only in fixture mode with a stand-in `claude.exe`)
+  - the claude.ai start-up fix, and daily use of the published build
+- **Cannot be produced live:** the "Waiting for Claude Code to refresh its login" state, because an open Claude Code renews its own login first. It rests on automated tests.
+- **Clean PC.** The published build was run on the development PC with no SDK in its environment, and loaded nothing from an installed .NET or Windows App SDK package. A PC without the Singleton package, or without any developer tools, has not been tried (D2).
+- **Screen readers.** Accessible names and Tab access are tested automatically. No Narrator session has been run.
+- **Claude Code versions.** The hook gate and the status line were measured on 2.1.288; the installed CLI has since updated itself to 2.1.289, which has not been measured.
 
 ## Upstream test inventory
 
@@ -230,7 +320,7 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 | ClaudeUsageTests.swift | 18 | 13 | 0 | 0 | 0 | 5 |
 | CodexProviderTests.swift | 28 | 28 | 0 | 0 | 0 | 0 |
 | DateExtensionsTests.swift | 10 | 10 | 0 | 0 | 0 | 0 |
-| LanguageManagerTests.swift | 3 | 3 | 0 | 0 | 0 | 0 |
+| LanguageManagerTests.swift | 3 | 0 | 0 | 0 | 0 | 3 |
 | NSWindowFullScreenSpacesTests.swift | 3 | 0 | 3 | 0 | 0 | 0 |
 | NotchHUDCoreTests.swift | 23 | 23 | 0 | 0 | 0 | 0 |
 | NotchHookInstallerTests.swift | 6 | 5 | 0 | 0 | 0 | 1 |
@@ -238,12 +328,12 @@ The pinned upstream has 16 test files containing 211 test cases. Dispositions:
 | ProfileKeychainMigrationTests.swift | 8 | 6 | 0 | 0 | 0 | 2 |
 | ProfileProviderTests.swift | 13 | 11 | 0 | 0 | 0 | 2 |
 | SessionKeyValidatorTests.swift | 33 | 25 | 0 | 0 | 0 | 8 |
-| SharedDataStoreTests.swift | 16 | 7 | 0 | 2 | 0 | 7 |
+| SharedDataStoreTests.swift | 16 | 7 | 0 | 0 | 0 | 9 |
 | SupportReminderServiceTests.swift | 4 | 0 | 0 | 0 | 0 | 4 |
 | TerminalLauncherServiceTests.swift | 8 | 7 | 0 | 0 | 0 | 1 |
 | URLBuilderTests.swift | 20 | 17 | 0 | 0 | 0 | 3 |
 | UsageStatusCalculatorTests.swift | 12 | 12 | 0 | 0 | 0 | 0 |
-| **Total** | **211** | **173** | **3** | **2** | **0** | **33** |
+| **Total** | **211** | **170** | **3** | **0** | **0** | **38** |
 
 ### ClaudeUsageTests.swift
 
@@ -324,9 +414,9 @@ Ported to `ResetTimeExtensionsTests`, using fixed time zones (difference 4).
 
 | Upstream case | Disposition | Windows test |
 | --- | --- | --- |
-| `testVietnameseCaseExists` | Ported | `SupportedLanguagesTests.VietnameseCaseExists` |
-| `testVietnameseProperties` | Ported | `SupportedLanguagesTests.VietnameseProperties` |
-| `testSupportedLanguageCountIs14` | Ported | `SupportedLanguagesTests.SupportedLanguageCountIs14` |
+| `testVietnameseCaseExists` | Excluded (M6) | The port is English only (difference 54). Ported in Milestone 0, removed with the language list in Milestone 6 |
+| `testVietnameseProperties` | Excluded (M6) | As above |
+| `testSupportedLanguageCountIs14` | Excluded (M6) | As above |
 
 ### NSWindowFullScreenSpacesTests.swift
 
@@ -463,8 +553,8 @@ Ported cases keep their names in `SessionKeyValidatorTests`.
 
 | Upstream case | Disposition | Windows milestone or reason |
 | --- | --- | --- |
-| `testLanguageCode` | Scheduled M6 | Persisted UI language |
-| `testLanguageCodeNil` | Scheduled M6 | As above |
+| `testLanguageCode` | Excluded (M6) | No UI language setting: the port is English only (difference 54) |
+| `testLanguageCodeNil` | Excluded (M6) | As above |
 | `testStatuslineShowDirectory` | Ported (M5) | `SettingsStoreTests.StatuslineShowDirectory` |
 | `testStatuslineShowBranch` | Ported (M5) | `SettingsStoreTests.StatuslineShowBranch` |
 | `testStatuslineShowUsage` | Ported (M5) | `SettingsStoreTests.StatuslineShowUsage` |
@@ -558,10 +648,10 @@ These characterise upstream source that upstream did not test, or pin a Windows-
 - `CodexTests`: `SerialiseWithoutExistingJsonCreatesDocument` and `SerialiseRejectsInvalidExistingJson` (difference 10).
 - `ProviderTests.WeeklySnapshotGatesTokensAndModelsByCapability`.
 - `LauncherNamingTests.OwnerKeepsItsInstalledSlug`.
-- `SupportedLanguagesTests.ChineseCodesMapToExplicitCultures`.
 - Milestone 4 (upstream has no tests for these features): `UsageAlertsTests`, `AutoSwitchTests`, `AutomationServiceTests`, `AutoStartServiceTests`, `CliSwitchTests`, `NotificationRegistrationsTests`, `LaunchAtLoginTests`, `MilestoneFourSettingsTests` and the `UsageFetched` and `CheckSoon` cases of `RefreshCoordinatorTests`.
 - Milestone 5:
   - Upstream's status line script and its launcher processes have no tests: `StatuslineRendererTests`, `StatuslineUsageTests`, `StatuslineInputTests`, `StatuslineCommandTests`, `StatuslineSyncTests`, `ShellEnvironmentTests`, `LauncherPathsTests`, `LauncherProcessTests`.
   - The installed footprint and hook lifecycle are the port's own: `FileInstallerTests`, `HookPortsTests`, `HudServiceTests`, `HudOrderingTests`, `IntegrationCoordinatorTests`, `MilestoneFiveViewTests`.
   - Cases beyond the ported ones in `HookHttpParserTests` (7), `HookServerTests` (7), `HookSettingsTests` (9) and `IntegrationServiceTests`.
   - `SettingsStoreTests`: `StatuslineDefaultsAreUpstreams` and `SettingsFromBeforeTheIntegrationsLoadWithTheirDefaults`.
+- Milestone 6: `BrowserSessionsTests` (the claude.ai route with a real WebView2 runtime against a loopback page) and `AccessibilityTests` (accessible names and Tab access in every window a user operates).

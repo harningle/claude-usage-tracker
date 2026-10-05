@@ -18,7 +18,8 @@ namespace ClaudeUsageTracker.App.Browser;
 /// in WebView2's own storage and are never copied into settings, logs or secret files. Every member except
 /// <see cref="SessionEpoch"/> and <see cref="SendAsync"/> must be called on the UI thread.
 /// </summary>
-public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) : IClaudeAiTransport, IDisposable
+/// <param name="parked">The document to send requests from; <see cref="ParkedUrl"/> unless a test serves its own.</param>
+public sealed partial class BrowserSessions(string root, Dispatcher dispatcher, Uri? parked = null) : IClaudeAiTransport, IDisposable
 {
     /// <summary>A small document on the claude.ai origin to send same-origin requests from.</summary>
     public const string ParkedUrl = "https://claude.ai/robots.txt";
@@ -26,6 +27,7 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
     private static readonly IntPtr MessageOnlyParent = new(-3);
     private static readonly TimeSpan NavigationTimeout = TimeSpan.FromSeconds(30);
 
+    private readonly Uri _parked = parked ?? new Uri(ParkedUrl);
     private readonly Dictionary<Guid, Session> _sessions = [];
     private readonly ConcurrentDictionary<Guid, long> _epochs = new();
 
@@ -66,7 +68,7 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
             try
             {
                 var core = await BackgroundAsync(profileId);
-                return await ParkAsync(core) ? await FetchAsync(core, path) : new BrowserResponse(null, null, false, null, null, "navigation");
+                return await ParkAsync(profileId, core) ? await FetchAsync(core, path) : new BrowserResponse(null, null, false, null, null, "navigation");
             }
             catch (Exception e) when (e is WebView2RuntimeNotFoundException or System.Runtime.InteropServices.COMException or InvalidOperationException)
             {
@@ -86,7 +88,7 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
             try
             {
                 var core = await BackgroundAsync(profileId);
-                return await ParkAsync(core)
+                return await ParkAsync(profileId, core)
                     ? await FetchAsync(core, path, method, body, accept)
                     : new BrowserResponse(null, null, false, null, null, "navigation");
             }
@@ -294,20 +296,33 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
         }
     }
 
-    /// <summary>Makes sure the background view is on the claude.ai origin. Returns false when it cannot be reached.</summary>
-    private static async Task<bool> ParkAsync(CoreWebView2 core)
+    /// <summary>
+    /// Makes sure the background view is on the claude.ai origin. Returns false when it cannot be reached. Requests
+    /// that arrive while the view is being parked wait for that navigation: a usage check sends three at once, and
+    /// a second navigation would cancel the first, whose completion then failed every request waiting for it.
+    /// </summary>
+    private Task<bool> ParkAsync(Guid profileId, CoreWebView2 core)
     {
-        if (Uri.TryCreate(core.Source, UriKind.Absolute, out var current) && current is { Scheme: "https", Host: "claude.ai" })
+        var session = SessionFor(profileId);
+        if (session.Parking is { IsCompleted: false } parking)
         {
-            return true;
+            return parking;
         }
 
+        return Uri.TryCreate(core.Source, UriKind.Absolute, out var current)
+            && Uri.Compare(current, _parked, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0
+                ? Task.FromResult(true)
+                : session.Parking = NavigateAsync(core);
+    }
+
+    private async Task<bool> NavigateAsync(CoreWebView2 core)
+    {
         var completed = new TaskCompletionSource<bool>();
         void OnCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e) => completed.TrySetResult(e.IsSuccess);
         core.NavigationCompleted += OnCompleted;
         try
         {
-            core.Navigate(ParkedUrl);
+            core.Navigate(_parked.AbsoluteUri);
             return await Task.WhenAny(completed.Task, Task.Delay(NavigationTimeout)) == completed.Task && await completed.Task;
         }
         finally
@@ -359,5 +374,8 @@ public sealed partial class BrowserSessions(string root, Dispatcher dispatcher) 
         public Task<CoreWebView2Environment>? Environment { get; set; }
 
         public Task<CoreWebView2Controller>? Controller { get; set; }
+
+        /// <summary>The navigation to the parked document, shared by the requests that wait for it.</summary>
+        public Task<bool>? Parking { get; set; }
     }
 }

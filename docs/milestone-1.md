@@ -166,7 +166,7 @@ Manual, 2026-10-01, after you enabled notifications (`Setting` then reported `En
 - **Relocation loses old notifications.** Notification A was posted from the `manual` folder, which was then moved; notification B came from the moved copy. Clicking **A did nothing at all**: no process, no error, no log entry, because its registration still pointed at the missing path. Clicking B cold-launched the moved copy. After the move, `cleanup-others` removed only the stale `manual` registration.
 - Toasts stay on screen for about 5-10 s, then remain in the notification centre until clicked.
 
-Pending: a clean-machine check without the Singleton package (Milestone 6).
+Pending: a clean-machine check without the Singleton package. Milestone 6 checked the published build on this PC only (D2 below).
 
 ## 6. Hook transport latency and reload
 
@@ -277,11 +277,11 @@ The planned sign-in, restart, renewal, isolation, Console, notification and tray
 | # | Item | Revisit in |
 | --- | --- | --- |
 | D1 | Tray: mixed-DPI monitors, keyboard selection (`NIN_KEYSELECT`) and anchoring the popover from the measured icon/flyout rectangles | **Closed 2026-10-01** in M2 (manual checks by the user, [milestone-2.md](milestone-2.md#live-and-manual-checks)) |
-| D2 | Notifications on a clean machine without the Singleton package (this PC has it installed) | M6 |
+| D2 | Notifications on a clean machine without the Singleton package (this PC has it installed) | **Closed on this PC only** in M6 (2026-10-05). The published build ran with no SDK in its environment and registered for notifications, and loaded nothing from `\dotnet\` or `\WindowsApps\`, so it used no installed Windows App SDK package. A clean PC has not been tried ([milestone-6.md](milestone-6.md#d2-d4-d5-and-d6)) |
 | D3 | Statusline: how Claude Code actually spawns the command shell, rapid replacement/cancellation and end-to-end timing with the production helper (only the spike helper was timed) | **Closed 2026-10-03** in M5: Git Bash, a newer update ends a running one, 33.5 ms p95 through Git Bash ([milestone-5.md](milestone-5.md#d3-the-status-line)) |
-| D4 | Self-contained output size (the notification spike was 470 files, 186 MB) | M6 packaging |
-| D5 | The extracted `Microsoft.WindowsAppRuntime.Insights.Resource.dll` workaround: build it into the app and re-check on each Windows App SDK update | Built into the app in M4 (2026-10-02; `Register()` succeeded in a fixture run, [milestone-4.md](milestone-4.md)); re-check at each Windows App SDK update and in M6 |
-| D6 | Stale notification registrations and `NotifyIconSettings` entries after a move: cleanup of the app's own stale entries | Notification registrations: removed at startup from M4 (only this app's, only for executables that no longer exist). `NotifyIconSettings` entries stay Explorer's; M6 (manual upgrade and cleanup) |
+| D4 | Self-contained output size (the notification spike was 470 files, 186 MB) | **Closed 2026-10-05** in M6: the published app is 326 files and 184 MiB (73 MiB zipped), the helper included. Leaving out the frameworks' other languages saved 156 files and 8.7 MB |
+| D5 | The extracted `Microsoft.WindowsAppRuntime.Insights.Resource.dll` workaround: build it into the app and re-check on each Windows App SDK update | Built into the app in M4 (2026-10-02; `Register()` succeeded in a fixture run, [milestone-4.md](milestone-4.md)). **Re-checked in M6** (2026-10-05): the published build still needs it and has it, and `Register()` succeeded from a published copy. Re-check at each Windows App SDK update |
+| D6 | Stale notification registrations and `NotifyIconSettings` entries after a move: cleanup of the app's own stale entries | **Closed 2026-10-05** in M6. Notification registrations have been removed at startup since M4, only this app's and only for executables that no longer exist; a moved published copy removed its old one. `NotifyIconSettings` entries are Explorer's own records and are left to Explorer: harmless, and documented in [personal-use.md](personal-use.md#removing-it) |
 | D7 | Upstream's `console.anthropic.com/api` base with an explicitly sent `platform.claude.com` key: untested, and moot while the port uses `platform.claude.com` | Only if `platform.claude.com` stops working |
 
 ### Running the isolation check again

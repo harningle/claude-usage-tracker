@@ -8,8 +8,7 @@ namespace ClaudeUsageTracker.App.Localisation;
 
 /// <summary>
 /// UI text by upstream localisation key, or by a <c>windows.</c> key for text only the port has.
-/// Milestone 2 ships upstream's English table only; the other upstream languages and the explicit
-/// zh-Hans/zh-Hant mapping are added in Milestone 6.
+/// The port is English only (accepted 2026-10-05), so only upstream's English table ships.
 /// </summary>
 public static class Strings
 {
@@ -27,8 +26,8 @@ public static class Strings
 
     /// <summary>
     /// The culture of the UI language, for month names, AM/PM designators and numbers inside UI text, so
-    /// they match the language of the surrounding words. English until Milestone 6 adds languages; the
-    /// 12/24-hour choice still follows the user's regional format.
+    /// they match the language of the surrounding words. The 12/24-hour choice still follows the user's
+    /// regional format.
     /// </summary>
     public static CultureInfo Culture { get; } = CultureInfo.GetCultureInfo("en-GB");
 
