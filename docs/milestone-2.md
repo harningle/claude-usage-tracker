@@ -15,10 +15,10 @@ Recorded 2026-10-01 on the development machine (Windows 11 26200, two 3840 × 21
 | Session/weekly/model usage, reset times, pace, service status, disconnected/stale/error states | Implemented, including the Extra Usage card from the endpoint's `spend` object (parity difference 27) | Automated (`ClaudeUsageResponseTests`, `PopoverModelTests`, `UsageDisplayTests`); manual in fixture mode; live: matches Claude Code's `/usage`. **The Extra Usage card has not been seen live**: the user's account reports extra usage as disabled (`out_of_credits`), so the card is hidden there, as upstream would hide it |
 | Polling, manual refresh, cancellation, backoff, per-profile coordinator, 30 s default, server retry guidance, late results dropped | Implemented | Automated (`RefreshCoordinatorTests`, `RefreshPolicyTests`), run five times without a flake |
 | G2: read-only usage for other account types | Pro and Team verified in Milestone 1; Max and Enterprise still need such accounts | — |
-| G3: rate limits and sustained 30-second polling | 429 and 5xx `Retry-After` handling implemented and tested with fixtures; **overnight live soak scheduled for the night of 2026-10-01** | Automated |
+| G3: rate limits and sustained 30-second polling | 429 and 5xx `Retry-After` handling implemented and tested with fixtures; sustained 30-second polling verified live: on the night of 2026-10-05, 1,696 Claude Code usage reads over 14 hours, all 200, with no rate limit ([milestone-4.md](milestone-4.md#the-night-of-2026-10-05)). A live 429 has never occurred, so the `Retry-After` handling rests on automated tests | Automated; live account |
 | D1: mixed DPI, keyboard selection, anchoring from icon rectangles | **Verified** (physical-pixel placement per monitor, `NIN_KEYSELECT` with focus moved into the popover) | Automated (`PopoverPlacementTests`); manual by the user on 2026-10-01 |
 
-**Acceptance met on 2026-10-01.** The user completed setup with a real Claude account, saw the popover and tray match Claude Code's `/usage`, then quit and relaunched; usage reappeared at once and refreshed (checks 1-3 under "Live and manual checks"). Still to do: the overnight soak and the waiting state (check 9), scheduled for the night of 2026-10-01. Everything below that says "fixture" used synthetic data only.
+**Acceptance met on 2026-10-01.** The user completed setup with a real Claude account, saw the popover and tray match Claude Code's `/usage`, then quit and relaunched; usage reappeared at once and refreshed (checks 1-3 under "Live and manual checks"). The overnight soak and the waiting state (check 9) were overtaken by later runs: sustained polling ran overnight without a failure (G3), and the waiting state cannot be produced while Claude Code is open, which renews its own login first. Everything below that says "fixture" used synthetic data only.
 
 ## What was built
 
@@ -101,7 +101,7 @@ The user ran checks 1-8 on the evening of 2026-10-01, with the real default Clau
 7. **Full screen and virtual desktops.** A second launch opened the popover above a full-screen browser, and on a new virtual desktop the popover opened there.
 8. **Account change.** Switching Claude Code's default login to the other account showed "Claude Code is now signed in to a different account." with dimmed icons and none of the other account's numbers. Switching back restored live usage within about 30 seconds.
 
-Still to do, scheduled for the night of 2026-10-01:
+Still to do, scheduled for the night of 2026-10-01 (superseded: the soak's polling part was covered by later overnight runs, see G3 above; the waiting state cannot arise while Claude Code is open, which renews its own login, and Milestone 3 replaced it by the takeover, which passed live on 2026-10-05):
 
 9. **G3 soak and waiting state.** Leave the app polling overnight with Claude Code unused. After the token expires, the popover should say "Waiting for Claude Code to refresh its login" and send no usage requests, and live usage should return after Claude Code's next use. Then summarise `requests.jsonl`.
 
