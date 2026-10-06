@@ -210,11 +210,34 @@ public sealed class MilestoneFourSettingsTests : IDisposable
         Assert.False(profile.NotificationSettings.Threshold90Enabled);
         Assert.Equal("mail", profile.NotificationSettings.SoundName);
         // Without a claude.ai sign-in the page says it cannot auto-start, and the switch is greyed.
-        Assert.True(model.AutoStartNeedsClaudeAi);
+        Assert.True(model.AutoStartNeedsLogin);
         Assert.False(model.CanSwitchAutoStart);
+        Assert.Equal("This profile can't auto-start a session because it has no claude.ai sign-in.", model.AutoStartNeedsLoginText);
 
         Profile.ClaudeAi = new ClaudeAiLink { OrganizationId = "org" };
-        Assert.False(model.AutoStartNeedsClaudeAi);
+        Assert.False(model.AutoStartNeedsLogin);
+        Assert.True(model.CanSwitchAutoStart);
+    });
+
+    [Fact]
+    public Task ACodexProfileCanAutoStartOnlyWithTheCodexClisLogin() => OnSta(model =>
+    {
+        Profile.Provider = Provider.Codex.RawValue();
+        Profile.Codex = new CodexLink { Source = CodexLink.ManualSource };
+
+        Assert.True(model.CanAutoStart);
+        Assert.True(model.AutoStartNeedsLogin);
+        Assert.False(model.CanSwitchAutoStart);
+        Assert.Equal("This profile can't auto-start a session because it doesn't use the Codex CLI's login.", model.AutoStartNeedsLoginText);
+        Assert.StartsWith("When this profile's 5-hour session has not started, run one short Codex request", model.AutoStartDescription, StringComparison.Ordinal);
+        Assert.Contains("codex.exe", model.AutoStartRequirement, StringComparison.Ordinal);
+
+        // A claude.ai sign-in means nothing to a Codex profile.
+        Profile.ClaudeAi = new ClaudeAiLink { OrganizationId = "org" };
+        Assert.False(model.CanSwitchAutoStart);
+
+        Profile.Codex = new CodexLink { Source = CodexLink.AuthFileSource };
+        Assert.False(model.AutoStartNeedsLogin);
         Assert.True(model.CanSwitchAutoStart);
     });
 

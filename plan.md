@@ -284,7 +284,7 @@ Not yet exercised live: the switch beside a launcher-only session (Claude Code w
 
 **Acceptance:** daily personal use works across the included features; unresolved auth/visual/live-account checks remain explicitly marked. Installer and automatic-update controls are absent at this stage. No public-release or full-parity claim follows from build success alone.
 
-Status (2026-10-06): implemented, with 1,321 automated tests, including fixes from the two code reviews before publishing and one from daily use. Details are in [the Milestone 6 log](docs/milestone-6.md).
+Status (2026-10-06): implemented, with 1,359 automated tests, including fixes from the two code reviews before publishing and one from daily use, and the Codex auto-start. Details are in [the Milestone 6 log](docs/milestone-6.md).
 
 - **English only** (section 1). The unused language list and its tests were removed, and the frameworks' other languages are left out of the build.
 - **Accessibility.** An automated audit of the popover, every settings page and the wizard's steps checks accessible names, the lists included. On the settings pages it also presses Tab and the arrow keys. It found one defect: on Manage Profiles, Tab from a profile's name lost the keyboard focus. That is fixed, and the audit caught all eight breakages of a mutation check.
@@ -299,6 +299,7 @@ Status (2026-10-06): implemented, with 1,321 automated tests, including fixes fr
   - the documented removal
 - **The guide** ([personal-use.md](docs/personal-use.md)) documents data and secret locations, DPAPI limits, upgrades, moving and removal.
 - **D2, D4, D5 and D6.** D4, D5 and D6 are closed. D2 is closed on this PC only: nothing loaded from installed runtime packages, but a clean PC has not been tried.
+- **Codex auto-start** (the user's decision of 2026-10-06; upstream's Codex provider cannot auto-start). A Codex profile that reads the Codex CLI's login can auto-start too. The tracker runs the user's own Codex CLI once with the profile's Codex home, so the CLI uses, and if it must renews, its own login; the tracker still never writes `auth.json`. Pasted Codex credentials are excluded. It remains opt-in and is never part of polling. Its rule for an unstarted window matches what the tracker saw of Codex, and one start passed live on 2026-10-06 ([parity difference 39](docs/parity.md)).
 
 **Acceptance not yet met:** daily personal use of the published build awaits the user, and the open live checks remain as listed in the parity matrix's verification limits.
 

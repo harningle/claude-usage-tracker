@@ -48,7 +48,8 @@ public static class ProviderRegistry
             PerModelBreakdown: false,
             ConsoleBilling: false,
             CliAccountSync: false,
-            AutoStartSession: false,
+            // Unlike upstream: through the Codex CLI, for a profile that reads the CLI's login (docs/parity.md difference 39).
+            AutoStartSession: true,
             OverageChecks: false,
             Credits: true));
 

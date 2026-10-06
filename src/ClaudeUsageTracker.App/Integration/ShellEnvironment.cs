@@ -67,12 +67,21 @@ public static class ShellEnvironment
     /// Whether a terminal opened now would find the directory on PATH: the user's and the machine's saved PATH,
     /// which may be newer than the one this process started with, or this process's own.
     /// </summary>
-    public static bool OnPath(string directory)
+    public static bool OnPath(string directory) => PathValues().Any(value => PathContains(value, directory));
+
+    /// <summary>
+    /// The machine's and the user's saved PATH, in the order a terminal opened now combines them and with variables not
+    /// yet expanded, then this process's own.
+    /// </summary>
+    public static string?[] PathValues()
     {
         using var user = Registry.CurrentUser.OpenSubKey("Environment");
         using var machine = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
-        return PathContains(user?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string, directory)
-               || PathContains(machine?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string, directory)
-               || PathContains(Environment.GetEnvironmentVariable("PATH"), directory);
+        return
+        [
+            machine?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string,
+            user?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string,
+            Environment.GetEnvironmentVariable("PATH"),
+        ];
     }
 }

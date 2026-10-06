@@ -38,6 +38,23 @@ public static class SessionAutoStart
     public static bool ShouldStart(UsageData usage, DateTimeOffset now) =>
         usage.SessionPercentage == 0 && (usage.SessionResetTime is not { } reset || reset <= now);
 
+    /// <summary>How far a Codex reset time may be from one session length after its observation and still count as unstarted.</summary>
+    public static readonly TimeSpan CodexIdleTolerance = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Whether a Codex session should be started now. Codex reports an unstarted 5-hour window at 0 % with a reset time one
+    /// session length after the request, which moves on with every read; the first request fixes it at one session length
+    /// after that request (seen on 2026-10-06). So a window at 0 % counts as unstarted when its reset time is missing, past,
+    /// or within <see cref="CodexIdleTolerance"/> of one session length after <paramref name="observedAt"/>. Not an upstream
+    /// feature: its Codex provider cannot auto-start.
+    /// </summary>
+    /// <param name="usage">A fresh observation; cached or stale values must never decide this.</param>
+    /// <param name="observedAt">When <paramref name="usage"/> was fetched.</param>
+    public static bool ShouldStartCodex(UsageData usage, DateTimeOffset observedAt) =>
+        usage.SessionPercentage == 0
+        && (usage.SessionResetTime is not { } reset || reset <= observedAt
+            || (reset - (observedAt + SessionLength)).Duration() <= CodexIdleTolerance);
+
     /// <summary>
     /// Upstream <c>parseCompletionResponseForResetTime</c>: the reset time of the new session window, from the last
     /// server-sent event of the completion whose <c>messageLimit.windows["5h"].resets_at</c> is a number of seconds

@@ -217,6 +217,13 @@
 "windows.autostart.failed_status" = "claude.ai answered with HTTP %d.";
 "windows.autostart.failed_network" = "No response arrived.";
 "windows.autostart.failed_response" = "The response was not understood.";
+"windows.general.autostart_description_codex" = "When this profile's 5-hour session has not started, run one short Codex request (\"Hi\") with the Codex CLI and its login, without your Codex settings or a saved session. This uses your usage. It is sent only when switched on here, never by usage checks.";
+"windows.general.autostart_requirement_codex" = "• The Codex CLI's login for this profile, not pasted credentials, and codex.exe on PATH";
+"windows.general.autostart_needs_codex_cli" = "This profile can't auto-start a session because it doesn't use the Codex CLI's login.";
+"windows.autostart.codex_not_found" = "The Codex CLI (codex.exe) was not found on PATH.";
+"windows.autostart.codex_timed_out" = "Codex did not finish within two minutes.";
+"windows.autostart.codex_no_reply" = "Codex finished without a reply.";
+"windows.autostart.codex_failed" = "Codex exited with code %d.";
 "windows.general.launch_at_login.description" = "Start Claude Usage Tracker when you sign in to Windows";
 "windows.launch.other_copy" = "Another copy of the app starts at sign-in: %@. Switch this on to start this copy instead.";
 "windows.launch.disabled_in_task_manager" = "Starting at sign-in is switched off for this app in Task Manager (Startup apps). Switch it on there.";

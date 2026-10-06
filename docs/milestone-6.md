@@ -51,7 +51,7 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
 
 ## Automated tests
 
-1,321 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus the 8 new ones below, 21 for defects 4 to 10 and 1 for defect 11:
+1,359 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus the 8 new ones below, 21 for defects 4 to 10, 1 for defect 11 and 38 for the Codex auto-start:
 
 - **`TheFirstCheckOnANewViewSucceedsAndNavigatesOnce`.**
   - The setup: a real WebView2 context on its own dispatcher thread, parked on a page of a small HTTP server on 127.0.0.1, sends the three requests of a usage check at once.
@@ -127,6 +127,29 @@ You found defect 11 in daily use of the published build (2026-10-06):
     - The effect: of two Claude profiles with auto-start on, only one started sessions. The other had only a Claude Code login, and auto-start sends through a claude.ai session, so it was skipped at every check. The card's note was easy to miss.
     - The fix: without a claude.ai sign-in the switch is greyed, showing what is stored (your choice), and the note says the profile can't auto-start. A profile switched on earlier starts sending once it is signed in. Parity difference 39.
     - Checked by `TheAutoStartSwitchIsGreyedWithoutAClaudeAiSignIn`, which realises the settings window and failed with the binding removed. The Tab check's settings now include a claude.ai sign-in, so the switch is still reached there.
+
+## Codex auto-start (added 2026-10-06)
+
+At your request, a Codex profile can now auto-start its session as well. Upstream's Codex provider cannot do this, so it is a deliberate addition: parity difference 39 has the details.
+
+- **Why it is worth doing:** Codex's 5-hour window starts at first use, as Claude's does. In four windows of your Codex history, the reset came exactly five hours after the first use. For example, on 5 October first use fell between the samples at 12:32 and 12:43 UTC, and the reset was at 17:42:44.
+- **How an unstarted window is recognised:** while idle, Codex reported 0 % with a reset time five hours after the read, moving on with the clock. At 15:02 UTC it read 20:02:29; after first use at about 15:21 it stayed at 20:21:41. After that window ended, the tracker's cache confirmed it: at 20:34:05 and 20:35:06 UTC Codex read 0 %, resetting 4 h 59 min 57 s after each read. A window at 0 % counts as unstarted when its reset is within two minutes of five hours after the read, or is missing or past.
+- **How it sends:** the tracker runs your own Codex CLI once: `codex exec --json --ephemeral --skip-git-repo-check --ignore-user-config --sandbox read-only Hi`.
+  - It runs in a new empty folder, with the profile's `CODEX_HOME` and without API-key variables. Its input is closed, and it is stopped with its children after two minutes.
+  - Exit code 0 with a `turn.completed` event counts as a start, followed by a five-hour wait. Anything else is a failure: it is notified once and waits 30 minutes.
+  - Debug Tools logs it as `codexAutoStart` with the exit code.
+- **Who can use it:** only a profile that reads the Codex CLI's login. Pasted credentials are excluded and their switch is greyed. The CLI sends with its own login, which such a profile does not follow; running it with the pasted credentials instead could renew them in the CLI's copy and use up the refresh token the tracker holds. Just before the run, the CLI's login is checked again; if it now belongs to another account, nothing runs.
+- **Fixture mode** never runs the CLI. It answers from `codex-auto-start.jsonl` (the events) and `codex-auto-start.exit` (the exit code) in its responses folder; without them the CLI counts as not found.
+- **Tests:** 38 new.
+  - `CodexAutoStartTests` (21) run the service with the real Codex usage source, scripted answers and a recorded stand-in for the CLI run. They cover a start and its wait, the rule for an unstarted window, an open window, pasted credentials, another account before and during the read, changes while the usage is read, each kind of failure and its wait, and the polling loop's result.
+  - `CodexExecTests` (15) run the CLI as a real process, against a stand-in `codex.exe` (`tests/FakeCodex`). They cover the fixed arguments, the Codex home, the empty folder, the closed input, the removed API keys, what counts as a start, a run stopped with its children, a child that keeps the output open, the removal of earlier runs' folders and finding `codex.exe` on PATH.
+  - Fixture mode and the settings card have one case each.
+  - A mutation check broke twelve guards in turn, and each was caught. One was missed at first, the exclusion of pasted credentials, because its test had saved none; it now does.
+- **Live check (passed, the evening of 2026-10-06):** with the published build, you switched auto-start on for your Codex profile while Codex was idle.
+  - At the next check the tracker ran the CLI: `codexAutoStart` at 22:02:57 UTC, exit status 0, 4.6 s. The "Session Auto-Started" notification followed.
+  - The reset time stopped moving: it stayed at 03:02:54 UTC, five hours after the run, an hour and more later. The tracker then waits until about that time.
+  - The start cost too little to show: the session still read 0 % and the weekly use stayed at 63 %.
+- **Not checked:** an npm install, whose `codex.cmd` is not run, and a `chatgpt_base_url` in `config.toml`, which `--ignore-user-config` skips.
 
 ## Delivery checks in fixture mode
 
@@ -217,6 +240,7 @@ These need your accounts or your PC, so they are yours to run:
    - a switch beside a launcher-only session
    - a helper upgrade with real Claude Code
 4. **A clean PC** (D2), if you have one or a virtual machine: copy the published folder there, start it, set up a profile and confirm that a notification shows.
+5. **The Codex auto-start:** passed on the evening of 2026-10-06 (see above). Over the following days, check that it starts each new Codex window once, and only while Codex is idle.
 
 ## Reproducing
 

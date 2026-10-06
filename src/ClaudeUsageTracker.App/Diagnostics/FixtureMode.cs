@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
+using ClaudeUsageTracker.App.Automation;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Interop;
 using ClaudeUsageTracker.App.Setup;
@@ -87,6 +88,23 @@ public sealed partial class FixtureMode
     /// <summary>A process guard that sees no Claude Code process, so no real process is ever read.</summary>
     public static CliProcessGuard ProcessGuard() =>
         new(() => Array.Empty<ProcessEntry>(), () => new Dictionary<string, LauncherImage>());
+
+    /// <summary>
+    /// The Codex auto-start, in place of running the Codex CLI: <c>codex-auto-start.jsonl</c> holds the events it would
+    /// print and <c>codex-auto-start.exit</c> its exit code (default 0). Without the events file the CLI counts as not found.
+    /// </summary>
+    public Func<string, CancellationToken, Task<CodexExecResult>> CodexExec() => (_, _) =>
+    {
+        var events = Path.Combine(Responses, "codex-auto-start.jsonl");
+        if (!File.Exists(events))
+        {
+            return Task.FromResult(new CodexExecResult(CodexExecOutcome.NotFound, null));
+        }
+
+        var exitFile = Path.Combine(Responses, "codex-auto-start.exit");
+        var exitCode = File.Exists(exitFile) && int.TryParse(File.ReadAllText(exitFile).Trim(), out var code) ? code : 0;
+        return Task.FromResult(Automation.CodexExec.Judge(exitCode, File.ReadLines(events).Any(Automation.CodexExec.IsTurnCompleted)));
+    };
 
     private (int Status, string? Body) Read(string name)
     {

@@ -271,7 +271,11 @@ public partial class App : Application
         _pages = new IntegrationPages(
             _settings, _integrations, () => Persist(), () => _settings.ActiveProfile is { } active ? _states.GetValueOrDefault(active.Id) : null,
             _links.Read, ShellEnvironment.OnPath, _userProfile, time);
-        _autoStart = new AutoStartService(_settings, claudeAi, _automation, time, _coordinator.Current, profileId =>
+        // Fixture mode never runs the Codex CLI.
+        var codexStarter = new CodexSessionStarter(
+            fixture?.CodexExec() ?? ((home, cancellation) => CodexExec.RunAsync(CodexExec.Find(ShellEnvironment.PathValues()), home, CodexExec.Timeout, cancellation)),
+            () => codexHome, time, _log);
+        _autoStart = new AutoStartService(_settings, claudeAi, sources[UsageSourceKind.Codex], codexStarter, _automation, time, _coordinator.Current, profileId =>
         {
             if (_coordinator.Current(profileId) is null)
             {

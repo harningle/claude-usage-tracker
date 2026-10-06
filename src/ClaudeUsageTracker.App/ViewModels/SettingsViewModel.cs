@@ -237,14 +237,23 @@ public sealed class SettingsViewModel : ObservableObject
         set => Edit(v => Profile!.AutoStartSessionEnabled = v, AutoStartEnabled, value);
     }
 
-    /// <summary>Upstream's requirement: a claude.ai session, through which the message is sent.</summary>
-    public bool AutoStartNeedsClaudeAi => CanAutoStart && Profile?.ClaudeAi is null;
+    /// <summary>Upstream's requirement: a login the message is sent through, a claude.ai session (or for Codex the Codex CLI's login).</summary>
+    public bool AutoStartNeedsLogin => CanAutoStart && !AutoStartService.CanSend(Profile!);
 
     /// <summary>
-    /// Unlike upstream, the switch is greyed without a claude.ai sign-in, since it could not send anything. It still shows
-    /// what is stored, so a profile switched on earlier starts sending once it is signed in.
+    /// Unlike upstream, the switch is greyed without that login, since it could not send anything. It still shows what is
+    /// stored, so a profile switched on earlier starts sending once it has the login.
     /// </summary>
-    public bool CanSwitchAutoStart => CanAutoStart && Profile?.ClaudeAi is not null;
+    public bool CanSwitchAutoStart => CanAutoStart && AutoStartService.CanSend(Profile!);
+
+    public string AutoStartDescription =>
+        Strings.Get(IsCodexProfile ? "windows.general.autostart_description_codex" : "windows.general.autostart_description");
+
+    public string AutoStartRequirement =>
+        Strings.Get(IsCodexProfile ? "windows.general.autostart_requirement_codex" : "windows.general.autostart_requirement");
+
+    public string AutoStartNeedsLoginText =>
+        Strings.Get(IsCodexProfile ? "windows.general.autostart_needs_codex_cli" : "windows.general.autostart_needs_claude_ai");
 
     private NotificationSettings Notify => Profile?.NotificationSettings ?? new NotificationSettings();
 

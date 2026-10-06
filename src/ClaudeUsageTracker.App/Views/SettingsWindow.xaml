@@ -574,13 +574,13 @@
             <StackPanel>
               <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc general.autostart_title}" FontSize="13" FontWeight="Medium" />
               <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc general.autostart_subtitle}" FontSize="12" Margin="0,4,0,16" />
-              <views:SettingToggle Title="{l:Loc general.autostart_toggle}" Description="{l:Loc windows.general.autostart_description}"
+              <views:SettingToggle Title="{l:Loc general.autostart_toggle}" Description="{Binding AutoStartDescription}"
                                    IsOn="{Binding AutoStartEnabled, Mode=TwoWay}" IsEnabled="{Binding CanSwitchAutoStart}" />
               <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.general.autostart_requirements}" FontWeight="Medium" />
-              <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.general.autostart_requirement}" Margin="0,2,0,0" />
+              <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding AutoStartRequirement}" Margin="0,2,0,0" />
               <Border Background="{DynamicResource Banner.Caution}" CornerRadius="6" Padding="12,8" Margin="0,10,0,0"
-                      Visibility="{Binding AutoStartNeedsClaudeAi, Converter={StaticResource Visible}}">
-                <TextBlock Style="{StaticResource Text.Body}" Text="{l:Loc windows.general.autostart_needs_claude_ai}" TextWrapping="Wrap" />
+                      Visibility="{Binding AutoStartNeedsLogin, Converter={StaticResource Visible}}">
+                <TextBlock Style="{StaticResource Text.Body}" Text="{Binding AutoStartNeedsLoginText}" TextWrapping="Wrap" />
               </Border>
             </StackPanel>
           </Border>

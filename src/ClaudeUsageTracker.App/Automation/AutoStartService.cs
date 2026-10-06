@@ -11,15 +11,17 @@ namespace ClaudeUsageTracker.App.Automation;
 /// <summary>
 /// Opt-in session auto-start (upstream <c>AutoStartSessionService</c>): every five minutes, and after a wake, each
 /// profile whose user switched it on is checked, and when its session window has not started, one short message is
-/// sent through its claude.ai session. This is the app's only model request. It is never part of usage polling,
-/// it runs only for opted-in profiles with a claude.ai sign-in, and it decides only on usage fetched within the
-/// last check interval by this run, never on cached values. After an attempt it waits: until the new window resets
-/// (or one session length) after a start, <see cref="SessionAutoStart.FailureHold"/> after a failure. The wait is
-/// kept on disk, so a restart does not send again early. Use it from the UI thread only.
+/// sent through its claude.ai session, or for a Codex profile through the Codex CLI (not an upstream feature). This is
+/// the app's only model request. It is never part of usage polling, it runs only for opted-in profiles with a login it
+/// can send through, and it decides only on usage fetched within the last check interval by this run, never on cached
+/// values. After an attempt it waits: until the new window resets (or one session length) after a start,
+/// <see cref="SessionAutoStart.FailureHold"/> after a failure. The wait is kept on disk, so a restart does not send
+/// again early. Use it from the UI thread only.
 /// </summary>
+/// <param name="codexUsage">Reads the usage of a Codex profile that is not polled.</param>
 public sealed class AutoStartService(
-    AppSettings settings, ClaudeAiClient client, AutomationService automation, TimeProvider time,
-    Func<Guid, ProfileUsageState?> current, Action<Guid> releaseBrowser)
+    AppSettings settings, ClaudeAiClient client, IUsageSource codexUsage, CodexSessionStarter codex, AutomationService automation,
+    TimeProvider time, Func<Guid, ProfileUsageState?> current, Action<Guid> releaseBrowser)
 {
     // For profiles that are not polled: the wait the server asked for after a failed usage read.
     private readonly Dictionary<Guid, DateTimeOffset> _retryNotBefore = [];
@@ -57,9 +59,18 @@ public sealed class AutoStartService(
         }
     }
 
-    /// <summary>Upstream's gates: the switch, the provider's capability and a claude.ai sign-in.</summary>
+    /// <summary>Upstream's gates: the switch, the provider's capability and a login to send through.</summary>
     public static bool IsEligible(ProfileSettings profile) =>
-        profile.AutoStartSessionEnabled && profile.ClaudeAi is not null && profile.ProviderKind.Descriptor().Capabilities.AutoStartSession;
+        profile.AutoStartSessionEnabled && CanSend(profile) && profile.ProviderKind.Descriptor().Capabilities.AutoStartSession;
+
+    /// <summary>
+    /// Whether the profile has a login the message can be sent through: a claude.ai sign-in, or for Codex the Codex CLI's
+    /// login. Pasted Codex credentials do not count: the CLI sends with its own login, which such a profile does not follow,
+    /// and running it with the pasted credentials instead could renew them in its copy and use up the refresh token the
+    /// tracker holds.
+    /// </summary>
+    public static bool CanSend(ProfileSettings profile) =>
+        profile.ProviderKind == Provider.Codex ? profile.Codex is { IsManual: false } : profile.ClaudeAi is not null;
 
     private bool IsWanted(ProfileSettings profile) => settings.Profiles.Contains(profile) && IsEligible(profile);
 
@@ -88,18 +99,24 @@ public sealed class AutoStartService(
 
     private async Task CheckSessionAsync(ProfileSettings profile, ProfileAutomationState memory, CancellationToken cancellation)
     {
-        var organization = profile.ClaudeAi!.OrganizationId;
-        // While a request is out the user may switch auto-start off, sign out or delete the profile.
-        bool StillWanted() => IsWanted(profile) && profile.ClaudeAi?.OrganizationId == organization;
+        var codexLink = profile.ProviderKind == Provider.Codex ? profile.Codex! : null;
+        var organization = profile.ClaudeAi?.OrganizationId;
+        // While a request is out the user may switch auto-start off, sign out, link another login or delete the profile.
+        bool StillWanted() => IsWanted(profile) && (codexLink is null
+            ? profile.ClaudeAi?.OrganizationId == organization
+            : profile.Codex?.Identity == codexLink.Identity && profile.Codex?.CodexHome == codexLink.CodexHome);
 
-        if (await FreshUsageAsync(profile, organization, cancellation).ConfigureAwait(true) is not { } usage
-            || !SessionAutoStart.ShouldStart(usage, time.GetUtcNow())
+        if (await FreshUsageAsync(profile, cancellation).ConfigureAwait(true) is not { } fresh
+            || !(codexLink is null ? SessionAutoStart.ShouldStart(fresh.Usage, time.GetUtcNow()) : SessionAutoStart.ShouldStartCodex(fresh.Usage, fresh.At))
             || !StillWanted())
         {
             return;
         }
 
-        if (await client.StartSessionAsync(profile.Id, organization, StillWanted, cancellation).ConfigureAwait(true) is not { } result)
+        var start = codexLink is null
+            ? client.StartSessionAsync(profile.Id, organization!, StillWanted, cancellation)
+            : codex.StartSessionAsync(codexLink, cancellation);
+        if (await start.ConfigureAwait(true) is not { } result)
         {
             // Stopped before the message; nothing was started or failed.
             return;
@@ -126,11 +143,11 @@ public sealed class AutoStartService(
     }
 
     /// <summary>
-    /// The profile's usage as fetched by this run within the last check interval: its polling loop's result when the
-    /// profile is polled (only if that loop's latest check succeeded), otherwise one read-only request now. Null when
-    /// there is none, or the server asked for no requests yet.
+    /// The profile's usage as fetched by this run within the last check interval, and when it was fetched: its polling
+    /// loop's result when the profile is polled (only if that loop's latest check succeeded), otherwise one read-only
+    /// request now. Null when there is none, or the server asked for no requests yet.
     /// </summary>
-    private async Task<UsageData?> FreshUsageAsync(ProfileSettings profile, string organization, CancellationToken cancellation)
+    private async Task<(UsageData Usage, DateTimeOffset At)?> FreshUsageAsync(ProfileSettings profile, CancellationToken cancellation)
     {
         var now = time.GetUtcNow();
         var state = current(profile.Id);
@@ -144,9 +161,9 @@ public sealed class AutoStartService(
             // A polled profile is never fetched beside its polling loop, so no two requests of it overlap; without a
             // fresh result of that loop this round is skipped. A check that failed, broke or sent nothing after the last
             // success (its attempt is later) leaves that success's values stale.
-            return state is { Source: UsageSourceKind.ClaudeAi, UsageFromCache: false, LastSuccessAt: { } at, Usage: { } cached }
+            return state is { UsageFromCache: false, LastSuccessAt: { } at, Usage: { } cached } && state.Source == profile.UsageSource
                    && state.LastAttemptAt <= at && now - at <= SessionAutoStart.CheckInterval
-                ? cached.Usage
+                ? (cached.Usage, at)
                 : null;
         }
 
@@ -155,7 +172,9 @@ public sealed class AutoStartService(
             return null;
         }
 
-        var fetched = await client.FetchUsageAsync(profile.Id, organization, cancellation).ConfigureAwait(true);
+        var fetched = profile.ProviderKind == Provider.Codex
+            ? await FetchCodexAsync(profile, cancellation).ConfigureAwait(true)
+            : await client.FetchUsageAsync(profile.Id, profile.ClaudeAi!.OrganizationId, cancellation).ConfigureAwait(true);
         if (fetched is FetchFailed failed
             && (failed.RetryAfter ?? (failed.Failure == FetchFailure.RateLimited ? RefreshPolicy.DefaultRateLimitWait : null)) is { } asked)
         {
@@ -166,6 +185,16 @@ public sealed class AutoStartService(
             _retryNotBefore.Remove(profile.Id);
         }
 
-        return fetched is FetchSucceeded success ? success.Usage : null;
+        return fetched is FetchSucceeded success ? (success.Usage, success.At) : null;
+    }
+
+    /// <summary>One read-only usage request with the Codex CLI's login, as polling would send it; null when that login cannot be used now.</summary>
+    private async Task<FetchResult?> FetchCodexAsync(ProfileSettings profile, CancellationToken cancellation)
+    {
+        var watch = ProfileWatch.From(profile);
+        var credentials = await codexUsage.ResolveAsync(watch, cancellation).ConfigureAwait(true);
+        return credentials.CanFetch
+            ? (await codexUsage.FetchAsync(watch, credentials, null, cancellation).ConfigureAwait(true)).Result
+            : null;
     }
 }

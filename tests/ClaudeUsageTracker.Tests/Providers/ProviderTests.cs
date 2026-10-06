@@ -30,7 +30,8 @@ public class ProviderTests
         Assert.True(Provider.Anthropic.Descriptor().Capabilities.CliAccountSync);
         Assert.False(Provider.Codex.Descriptor().Capabilities.TokenCounts);
         Assert.False(Provider.Codex.Descriptor().Capabilities.CliAccountSync);
-        Assert.False(Provider.Codex.Descriptor().Capabilities.AutoStartSession);
+        // Unlike upstream, through the Codex CLI (docs/parity.md difference 39).
+        Assert.True(Provider.Codex.Descriptor().Capabilities.AutoStartSession);
         Assert.True(Provider.Codex.Descriptor().Capabilities.Credits);
     }
 

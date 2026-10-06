@@ -72,9 +72,24 @@ public sealed class AutoStartServiceTests : IDisposable
     private AutomationService Automation() => new(
         _settings, _notifier, new AutomationStateStore(Path.Combine(_temp.Path, "automation.json")), _time, _ => null, (_, _) => { });
 
-    private AutoStartService Service(AutomationService? automation = null) => new(
-        _settings, new ClaudeAiClient(_transport, _time, new RequestLog(Path.Combine(_temp.Path, "diagnostics"))), automation ?? Automation(), _time,
-        _ => _current, _released.Add);
+    private AutoStartService Service(AutomationService? automation = null)
+    {
+        var log = new RequestLog(Path.Combine(_temp.Path, "diagnostics"));
+        var codex = new CodexSessionStarter(
+            (_, _) => throw new InvalidOperationException("No Codex run was expected."), () => throw new InvalidOperationException("No Codex home was expected."),
+            _time, log);
+        return new(_settings, new ClaudeAiClient(_transport, _time, log), new NoCodexUsage(), codex, automation ?? Automation(), _time, _ => _current, _released.Add);
+    }
+
+    /// <summary>These profiles are claude.ai ones: no Codex usage is read.</summary>
+    private sealed class NoCodexUsage : IUsageSource
+    {
+        public Task<SourceCredentials> ResolveAsync(ProfileWatch watch, CancellationToken cancellation) =>
+            throw new InvalidOperationException("No Codex usage was expected.");
+
+        public Task<SourceFetch> FetchAsync(ProfileWatch watch, SourceCredentials credentials, UsageData? previous, CancellationToken cancellation) =>
+            throw new InvalidOperationException("No Codex usage was expected.");
+    }
 
     private int Starts => _transport.AutoStartRequests.Count(r => r.Step == AutoStartStep.Completion);
 
