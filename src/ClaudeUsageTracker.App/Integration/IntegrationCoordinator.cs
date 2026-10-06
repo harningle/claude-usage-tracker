@@ -39,7 +39,7 @@ public sealed record StatuslineApplyResult(bool Applied, string? Problem, IReadO
 public sealed class IntegrationCoordinator
 {
     private readonly AppSettings _settings;
-    private readonly Action _persist;
+    private readonly Func<bool> _persist;
     private readonly IntegrationService _service;
     private readonly HudService _hud;
     private readonly StatuslineFiles _files;
@@ -48,12 +48,12 @@ public sealed class IntegrationCoordinator
     private readonly Func<bool> _gitBash;
     private readonly Func<Guid, CachedUsage?> _fetched;
 
-    /// <param name="persist">Saves the settings after a choice was changed here.</param>
+    /// <param name="persist">Saves the settings after a choice was changed here; false when the save failed, which it has shown.</param>
     /// <param name="folders">The known Claude Code folders: the default one, <c>CLAUDE_CONFIG_DIR</c>, linked and launcher folders.</param>
     /// <param name="gitBash">Whether Claude Code runs commands through Git Bash on this PC.</param>
     /// <param name="fetched">A profile's usage as fetched by this run, or null.</param>
     public IntegrationCoordinator(
-        AppSettings settings, Action persist, IntegrationService service, HudService hud, StatuslineFiles files, StatuslineSync sync,
+        AppSettings settings, Func<bool> persist, IntegrationService service, HudService hud, StatuslineFiles files, StatuslineSync sync,
         Func<IReadOnlyList<string>> folders, Func<bool> gitBash, Func<Guid, CachedUsage?> fetched)
     {
         _settings = settings;
@@ -212,10 +212,17 @@ public sealed class IntegrationCoordinator
 
     // The HUD
 
+    /// <summary>Switches the HUD on or off. A switch whose save failed is undone: no hooks or listener for a HUD not saved as on.</summary>
     public void SetHudEnabled(bool enabled)
     {
+        var previous = _settings.HudEnabled;
         _settings.HudEnabled = enabled;
-        _persist();
+        if (!_persist())
+        {
+            _settings.HudEnabled = previous;
+            return;
+        }
+
         if (HudWanted)
         {
             _hud.Start();

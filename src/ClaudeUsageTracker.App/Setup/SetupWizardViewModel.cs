@@ -92,6 +92,7 @@ public sealed class SetupWizardViewModel : ObservableObject
     private readonly string _userProfile;
     private readonly string? _configDirOverride;
     private readonly Func<IReadOnlyList<string>>? _knownFolders;
+    private readonly SetupTarget _target;
     private readonly List<string> _extraDirectories = [];
     private WizardStep _step = WizardStep.ChooseProvider;
     private WizardRoute _route = WizardRoute.ClaudeCode;
@@ -119,6 +120,8 @@ public sealed class SetupWizardViewModel : ObservableObject
         _links = links;
         _client = client;
         _setup = setup;
+        // Fixed for the wizard's whole run: choosing another profile meanwhile moves neither a sign-in nor the save.
+        _target = setup.CaptureTarget();
         _services = services;
         _time = time;
         _userProfile = userProfile;
@@ -133,7 +136,10 @@ public sealed class SetupWizardViewModel : ObservableObject
     public WizardRoute Route { get => _route; private set => Set(ref _route, value); }
 
     /// <summary>The profile whose browser context a sign-in uses; the profile the save will configure.</summary>
-    public Guid TargetProfileId => _setup.TargetProfileId;
+    public Guid TargetProfileId => _target.ProfileId;
+
+    /// <summary>The target's profile: null for a new one not yet saved, or one deleted since the wizard opened.</summary>
+    private ProfileSettings? TargetProfile => _setup.Find(_target);
 
     /// <summary>The 1-3 step indicator: find or enter the credentials, test or choose, review.</summary>
     public int ProgressStep => Step switch
@@ -198,7 +204,7 @@ public sealed class SetupWizardViewModel : ObservableObject
     {
         Step = WizardStep.Detecting;
         Message = null;
-        var linked = _setup.TargetProfile?.CliLink?.ConfigDirectory;
+        var linked = TargetProfile?.CliLink?.ConfigDirectory;
         // Folders of installed launchers are known places to look, and are listed once they hold a login.
         var known = new List<string>([.. _extraDirectories, .. _knownFolders?.Invoke() ?? []]);
         if (linked is not null)
@@ -299,11 +305,11 @@ public sealed class SetupWizardViewModel : ObservableObject
         Step = WizardStep.Testing;
         Message = null;
         var result = await _client.FetchUsageAsync(
-            credentials.AccessToken, cancellation, fresh.Account?.Identity ?? _setup.TargetProfileId.ToString("N"));
+            credentials.AccessToken, cancellation, fresh.Account?.Identity ?? _target.ProfileId.ToString("N"));
         if (result is FetchSucceeded success)
         {
             Tested(success);
-            var target = _setup.TargetProfile;
+            var target = TargetProfile;
             var rows = new List<ReviewRow>
             {
                 ProfileRow(),
@@ -344,7 +350,7 @@ public sealed class SetupWizardViewModel : ObservableObject
         {
             if (Route == WizardRoute.Console)
             {
-                if (await _services.Browser.SignInToConsoleAsync(_setup.TargetProfileId) is { } key)
+                if (await _services.Browser.SignInToConsoleAsync(_target.ProfileId) is { } key)
                 {
                     await LoadConsoleOrganizationsAsync(key, cancellation);
                 }
@@ -352,7 +358,7 @@ public sealed class SetupWizardViewModel : ObservableObject
                 return;
             }
 
-            if (await _services.Browser.SignInToClaudeAiAsync(_setup.TargetProfileId))
+            if (await _services.Browser.SignInToClaudeAiAsync(_target.ProfileId))
             {
                 _undoSessionKey = null;
                 await LoadClaudeAiOrganizationsAsync(freshSession: true, cancellation);
@@ -391,7 +397,7 @@ public sealed class SetupWizardViewModel : ObservableObject
                 return;
             }
 
-            var undo = await _services.Browser.UseSessionKeyAsync(_setup.TargetProfileId, key);
+            var undo = await _services.Browser.UseSessionKeyAsync(_target.ProfileId, key);
             if (await LoadClaudeAiOrganizationsAsync(freshSession: false, cancellation))
             {
                 _undoSessionKey = undo;
@@ -415,11 +421,11 @@ public sealed class SetupWizardViewModel : ObservableObject
     private async Task<bool> LoadClaudeAiOrganizationsAsync(bool freshSession, CancellationToken cancellation)
     {
         Step = WizardStep.Testing;
-        var result = await _services.ClaudeAi.FetchOrganizationsAsync(_setup.TargetProfileId, cancellation);
+        var result = await _services.ClaudeAi.FetchOrganizationsAsync(_target.ProfileId, cancellation);
         for (var attempt = 1; freshSession && attempt < 4 && result.Failure?.Failure == FetchFailure.CredentialsRejected; attempt++)
         {
             await Task.Delay(TimeSpan.FromSeconds(1.5 * attempt), _time, cancellation);
-            result = await _services.ClaudeAi.FetchOrganizationsAsync(_setup.TargetProfileId, cancellation);
+            result = await _services.ClaudeAi.FetchOrganizationsAsync(_target.ProfileId, cancellation);
         }
 
         if (result.Organizations is not { Count: > 0 } organizations)
@@ -436,7 +442,7 @@ public sealed class SetupWizardViewModel : ObservableObject
             return false;
         }
 
-        ShowOrganizations(organizations.Select(o => new OrganizationView(o.Uuid, o.DisplayName)), _setup.TargetProfile?.ClaudeAi?.OrganizationId);
+        ShowOrganizations(organizations.Select(o => new OrganizationView(o.Uuid, o.DisplayName)), TargetProfile?.ClaudeAi?.OrganizationId);
         return true;
     }
 
@@ -456,7 +462,7 @@ public sealed class SetupWizardViewModel : ObservableObject
         }
 
         _consoleKey = result.RenewedKey ?? key;
-        ShowOrganizations(organizations.Select(o => new OrganizationView(o.Uuid, o.DisplayName)), _setup.TargetProfile?.Console?.OrganizationId);
+        ShowOrganizations(organizations.Select(o => new OrganizationView(o.Uuid, o.DisplayName)), TargetProfile?.Console?.OrganizationId);
     }
 
     private void ShowOrganizations(IEnumerable<OrganizationView> organizations, string? linkedId)
@@ -478,7 +484,7 @@ public sealed class SetupWizardViewModel : ObservableObject
 
         Step = WizardStep.Testing;
         Message = null;
-        var result = await _services.ClaudeAi.FetchUsageAsync(_setup.TargetProfileId, organization.Id, cancellation);
+        var result = await _services.ClaudeAi.FetchUsageAsync(_target.ProfileId, organization.Id, cancellation);
         if (result is not FetchSucceeded success)
         {
             Message = FailureMessage((FetchFailed)result);
@@ -494,7 +500,7 @@ public sealed class SetupWizardViewModel : ObservableObject
             new(Strings.Get("windows.setup.review.source"), Strings.Get("windows.setup.review.source_claude_ai")),
             UsageRow(success.Usage),
         ];
-        var linked = _setup.TargetProfile?.ClaudeAi;
+        var linked = TargetProfile?.ClaudeAi;
         ReviewWarning = linked is not null && linked.OrganizationId != organization.Id
             ? Strings.Format("windows.setup.review.switch_warning", linked.OrganizationName ?? linked.OrganizationId)
             : null;
@@ -586,7 +592,7 @@ public sealed class SetupWizardViewModel : ObservableObject
 
         rows.Add(UsageRow(success.Usage));
         Review = rows;
-        ReviewWarning = _setup.TargetProfile is { ProviderKind: Core.Providers.Provider.Anthropic, UsageSource: not null }
+        ReviewWarning = TargetProfile is { ProviderKind: Core.Providers.Provider.Anthropic, UsageSource: not null }
             ? Strings.Get("windows.setup.review.provider_change")
             : null;
         Step = WizardStep.Review;
@@ -615,13 +621,13 @@ public sealed class SetupWizardViewModel : ObservableObject
             var profile = Route switch
             {
                 WizardRoute.ClaudeCode when Selected is not null && _testedUsage is not null =>
-                    await _setup.SaveCliAsync(Selected.Snapshot, _testedUsage, _testedAt, cancellation),
+                    await _setup.SaveCliAsync(_target, Selected.Snapshot, _testedUsage, _testedAt, cancellation),
                 WizardRoute.ClaudeAi when SelectedOrganization is { } organization && _testedUsage is not null =>
-                    await _setup.SaveClaudeAiAsync(new ClaudeOrganization(organization.Id, organization.Name), _testedUsage, _testedAt),
+                    await _setup.SaveClaudeAiAsync(_target, new ClaudeOrganization(organization.Id, organization.Name), _testedUsage, _testedAt),
                 WizardRoute.Console when SelectedOrganization is { } organization && _consoleKey is not null =>
-                    await _setup.SaveConsoleAsync(new ConsoleOrganization(organization.Id, organization.Name), _consoleKey, cancellation),
+                    await _setup.SaveConsoleAsync(_target, new ConsoleOrganization(organization.Id, organization.Name), _consoleKey, cancellation),
                 WizardRoute.Codex when _codexCredentials is not null && _testedUsage is not null =>
-                    await _setup.SaveCodexAsync(_services.CodexHome, _codexPasted, _codexCredentials, _testedUsage, _testedAt, cancellation),
+                    await _setup.SaveCodexAsync(_target, _services.CodexHome, _codexPasted, _codexCredentials, _testedUsage, _testedAt, cancellation),
                 _ => null,
             };
             if (profile is null)
@@ -657,7 +663,7 @@ public sealed class SetupWizardViewModel : ObservableObject
     }
 
     private ReviewRow ProfileRow() =>
-        new(Strings.Get("windows.setup.review.profile"), _setup.TargetProfile?.Name ?? Strings.Get("windows.setup.review.new_profile"));
+        new(Strings.Get("windows.setup.review.profile"), TargetProfile?.Name ?? Strings.Get("windows.setup.review.new_profile"));
 
     private static ReviewRow UsageRow(UsageData usage) =>
         new(Strings.Get("windows.setup.review.usage_now"), string.Join(", ",

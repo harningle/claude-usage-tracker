@@ -103,7 +103,7 @@ public sealed class SettingsViewModel : ObservableObject
     public const int LogRowLimit = 200;
 
     private readonly AppSettings _settings;
-    private readonly Action _changed;
+    private readonly Func<bool> _changed;
     private readonly Action _applied;
     private readonly ProfileService _profiles;
     private readonly RequestLog _log;
@@ -118,10 +118,13 @@ public sealed class SettingsViewModel : ObservableObject
     private string? _launchError;
     private string? _profileError;
 
-    /// <param name="changed">Saves the settings and applies them, after an edit made here.</param>
+    /// <param name="changed">
+    /// Saves the settings and applies them, after an edit made here. False when the save failed, which it has shown; the
+    /// edit is then undone.
+    /// </param>
     /// <param name="applied">Applies settings that <paramref name="profiles"/> already saved.</param>
     public SettingsViewModel(
-        AppSettings settings, Action changed, Action applied, ProfileService profiles, HistoryViewModel history, RequestLog log, bool taskbarDark,
+        AppSettings settings, Func<bool> changed, Action applied, ProfileService profiles, HistoryViewModel history, RequestLog log, bool taskbarDark,
         SettingsIntegrations integrations)
     {
         _settings = settings;
@@ -172,33 +175,33 @@ public sealed class SettingsViewModel : ObservableObject
 
     // Appearance (per profile), upstream AppearanceSettingsView.
 
-    public bool Monochrome { get => Icon.Monochrome; set => Edit(() => Icon.ColorMode = value ? "monochrome" : "multiColor"); }
-    public bool ShowIconNames { get => Icon.ShowIconNames; set => Edit(() => Icon.ShowIconNames = value); }
-    public bool ShowRemaining { get => Icon.ShowRemainingPercentage; set => Edit(() => Icon.ShowRemainingPercentage = value); }
-    public bool ShowTimeMarker { get => Icon.ShowTimeMarker; set => Edit(() => Icon.ShowTimeMarker = value); }
-    public bool ShowPaceMarker { get => Icon.ShowPaceMarker; set => Edit(() => Icon.ShowPaceMarker = value); }
-    public bool UsePaceColoring { get => Icon.UsePaceColoring; set => Edit(() => Icon.UsePaceColoring = value); }
+    public bool Monochrome { get => Icon.Monochrome; set => Edit(v => Icon.ColorMode = v, Icon.ColorMode, value ? "monochrome" : "multiColor"); }
+    public bool ShowIconNames { get => Icon.ShowIconNames; set => Edit(v => Icon.ShowIconNames = v, ShowIconNames, value); }
+    public bool ShowRemaining { get => Icon.ShowRemainingPercentage; set => Edit(v => Icon.ShowRemainingPercentage = v, ShowRemaining, value); }
+    public bool ShowTimeMarker { get => Icon.ShowTimeMarker; set => Edit(v => Icon.ShowTimeMarker = v, ShowTimeMarker, value); }
+    public bool ShowPaceMarker { get => Icon.ShowPaceMarker; set => Edit(v => Icon.ShowPaceMarker = v, ShowPaceMarker, value); }
+    public bool UsePaceColoring { get => Icon.UsePaceColoring; set => Edit(v => Icon.UsePaceColoring = v, UsePaceColoring, value); }
 
-    public bool SessionEnabled { get => Metric("session").IsEnabled; set => Edit(() => Metric("session").IsEnabled = value); }
-    public bool WeekEnabled { get => Metric("week").IsEnabled; set => Edit(() => Metric("week").IsEnabled = value); }
-    public bool ApiEnabled { get => Metric("api").IsEnabled; set => Edit(() => Metric("api").IsEnabled = value); }
+    public bool SessionEnabled { get => Metric("session").IsEnabled; set => Edit(v => Metric("session").IsEnabled = v, SessionEnabled, value); }
+    public bool WeekEnabled { get => Metric("week").IsEnabled; set => Edit(v => Metric("week").IsEnabled = v, WeekEnabled, value); }
+    public bool ApiEnabled { get => Metric("api").IsEnabled; set => Edit(v => Metric("api").IsEnabled = v, ApiEnabled, value); }
 
     public IconStyleOption SessionStyle
     {
         get => StyleOf("session");
-        set => Edit(() => Metric("session").IconStyle = value.RawValue);
+        set => Edit(v => Metric("session").IconStyle = v, Metric("session").IconStyle, value.RawValue);
     }
 
     public IconStyleOption WeekStyle
     {
         get => StyleOf("week");
-        set => Edit(() => Metric("week").IconStyle = value.RawValue);
+        set => Edit(v => Metric("week").IconStyle = v, Metric("week").IconStyle, value.RawValue);
     }
 
     public IconStyleOption ApiStyle
     {
         get => StyleOf("api");
-        set => Edit(() => Metric("api").IconStyle = value.RawValue);
+        set => Edit(v => Metric("api").IconStyle = v, Metric("api").IconStyle, value.RawValue);
     }
 
     /// <summary>The API credits metric is offered only where it can show something: a profile with Console billing set up.</summary>
@@ -218,13 +221,7 @@ public sealed class SettingsViewModel : ObservableObject
     public double RefreshInterval
     {
         get => Profile?.RefreshInterval ?? 30;
-        set => Edit(() =>
-        {
-            if (Profile is { } profile)
-            {
-                profile.RefreshInterval = Math.Clamp(Math.Round(value / 10) * 10, 10, 300);
-            }
-        });
+        set => Edit(v => Profile!.RefreshInterval = v, RefreshInterval, Math.Clamp(Math.Round(value / 10) * 10, 10, 300));
     }
 
     public string RefreshText => Strings.Format("general.refresh_seconds", (int)RefreshInterval);
@@ -237,7 +234,7 @@ public sealed class SettingsViewModel : ObservableObject
     public bool AutoStartEnabled
     {
         get => Profile?.AutoStartSessionEnabled == true;
-        set => Edit(() => Profile!.AutoStartSessionEnabled = value);
+        set => Edit(v => Profile!.AutoStartSessionEnabled = v, AutoStartEnabled, value);
     }
 
     /// <summary>Upstream's requirement: a claude.ai session, through which the message is sent.</summary>
@@ -248,19 +245,19 @@ public sealed class SettingsViewModel : ObservableObject
     public bool NotificationsEnabled
     {
         get => Notify.Enabled;
-        set => Edit(() =>
+        set
         {
-            Notify.Enabled = value;
-            if (value && Profile is { } profile)
+            Edit(v => Notify.Enabled = v, NotificationsEnabled, value);
+            if (value && NotificationsEnabled && Profile is { } profile)
             {
                 _integrations.NotificationsSwitchedOn(profile);
             }
-        });
+        }
     }
 
-    public bool Threshold75 { get => Notify.Threshold75Enabled; set => Edit(() => Notify.Threshold75Enabled = value); }
-    public bool Threshold90 { get => Notify.Threshold90Enabled; set => Edit(() => Notify.Threshold90Enabled = value); }
-    public bool Threshold95 { get => Notify.Threshold95Enabled; set => Edit(() => Notify.Threshold95Enabled = value); }
+    public bool Threshold75 { get => Notify.Threshold75Enabled; set => Edit(v => Notify.Threshold75Enabled = v, Threshold75, value); }
+    public bool Threshold90 { get => Notify.Threshold90Enabled; set => Edit(v => Notify.Threshold90Enabled = v, Threshold90, value); }
+    public bool Threshold95 { get => Notify.Threshold95Enabled; set => Edit(v => Notify.Threshold95Enabled = v, Threshold95, value); }
 
     /// <summary>Upstream's custom thresholds, ascending, coloured by upstream's bands.</summary>
     public IReadOnlyList<ThresholdRow> CustomThresholds => Notify.CustomThresholds
@@ -283,18 +280,24 @@ public sealed class SettingsViewModel : ObservableObject
             return false;
         }
 
-        Edit(() => Notify.CustomThresholds.Add(value));
+        Edit(() => Notify.CustomThresholds.Add(value), () => Notify.CustomThresholds.Remove(value));
         return true;
     }
 
-    public void RemoveCustomThreshold(int value) => Edit(() => Notify.CustomThresholds.Remove(value));
+    public void RemoveCustomThreshold(int value)
+    {
+        if (Notify.CustomThresholds.Contains(value))
+        {
+            Edit(() => Notify.CustomThresholds.Remove(value), () => Notify.CustomThresholds.Add(value));
+        }
+    }
 
     public IReadOnlyList<SoundOption> Sounds { get; } = [.. NotificationSounds.Options.Select(o => new SoundOption(o.RawValue, Strings.Get(o.NameKey)))];
 
     public SoundOption Sound
     {
         get => Sounds.FirstOrDefault(s => s.RawValue == NotificationSounds.For(Notify.SoundName).RawValue) ?? Sounds[0];
-        set => Edit(() => Notify.SoundName = value.RawValue);
+        set => Edit(v => Notify.SoundName = v, Notify.SoundName, value.RawValue);
     }
 
     public void PreviewSound() => NotificationSounds.Preview(Notify.SoundName);
@@ -436,7 +439,7 @@ public sealed class SettingsViewModel : ObservableObject
             return true;
         }
 
-        EditApp(() => _settings.Shortcuts.Set(action, combo));
+        EditApp(c => _settings.Shortcuts.Set(action, c), _settings.Shortcuts.Get(action), combo);
         ShortcutMessage = null;
         StopRecording();
         return true;
@@ -444,7 +447,7 @@ public sealed class SettingsViewModel : ObservableObject
 
     public void ClearShortcut(HotkeyAction action)
     {
-        EditApp(() => _settings.Shortcuts.Set(action, null));
+        EditApp(c => _settings.Shortcuts.Set(action, c), _settings.Shortcuts.Get(action), null);
         _refusedShortcuts = _integrations.ApplyShortcuts();
         RaisePropertyChanged(nameof(ShortcutRows));
     }
@@ -469,7 +472,7 @@ public sealed class SettingsViewModel : ObservableObject
     public bool AutoSwitchEnabled
     {
         get => _settings.AutoSwitchProfileEnabled;
-        set => EditApp(() => _settings.AutoSwitchProfileEnabled = value);
+        set => EditApp(v => _settings.AutoSwitchProfileEnabled = v, AutoSwitchEnabled, value);
     }
 
     // Popover (app-wide), upstream PopoverSettingsView.
@@ -636,13 +639,16 @@ public sealed class SettingsViewModel : ObservableObject
     public bool UsedElsewhere
     {
         get => Profile?.CliLink?.UsedElsewhere == true;
-        set => Edit(() =>
-        {
-            if (Profile?.CliLink is { } link)
+        set => Edit(
+            v =>
             {
-                link.UsedElsewhere = value;
-            }
-        });
+                if (Profile?.CliLink is { } link)
+                {
+                    link.UsedElsewhere = v;
+                }
+            },
+            UsedElsewhere,
+            value);
     }
 
     public CredentialView Codex
@@ -664,6 +670,12 @@ public sealed class SettingsViewModel : ObservableObject
                 if (_state?.Usage?.Usage.PlanType is { } plan)
                 {
                     rows.Add(new(Strings.Get("cli.subscription"), plan));
+                }
+
+                // Pasted credentials whose renewal could not be saved, or may not be renewed yet.
+                if (_state is { Source: UsageSourceKind.Codex, MirrorError: { } storageError })
+                {
+                    rows.Add(new(Strings.Get("windows.cli.mirror"), storageError));
                 }
             }
 
@@ -722,16 +734,16 @@ public sealed class SettingsViewModel : ObservableObject
     public IconStyleOption MultiStyle
     {
         get => MultiStyles.FirstOrDefault(o => o.RawValue == MultiConfig.IconStyle) ?? MultiStyles[0];
-        set => EditApp(() => MultiConfig.IconStyle = value.RawValue);
+        set => EditApp(v => MultiConfig.IconStyle = v, MultiConfig.IconStyle, value.RawValue);
     }
 
-    public bool MultiShowWeek { get => MultiConfig.ShowWeek; set => EditApp(() => MultiConfig.ShowWeek = value); }
-    public bool MultiMonochrome { get => MultiConfig.UseSystemColor; set => EditApp(() => MultiConfig.UseSystemColor = value); }
-    public bool MultiShowRemaining { get => MultiConfig.ShowRemainingPercentage; set => EditApp(() => MultiConfig.ShowRemainingPercentage = value); }
-    public bool MultiShowTimeMarker { get => MultiConfig.ShowTimeMarker; set => EditApp(() => MultiConfig.ShowTimeMarker = value); }
-    public bool MultiShowPaceMarker { get => MultiConfig.ShowPaceMarker; set => EditApp(() => MultiConfig.ShowPaceMarker = value); }
-    public bool MultiUsePaceColoring { get => MultiConfig.UsePaceColoring; set => EditApp(() => MultiConfig.UsePaceColoring = value); }
-    public bool MultiActiveIndicator { get => MultiConfig.ShowActiveProfileIndicator; set => EditApp(() => MultiConfig.ShowActiveProfileIndicator = value); }
+    public bool MultiShowWeek { get => MultiConfig.ShowWeek; set => EditApp(v => MultiConfig.ShowWeek = v, MultiShowWeek, value); }
+    public bool MultiMonochrome { get => MultiConfig.UseSystemColor; set => EditApp(v => MultiConfig.UseSystemColor = v, MultiMonochrome, value); }
+    public bool MultiShowRemaining { get => MultiConfig.ShowRemainingPercentage; set => EditApp(v => MultiConfig.ShowRemainingPercentage = v, MultiShowRemaining, value); }
+    public bool MultiShowTimeMarker { get => MultiConfig.ShowTimeMarker; set => EditApp(v => MultiConfig.ShowTimeMarker = v, MultiShowTimeMarker, value); }
+    public bool MultiShowPaceMarker { get => MultiConfig.ShowPaceMarker; set => EditApp(v => MultiConfig.ShowPaceMarker = v, MultiShowPaceMarker, value); }
+    public bool MultiUsePaceColoring { get => MultiConfig.UsePaceColoring; set => EditApp(v => MultiConfig.UsePaceColoring = v, MultiUsePaceColoring, value); }
+    public bool MultiActiveIndicator { get => MultiConfig.ShowActiveProfileIndicator; set => EditApp(v => MultiConfig.ShowActiveProfileIndicator = v, MultiActiveIndicator, value); }
 
     /// <summary>The Percent style has room for the session only; the page says so while the week is switched on.</summary>
     public bool MultiWeekInTooltipOnly => MultiConfig is { IconStyle: "percentage", ShowWeek: true };
@@ -891,22 +903,35 @@ public sealed class SettingsViewModel : ObservableObject
     private IconStyleOption StyleOf(string type) =>
         IconStyles.FirstOrDefault(o => o.RawValue == Metric(type).IconStyle) ?? IconStyles[0];
 
-    /// <summary>An edit of the active profile's own settings.</summary>
-    private void Edit(Action change)
+    /// <summary>An edit of the active profile's own settings; see <see cref="EditApp(Action, Action)"/>.</summary>
+    private void Edit(Action change, Action undo)
     {
         if (Profile is not null)
         {
-            EditApp(change);
+            EditApp(change, undo);
         }
     }
 
-    /// <summary>An edit of an app-wide setting.</summary>
-    private void EditApp(Action change)
+    /// <summary>Sets one of the active profile's settings from <paramref name="old"/> to <paramref name="value"/>.</summary>
+    private void Edit<T>(Action<T> set, T old, T value) => Edit(() => set(value), () => set(old));
+
+    /// <summary>
+    /// An edit of an app-wide setting, saved and then applied. A failed save is shown and the edit undone, so nothing runs on
+    /// a setting that was not saved.
+    /// </summary>
+    private void EditApp(Action change, Action undo)
     {
         change();
-        _changed();
+        if (!_changed())
+        {
+            undo();
+        }
+
         Reload();
     }
+
+    /// <summary>Sets an app-wide setting from <paramref name="old"/> to <paramref name="value"/>.</summary>
+    private void EditApp<T>(Action<T> set, T old, T value) => EditApp(() => set(value), () => set(old));
 
     /// <summary>A profile action that saves the settings itself; a failure is shown on the page and nothing changes.</summary>
     private void Run(Action action)
@@ -929,7 +954,7 @@ public sealed class SettingsViewModel : ObservableObject
     {
         if (selected && _settings.TimeDisplay != value)
         {
-            EditApp(() => _settings.TimeDisplay = value);
+            EditApp(v => _settings.TimeDisplay = v, _settings.TimeDisplay, value);
         }
     }
 
@@ -937,7 +962,7 @@ public sealed class SettingsViewModel : ObservableObject
     {
         if (selected && _settings.TimeFormat != value)
         {
-            EditApp(() => _settings.TimeFormat = value);
+            EditApp(v => _settings.TimeFormat = v, _settings.TimeFormat, value);
         }
     }
 

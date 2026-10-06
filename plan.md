@@ -284,7 +284,7 @@ Not yet exercised live: the switch beside a launcher-only session (Claude Code w
 
 **Acceptance:** daily personal use works across the included features; unresolved auth/visual/live-account checks remain explicitly marked. Installer and automatic-update controls are absent at this stage. No public-release or full-parity claim follows from build success alone.
 
-Status (2026-10-05): implemented, with 1,299 automated tests. Details are in [the Milestone 6 log](docs/milestone-6.md).
+Status (2026-10-06): implemented, with 1,320 automated tests, including fixes from the two code reviews before publishing. Details are in [the Milestone 6 log](docs/milestone-6.md).
 
 - **English only** (section 1). The unused language list and its tests were removed, and the frameworks' other languages are left out of the build.
 - **Accessibility.** An automated audit of the popover, every settings page and the wizard's steps checks accessible names, the lists included. On the settings pages it also presses Tab and the arrow keys. It found one defect: on Manage Profiles, Tab from a profile's name lost the keyboard focus. That is fixed, and the audit caught all eight breakages of a mutation check.

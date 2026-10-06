@@ -290,15 +290,25 @@ public sealed class CodexUsageSourceTests : IDisposable
     {
         var links = new LinkHarness(_temp.Path, Path.Combine(_temp.Path, "home"), _time, tokens);
         var handler = new ScriptedHandler((request, _) => Task.FromResult(usage(request.Headers.Authorization?.Parameter)));
-        var source = new CodexUsageSource(links.Secrets, links.Lock, links.Tokens,
-            new CodexClient(new HttpClient(handler), _time, new RequestLog(_temp.Path)), _time, () => Path.Combine(_temp.Path, "home", ".codex"));
-        var bundle = links.Secrets.Load(_profileId);
-        bundle.CodexAuthJson = pasted;
-        links.Secrets.Save(_profileId, bundle);
-        return (source, links, handler);
+        Paste(links, _profileId, pasted);
+        return (Source(links, handler), links, handler);
     }
 
-    private string SecretFile => new SecretStore(Path.Combine(_temp.Path, "secrets")).PathFor(_profileId);
+    /// <summary>A source over the same files, as after a restart: nothing it remembered in memory is left.</summary>
+    private CodexUsageSource Source(LinkHarness links, ScriptedHandler usage) =>
+        new(links.Secrets, links.Lock, links.Tokens,
+            new CodexClient(new HttpClient(usage), _time, new RequestLog(_temp.Path)), _time, () => Path.Combine(_temp.Path, "home", ".codex"));
+
+    private static void Paste(LinkHarness links, Guid profileId, string pasted)
+    {
+        var bundle = links.Secrets.Load(profileId);
+        bundle.CodexAuthJson = pasted;
+        links.Secrets.Save(profileId, bundle);
+    }
+
+    private string SecretFile => SecretFileOf(_profileId);
+
+    private string SecretFileOf(Guid profileId) => new SecretStore(Path.Combine(_temp.Path, "secrets")).PathFor(profileId);
 
     [Fact]
     public async Task RenewedCredentialsThatCouldNotBeSavedAreSavedLater()
@@ -391,9 +401,9 @@ public sealed class CodexUsageSourceTests : IDisposable
         Assert.Equal(3, links.TokenRequests);
     }
 
-    private ProfileWatch Watch() => ProfileWatch.From(new ProfileSettings
+    private ProfileWatch Watch(Guid? profileId = null) => ProfileWatch.From(new ProfileSettings
     {
-        Id = _profileId,
+        Id = profileId ?? _profileId,
         Name = "Codex",
         Provider = Provider.Codex.RawValue(),
         Codex = new CodexLink { Source = CodexLink.ManualSource, AccountId = "chatgpt-1" },
@@ -453,5 +463,266 @@ public sealed class CodexUsageSourceTests : IDisposable
 
         Assert.Equal(2, bodies.Count);
         Assert.Single(bodies, b => b.Contains("\"codex-rt\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LoginPastedInTwoProfilesIsRenewedOnceForBothAndNeverResentAfterARestart()
+    {
+        var (source, links, usage) = Create(
+            LinkHarness.TokenEndpoint(() => LinkHarness.Json(HttpStatusCode.OK, """{"access_token":"codex-at-2","refresh_token":"codex-rt-2"}""")),
+            _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+
+        await source.ResolveAsync(Watch(), CancellationToken.None);
+
+        // The other profile's copy held the token the renewal used up, so it is given the renewal too.
+        Assert.Contains("codex-rt-2", links.Secrets.Load(other).CodexAuthJson, StringComparison.Ordinal);
+        var resolved = await Source(links, usage).ResolveAsync(Watch(other), CancellationToken.None);
+        Assert.Equal("codex-at-2", ((ClaudeUsageTracker.Core.Providers.Codex.CodexCredentials)resolved.Secret!).AccessToken);
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task PastedLoginIsNotRenewedWhileAnotherProfilesCopyCannotBeRead()
+    {
+        var (source, links, _) = Create(
+            LinkHarness.TokenEndpoint(() => LinkHarness.Json(HttpStatusCode.OK, """{"access_token":"codex-at-2","refresh_token":"codex-rt-2"}""")),
+            _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+
+        SourceCredentials held;
+        using (new FileStream(SecretFileOf(other), FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            held = await source.ResolveAsync(Watch(), CancellationToken.None);
+        }
+
+        // That copy may hold the same login, which a renewal would leave with a used-up token; the current one is still used.
+        Assert.Equal(0, links.TokenRequests);
+        Assert.Equal(LinkStatus.Ready, held.Status);
+        Assert.Equal("codex-at", ((ClaudeUsageTracker.Core.Providers.Codex.CodexCredentials)held.Secret!).AccessToken);
+        Assert.NotNull(held.StorageError);
+
+        // Once it can be read, the renewal goes ahead at the next check and reaches it too.
+        Assert.Null((await source.ResolveAsync(Watch(), CancellationToken.None)).StorageError);
+        Assert.Equal(1, links.TokenRequests);
+        Assert.Contains("codex-rt-2", links.Secrets.Load(other).CodexAuthJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenewalThatCannotBeSavedInAnotherProfileIsSavedAtItsNextCheck()
+    {
+        var (source, links, _) = Create(
+            LinkHarness.TokenEndpoint(() => LinkHarness.Json(HttpStatusCode.OK, """{"access_token":"codex-at-2","refresh_token":"codex-rt-2"}""")),
+            _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+
+        using (new FileStream(SecretFileOf(other), FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await source.ResolveAsync(Watch(), CancellationToken.None);
+        }
+
+        Assert.Contains("codex-rt\"", links.Secrets.Load(other).CodexAuthJson, StringComparison.Ordinal);
+        var resolved = await source.ResolveAsync(Watch(other), CancellationToken.None);
+
+        Assert.Equal("codex-at-2", ((ClaudeUsageTracker.Core.Providers.Codex.CodexCredentials)resolved.Secret!).AccessToken);
+        Assert.Null(resolved.StorageError);
+        Assert.Contains("codex-rt-2", links.Secrets.Load(other).CodexAuthJson, StringComparison.Ordinal);
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    // Two grants: the second renewal, once the first has reached every copy.
+    private static ScriptedHandler TwoGrants() => LinkHarness.TokenEndpoint(
+        () => LinkHarness.Json(HttpStatusCode.OK, """{"access_token":"codex-at-2","refresh_token":"codex-rt-2"}"""),
+        () => LinkHarness.Json(HttpStatusCode.OK, """{"access_token":"codex-at-3","refresh_token":"codex-rt-3"}"""));
+
+    private FileStream Unwritable(Guid profileId) => new(SecretFileOf(profileId), FileMode.Open, FileAccess.Read, FileShare.Read);
+
+    private static string? AccessToken(SourceCredentials credentials) =>
+        (credentials.Secret as ClaudeUsageTracker.Core.Providers.Codex.CodexCredentials)?.AccessToken;
+
+    [Fact]
+    public async Task CopyThatCouldNotBeSavedNeverSendsTheUsedTokenAfterARestart()
+    {
+        var (source, links, usage) = Create(TwoGrants(), _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+        SourceCredentials renewing;
+        using (Unwritable(other))
+        {
+            renewing = await source.ResolveAsync(Watch(), CancellationToken.None);
+        }
+
+        // The renewal is used, and the copy it could not reach yet is reported.
+        Assert.Equal("codex-at-2", AccessToken(renewing));
+        Assert.Contains("another profile", renewing.StorageError, StringComparison.Ordinal);
+
+        // After a restart the copy still holds the used token; it takes the renewal saved with the first profile instead.
+        var resolved = await Source(links, usage).ResolveAsync(Watch(other), CancellationToken.None);
+
+        Assert.Equal("codex-at-2", AccessToken(resolved));
+        Assert.Contains("codex-rt-2", links.Secrets.Load(other).CodexAuthJson, StringComparison.Ordinal);
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task CopyThatStillCannotBeSavedAfterARestartWaitsAndSaysSo()
+    {
+        var (source, links, usage) = Create(TwoGrants(), _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+        using (Unwritable(other))
+        {
+            await source.ResolveAsync(Watch(), CancellationToken.None);
+            var restarted = Source(links, usage);
+
+            var waiting = await restarted.ResolveAsync(Watch(other), CancellationToken.None);
+            var holder = await restarted.ResolveAsync(Watch(), CancellationToken.None);
+
+            Assert.Contains("another profile", waiting.StorageError, StringComparison.Ordinal);
+            Assert.Contains("another profile", holder.StorageError, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task NothingIsRenewedAgainUntilEveryCopyHasTheRenewal()
+    {
+        var (source, links, _) = Create(TwoGrants(), _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+        using (Unwritable(other))
+        {
+            await source.ResolveAsync(Watch(), CancellationToken.None);
+            // Eight days on, the first profile's login is due again, but the copy still holds the token used up first.
+            _time.Now += TimeSpan.FromDays(9);
+            await source.ResolveAsync(Watch(), CancellationToken.None);
+            Assert.Equal(1, links.TokenRequests);
+        }
+
+        // Once the copy has the first renewal, the second goes ahead and reaches it too.
+        await source.ResolveAsync(Watch(), CancellationToken.None);
+        await source.ResolveAsync(Watch(), CancellationToken.None);
+
+        Assert.Equal(2, links.TokenRequests);
+        Assert.Contains("codex-rt-3", links.Secrets.Load(other).CodexAuthJson, StringComparison.Ordinal);
+        Assert.Contains("codex-rt-3", links.Secrets.Load(_profileId).CodexAuthJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenewalSavedOnlyInTheCopyReachesTheRenewingProfileAfterARestart()
+    {
+        var (source, links, usage) = Create(TwoGrants(), _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+        using (Unwritable(_profileId))
+        {
+            await source.ResolveAsync(Watch(), CancellationToken.None);
+        }
+
+        var resolved = await Source(links, usage).ResolveAsync(Watch(), CancellationToken.None);
+
+        Assert.Equal("codex-at-2", AccessToken(resolved));
+        Assert.Contains("codex-rt-2", links.Secrets.Load(_profileId).CodexAuthJson, StringComparison.Ordinal);
+        Assert.Equal(1, links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task SettledRenewalLeavesNoRecordBehind()
+    {
+        var (source, links, _) = Create(TwoGrants(), _ => LinkHarness.Json(HttpStatusCode.OK, UsageBody), Stale);
+        var other = Guid.NewGuid();
+        Paste(links, other, Stale);
+
+        await source.ResolveAsync(Watch(), CancellationToken.None);
+        await source.ResolveAsync(Watch(), CancellationToken.None);
+        await source.ResolveAsync(Watch(other), CancellationToken.None);
+
+        Assert.Null(links.Secrets.Load(_profileId).CodexPending);
+        Assert.Null(links.Secrets.Load(other).CodexPending);
+    }
+}
+
+/// <summary>Console billing: a session cookie the Console renews replaces the saved key only while that is the key it renewed.</summary>
+public sealed class ConsoleBillingSourceTests : IDisposable
+{
+    private static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+    private const string Sent = "sk-ant-sid01-synthetic-sent";
+    private const string Renewed = "sk-ant-sid01-synthetic-renewed";
+
+    private readonly TempDirectory _temp = new();
+    private readonly FakeTimeProvider _time = new(Now);
+    private readonly Guid _profileId = Guid.NewGuid();
+
+    public void Dispose() => _temp.Dispose();
+
+    /// <param name="duringRequest">Runs while the Console answers, as a sign-in or a removal in the wizard would.</param>
+    private (ConsoleBillingSource Source, LinkHarness Links) Create(Action<LinkHarness>? duringRequest = null)
+    {
+        var links = new LinkHarness(_temp.Path, Path.Combine(_temp.Path, "home"), _time);
+        SaveKey(links, new ConsoleSecret(Sent, Now.AddDays(10)));
+        var handler = new ScriptedHandler((request, _) =>
+        {
+            duringRequest?.Invoke(links);
+            var response = LinkHarness.Json(HttpStatusCode.OK, ConsoleEndpoint.Answer(request.RequestUri!)!.Value.Body);
+            response.Headers.TryAddWithoutValidation("Set-Cookie", $"sessionKey={Renewed}; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2026 12:00:00 GMT");
+            return Task.FromResult(response);
+        });
+        return (new ConsoleBillingSource(links.Secrets, links.Lock, new ConsoleClient(new HttpClient(handler), _time, links.Log)), links);
+    }
+
+    private void SaveKey(LinkHarness links, ConsoleSecret? key)
+    {
+        var bundle = links.Secrets.Load(_profileId);
+        bundle.Console = key;
+        links.Secrets.Save(_profileId, bundle);
+    }
+
+    private ProfileWatch Watch() => ProfileWatch.From(new ProfileSettings
+    {
+        Id = _profileId,
+        Name = "Console",
+        Console = new ConsoleLink { OrganizationId = "org-api", LinkedAt = Now },
+    });
+
+    [Fact]
+    public async Task RenewedCookieReplacesTheKeyItRenewed()
+    {
+        var (source, links) = Create();
+
+        var fetch = await source.FetchAsync(Watch(), CancellationToken.None);
+
+        Assert.NotNull(fetch.Usage);
+        Assert.Null(fetch.StorageError);
+        Assert.Equal(Renewed, links.Secrets.Load(_profileId).Console?.SessionKey);
+        // Its expiry is reported for the link's settings, without the key.
+        Assert.True(fetch.KeyRenewed);
+        Assert.Equal(new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero), fetch.KeyExpiry);
+    }
+
+    [Fact]
+    public async Task RenewedCookieNeverReplacesANewerSignIn()
+    {
+        const string signedIn = "sk-ant-sid01-synthetic-newer";
+        var (source, links) = Create(l => SaveKey(l, new ConsoleSecret(signedIn, Now.AddDays(28))));
+
+        var fetch = await source.FetchAsync(Watch(), CancellationToken.None);
+
+        Assert.Equal(signedIn, links.Secrets.Load(_profileId).Console?.SessionKey);
+        Assert.False(fetch.KeyRenewed);
+    }
+
+    [Fact]
+    public async Task RenewedCookieDoesNotBringBackARemovedKey()
+    {
+        var (source, links) = Create(l => SaveKey(l, null));
+
+        var fetch = await source.FetchAsync(Watch(), CancellationToken.None);
+
+        Assert.Null(links.Secrets.Load(_profileId).Console);
+        Assert.False(fetch.KeyRenewed);
     }
 }

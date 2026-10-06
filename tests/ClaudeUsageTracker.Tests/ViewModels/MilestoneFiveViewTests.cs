@@ -307,6 +307,31 @@ public sealed class MilestoneFiveViewTests : IDisposable
     }
 
     [Fact]
+    public void ChoicesWhoseSaveFailsAreUndoneAndNotApplied()
+    {
+        _settings.StatuslineEnabled = true;
+        _harness.Files.WriteConfig(_settings.Statusline);
+        var config = File.ReadAllText(StatuslinePaths.ConfigFile(_harness.Data));
+        _harness.SaveFails = true;
+
+        Statusline.ShowBranch = false;
+        Statusline.SingleColour = "#123456";
+        Hud.AutoHide = false;
+        Hud.Enabled = true;
+
+        Assert.True(_settings.Statusline.ShowBranch);
+        Assert.NotEqual("#123456", _settings.Statusline.SingleColorHex);
+        Assert.True(Statusline.ShowBranch);
+        // The status line in Claude Code still shows what is saved.
+        Assert.Equal(config, File.ReadAllText(StatuslinePaths.ConfigFile(_harness.Data)));
+        Assert.True(_settings.HudAutoHide);
+        Assert.False(_settings.HudEnabled);
+        // No hooks or listener for a HUD that is not saved as on.
+        Assert.Equal("Hooks not configured", Hud.HookStatusText);
+        Assert.False(Hud.ShowServer);
+    }
+
+    [Fact]
     public void AutoHideIsKept()
     {
         Assert.True(Hud.AutoHide);

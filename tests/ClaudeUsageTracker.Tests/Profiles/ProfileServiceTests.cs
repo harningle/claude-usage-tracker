@@ -228,6 +228,31 @@ public sealed class ProfileServiceTests : IDisposable
     }
 
     [Fact]
+    public void RenewedConsoleCookieMovesTheExpiryOfTheLinkItWasFetchedForOnly()
+    {
+        var linkedAt = Now.AddDays(-6);
+        var profile = new ProfileSettings
+        {
+            Name = "Console",
+            Console = new ConsoleLink { OrganizationId = "org-api", LinkedAt = linkedAt, SessionKeyExpiry = Now.AddDays(1) },
+        };
+        var (service, _, _) = Create(profile);
+
+        service.ConsoleKeyRenewed(profile.Id, linkedAt, Now.AddDays(7));
+
+        Assert.Equal(Now.AddDays(7), profile.Console.SessionKeyExpiry);
+        Assert.Equal(Now.AddDays(7), new SettingsStore(SettingsPath).Load().Profiles[0].Console?.SessionKeyExpiry);
+
+        // A cookie renewed for a link replaced since says nothing about the new link's key.
+        service.ConsoleKeyRenewed(profile.Id, linkedAt.AddMinutes(-1), Now.AddDays(30));
+        Assert.Equal(Now.AddDays(7), profile.Console.SessionKeyExpiry);
+
+        // A cookie the Console gave no expiry leaves none to warn about.
+        service.ConsoleKeyRenewed(profile.Id, linkedAt, null);
+        Assert.Null(profile.Console.SessionKeyExpiry);
+    }
+
+    [Fact]
     public async Task UnlinkingClaudeCodeRemovesTheCopyAfterChecksStopButNotClaudeCodesLogin()
     {
         var claude = Path.Combine(UserProfile, ".claude");

@@ -49,6 +49,25 @@ public sealed class ProfileSecretsTests : IDisposable
     }
 
     [Fact]
+    public void CodexRenewalRecordIsKeptWithItsCredentialsAndDroppedWhenTheyAreReplaced()
+    {
+        var other = Guid.NewGuid().ToString("N");
+        var bundle = ProfileSecrets.Empty();
+        bundle.CodexAuthJson = """{"tokens":{"access_token":"codex-at-2"}}""";
+        bundle.CodexPending = new PendingWriteBack("codex-rt", Saved, [other]);
+
+        Store.Save(_profileId, bundle);
+        var loaded = Store.Load(_profileId);
+
+        Assert.Equal("codex-rt", loaded.CodexPending?.ConsumedRefreshToken);
+        Assert.Equal([other], loaded.CodexPending?.Targets);
+
+        // Credentials pasted in their place are another login; the record belonged to the old one.
+        loaded.CodexAuthJson = """{"tokens":{"access_token":"other-at"}}""";
+        Assert.Null(loaded.CodexPending);
+    }
+
+    [Fact]
     public void FileHoldsNoPlaintextSecret()
     {
         var bundle = ProfileSecrets.Empty();

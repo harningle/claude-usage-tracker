@@ -40,11 +40,12 @@ public sealed class CliSecret(
 }
 
 /// <summary>
-/// A takeover refresh whose result is saved here but not yet in every Claude Code folder that held the
-/// old login (plan.md section 2, "pending reconciliation").
+/// A renewal whose result is saved here but maybe not yet everywhere that held the old login (plan.md section 2,
+/// "pending reconciliation"): Claude Code folders after a takeover, or other profiles holding the same pasted Codex
+/// credentials.
 /// </summary>
-/// <param name="consumedRefreshToken">The refresh token the renewal used up; a folder still holding it needs the new login.</param>
-/// <param name="targets">Config directories still to be written.</param>
+/// <param name="consumedRefreshToken">The refresh token the renewal used up; a place still holding it needs the new login.</param>
+/// <param name="targets">Config directories, or for Codex the profile IDs, still to be written.</param>
 public sealed class PendingWriteBack(string consumedRefreshToken, DateTimeOffset createdAt, IReadOnlyList<string> targets)
 {
     public string ConsumedRefreshToken { get; } = consumedRefreshToken;
@@ -136,12 +137,7 @@ public sealed class ProfileSecrets
                 return null;
             }
 
-            var pending = cli["pendingWriteBack"] is JsonObject p && String(p, "consumedRefreshToken") is { } consumed
-                ? new PendingWriteBack(
-                    consumed,
-                    Time(p["createdAt"]) ?? DateTimeOffset.UnixEpoch,
-                    (p["targets"] as JsonArray)?.Select(t => t is JsonValue v && v.TryGetValue(out string? s) ? s : null).OfType<string>().ToList() ?? [])
-                : null;
+            var pending = cli["pendingWriteBack"] is JsonObject p ? Pending(p) : null;
             return new CliSecret(
                 oauth.ToJsonString(),
                 String(cli, "ownership") == "appOwned" ? CredentialOwnership.AppOwned : CredentialOwnership.CliLinked,
@@ -173,12 +169,7 @@ public sealed class ProfileSecrets
 
             if (value.Pending is { } pending)
             {
-                cli["pendingWriteBack"] = new JsonObject
-                {
-                    ["consumedRefreshToken"] = pending.ConsumedRefreshToken,
-                    ["createdAt"] = pending.CreatedAt.ToString("O", CultureInfo.InvariantCulture),
-                    ["targets"] = new JsonArray([.. pending.Targets.Select(t => (JsonNode)JsonValue.Create(t))]),
-                };
+                cli["pendingWriteBack"] = Json(pending);
             }
 
             _root["claudeCli"] = cli;
@@ -209,7 +200,10 @@ public sealed class ProfileSecrets
         }
     }
 
-    /// <summary>Codex credentials the user pasted, in the shape of the Codex CLI's <c>auth.json</c>.</summary>
+    /// <summary>
+    /// Codex credentials the user pasted, in the shape of the Codex CLI's <c>auth.json</c>. Setting them drops
+    /// <see cref="CodexPending"/>, which belonged to the credentials they replace.
+    /// </summary>
     public string? CodexAuthJson
     {
         get => _root["codex"] is JsonObject codex ? String(codex, "authJson") : null;
@@ -226,6 +220,47 @@ public sealed class ProfileSecrets
             }
         }
     }
+
+    /// <summary>
+    /// A renewal of the pasted credentials that other profiles held too: the token it used up and the profiles that may
+    /// still hold it. Kept with <see cref="CodexAuthJson"/>, which is that renewal, so a restart cannot lose it.
+    /// </summary>
+    public PendingWriteBack? CodexPending
+    {
+        get => _root["codex"] is JsonObject codex && codex["pendingWriteBack"] is JsonObject p ? Pending(p) : null;
+
+        set
+        {
+            if (_root["codex"] is not JsonObject codex)
+            {
+                throw new InvalidOperationException("A pending renewal is kept only with the credentials it renewed.");
+            }
+
+            if (value is null)
+            {
+                codex.Remove("pendingWriteBack");
+            }
+            else
+            {
+                codex["pendingWriteBack"] = Json(value);
+            }
+        }
+    }
+
+    private static PendingWriteBack? Pending(JsonObject pending) =>
+        String(pending, "consumedRefreshToken") is { } consumed
+            ? new PendingWriteBack(
+                consumed,
+                Time(pending["createdAt"]) ?? DateTimeOffset.UnixEpoch,
+                (pending["targets"] as JsonArray)?.Select(t => t is JsonValue v && v.TryGetValue(out string? s) ? s : null).OfType<string>().ToList() ?? [])
+            : null;
+
+    private static JsonObject Json(PendingWriteBack pending) => new()
+    {
+        ["consumedRefreshToken"] = pending.ConsumedRefreshToken,
+        ["createdAt"] = pending.CreatedAt.ToString("O", CultureInfo.InvariantCulture),
+        ["targets"] = new JsonArray([.. pending.Targets.Select(t => (JsonNode)JsonValue.Create(t))]),
+    };
 
     private static string? String(JsonObject obj, string key) =>
         obj[key] is JsonValue value && value.TryGetValue(out string? text) ? text : null;

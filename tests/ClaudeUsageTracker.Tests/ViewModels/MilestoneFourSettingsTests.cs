@@ -6,6 +6,7 @@ using ClaudeUsageTracker.App.Profiles;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.App.ViewModels;
+using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Tests.Notifications;
 
 namespace ClaudeUsageTracker.Tests.ViewModels;
@@ -22,6 +23,7 @@ public sealed class MilestoneFourSettingsTests : IDisposable
     private readonly FakeTimeProvider _time = new(Now);
     private readonly AppSettings _settings = new();
     private readonly List<string> _calls = [];
+    private bool _saveFails;
 
     public MilestoneFourSettingsTests()
     {
@@ -66,7 +68,18 @@ public sealed class MilestoneFourSettingsTests : IDisposable
         var history = new UsageHistoryService(new UsageHistoryStore(Path.Combine(_temp.Path, "history")), _time);
         var profiles = new ProfileService(store, _settings, links.Service, links.Secrets, links.Lock, cache, history, _time);
         return new SettingsViewModel(
-            _settings, () => store.Save(_settings), () => { }, profiles, new HistoryViewModel(history, _time, () => true),
+            _settings,
+            () =>
+            {
+                if (_saveFails)
+                {
+                    return false;
+                }
+
+                store.Save(_settings);
+                return true;
+            },
+            () => { }, profiles, new HistoryViewModel(history, _time, () => true),
             new RequestLog(Path.Combine(_temp.Path, "diagnostics")), taskbarDark: true,
             new SettingsIntegrations
             {
@@ -198,6 +211,48 @@ public sealed class MilestoneFourSettingsTests : IDisposable
         Assert.Equal("mail", profile.NotificationSettings.SoundName);
         // Without a claude.ai sign-in the page says nothing is sent yet.
         Assert.True(model.AutoStartNeedsClaudeAi);
+    });
+
+    [Fact]
+    public Task AnEditWhoseSaveFailsIsUndone() => OnSta(model =>
+    {
+        var threshold75 = Profile.NotificationSettings.Threshold75Enabled;
+        var refresh = Profile.RefreshInterval;
+        var shortcut = new KeyCombo { VirtualKey = U, Modifiers = Control | Alt };
+        _settings.Shortcuts.Set(HotkeyAction.Refresh, shortcut);
+        _saveFails = true;
+
+        // Auto-start sends messages once it is on, so it must not run on a setting that was not saved.
+        model.AutoStartEnabled = true;
+        model.Threshold75 = !threshold75;
+        model.RefreshInterval = refresh + 60;
+        Assert.True(model.AddCustomThreshold("42"));
+        model.AutoSwitchEnabled = true;
+        model.Monochrome = true;
+        model.ClearShortcut(HotkeyAction.Refresh);
+
+        Assert.False(Profile.AutoStartSessionEnabled);
+        Assert.False(model.AutoStartEnabled);
+        Assert.Equal(threshold75, Profile.NotificationSettings.Threshold75Enabled);
+        Assert.Equal(refresh, Profile.RefreshInterval);
+        Assert.DoesNotContain(42, Profile.NotificationSettings.CustomThresholds);
+        Assert.False(_settings.AutoSwitchProfileEnabled);
+        Assert.False(Profile.IconConfig.Monochrome);
+        Assert.Same(shortcut, _settings.Shortcuts.Get(HotkeyAction.Refresh));
+    });
+
+    [Fact]
+    public Task PastedCodexCredentialsThatCannotBeSavedOrRenewedSaySo() => OnSta(model =>
+    {
+        Profile.Provider = Provider.Codex.RawValue();
+        Profile.Codex = new CodexLink { Source = CodexLink.ManualSource };
+        const string error = "Another profile's saved credentials could not be read.";
+
+        model.Update(new ProfileUsageState { ProfileId = Profile.Id, Source = UsageSourceKind.Codex, MirrorError = error }, null, null, []);
+        Assert.Contains(model.Codex.Details, r => r.Value == error);
+
+        model.Update(new ProfileUsageState { ProfileId = Profile.Id, Source = UsageSourceKind.Codex }, null, null, []);
+        Assert.DoesNotContain(model.Codex.Details, r => r.Value == error);
     });
 
     [Fact]

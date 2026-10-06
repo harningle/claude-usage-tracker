@@ -51,7 +51,7 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
 
 ## Automated tests
 
-1,299 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus 8 new:
+1,320 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus the 8 new ones below and 21 for defects 4 to 10:
 
 - **`TheFirstCheckOnANewViewSucceedsAndNavigatesOnce`.**
   - The setup: a real WebView2 context on its own dispatcher thread, parked on a page of a small HTTP server on 127.0.0.1, sends the three requests of a usage check at once.
@@ -96,6 +96,30 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
    - The cause: leaving the box commits the rename, and every settings edit raises a change for every property. `Profiles` built new row objects each time, and rows compare by reference, so both lists bound to it rebuilt every row. That included the control Tab was moving to, whose removal left the focus with the window.
    - The fix: the rows stay the same objects and change in place, so the lists keep their controls.
    - Checked by `TabReachesEveryControlOfEverySettingsPage`, which failed with "Tab from TextBox drops the keyboard focus to the window" before the fix and passes after it.
+
+Your code review before publishing (2026-10-06) found defects 4 to 7; fixing them turned up 8 and 9. Your second review found that the first fix of defect 4 still lost a renewal at a restart, and found defect 10. The tests named for defects 4 to 7 and 9 failed before the fixes, except `RenewedCookieDoesNotBringBackARemovedKey`, which keeps behaviour that was already right. Defect 8's tests cover an event and a method that are new. A mutation check undid each new guard in turn: all eleven breakages of the first round and all ten of the second were caught.
+
+4. **The same pasted Codex login in two profiles could send a used refresh token after a restart.**
+   - The cause: a renewal saved the new tokens in the renewing profile only. The record of used tokens is in memory, so after a restart the other profile sent the old one, and OpenAI revokes a login whose token is sent twice.
+   - The first fix saved the renewal in every profile whose pasted credentials held the token it used up, as Claude Code logins already were (difference 13). It also made renewals wait while another profile's saved credentials cannot be read, since they might hold that token.
+   - What your second review found: a profile whose file could not be written at that moment kept the renewal in memory only. After a restart it sent the used token, so you saw two renewals instead of one. The failure was also not shown.
+   - The fix now: each profile saves the renewal with an encrypted record of the token used up and of the other profiles that held it, as Claude Code's pending hand-back does. A profile still holding the used token never sends it: it is given the renewal from a record, at the next check of a profile that saved one or before any renewal. Until every profile has it, nothing in that login is renewed again, and both profiles' Codex pages say why. Parity difference 32.
+   - Checked by `LoginPastedInTwoProfilesIsRenewedOnceForBothAndNeverResentAfterARestart`, `PastedLoginIsNotRenewedWhileAnotherProfilesCopyCannotBeRead`, `RenewalThatCannotBeSavedInAnotherProfileIsSavedAtItsNextCheck`, `CopyThatCouldNotBeSavedNeverSendsTheUsedTokenAfterARestart` (your reproduction: without the record it sends two renewals), `CopyThatStillCannotBeSavedAfterARestartWaitsAndSaysSo`, `NothingIsRenewedAgainUntilEveryCopyHasTheRenewal`, `RenewalSavedOnlyInTheCopyReachesTheRenewingProfileAfterARestart`, `SettledRenewalLeavesNoRecordBehind` and `CodexRenewalRecordIsKeptWithItsCredentialsAndDroppedWhenTheyAreReplaced`.
+5. **The wizard saved to whichever profile was active at Done.**
+   - The effect: the wizard does not block the rest of the app. If the Next Profile shortcut or the profile switcher changed the active profile while it was open, a sign-in made for one profile was tested and saved for another. Closing it then cleaned up the wrong profile's browser data.
+   - The fix: the wizard fixes its profile when it opens and uses it for the sign-in, the test, the save and the clean-up. A profile deleted meanwhile is not recreated; Done says so. The saved profile becomes the active one, as before.
+   - Checked by `ProfileSwitchedWhileTheWizardIsOpenKeepsTheSignInAndSaveOnTheProfileItOpenedFor`, `ConsoleKeyIsSavedForTheProfileTheWizardOpenedFor` and `ProfileDeletedWhileTheWizardIsOpenIsNotRecreatedOrReplaced`.
+6. **Closing the wizard while a Console or Codex key was being saved left the link without its key.**
+   - The cause: the settings are saved first and the key second. Closing the wizard while the key waited for the credential lock cancelled the save, and the undo ran only for storage errors.
+   - The fix: any failure of the second step undoes the first, cancellation included; the undo runs on the UI thread, which owns the settings.
+   - Checked by `SaveCancelledWhileWaitingToWriteTheKeyRestoresTheSettings`.
+7. **A late Console answer could overwrite a newer sign-in.** A renewed session cookie replaced whatever key was saved. It now replaces only the key that the request sent. Checked by `RenewedCookieNeverReplacesANewerSignIn` and `RenewedCookieDoesNotBringBackARemovedKey`.
+8. **A renewed Console cookie kept the old expiry in the settings,** so the settings page showed it and the expiry warning came a day before a date that no longer applied. The renewed cookie's expiry now becomes the link's, unless the link was replaced meanwhile. Checked by `RenewedConsoleCookieIsAnnouncedWithTheLinkItWasFetchedFor` and `RenewedConsoleCookieMovesTheExpiryOfTheLinkItWasFetchedForOnly`.
+9. **The Codex page never showed a storage error,** although a pasted login whose renewal could not be saved was meant to say so. The Codex page now shows it, as the Claude Code page does, and also when a renewal waits for another profile's credentials. Checked by `PastedCodexCredentialsThatCannotBeSavedOrRenewedSaySo`.
+10. **A settings edit whose save failed was applied anyway.**
+    - The effect: the error was shown, but the app went on with the unsaved choice until it was restarted, which then quietly brought back the old one. Some of these choices act outside the app: session auto-start sends messages, a global shortcut is registered, and the HUD installs hooks in Claude Code's settings.
+    - The fix: the settings pages, the status line choices and the HUD switches apply an edit only once it is saved. A failed save is shown and the edit undone, as profile actions already were. Records of what has already been done outside the app, such as an applied status line or an installed launcher, still follow what was done.
+    - Checked by `AnEditWhoseSaveFailsIsUndone` and `ChoicesWhoseSaveFailsAreUndoneAndNotApplied`.
 
 ## Delivery checks in fixture mode
 
@@ -164,6 +188,9 @@ Not covered here:
 - **The start-up fix** needs a live start to be seen.
 - **Explorer's tray records** of moved or removed copies stay in the registry, and may stay listed under Settings → Personalisation → Taskbar → Other system tray icons.
 - **Claude Code 2.1.289** is installed now. The hook gate and status line were measured on 2.1.288.
+- **Whether the Console replaces its session cookie** has not been seen live; defects 7 and 8 rest on automated tests.
+- **A pasted Codex login that was renewed outside the tracker** (by the Codex CLI on another PC, or an old copy of `auth.json`) cannot be recognised. Its first renewal sends a used token. Defect 4 covers only copies the tracker itself holds.
+- **A renewal that no profile could save before the tracker quits is lost,** for pasted Codex logins as for Claude Code ones (plan section 2): the next start has only the used token. The tracker tries to save it again at every check until then. Once any profile holding the login has saved it, the others are given it from there (defect 4).
 
 ## Live checks to do
 

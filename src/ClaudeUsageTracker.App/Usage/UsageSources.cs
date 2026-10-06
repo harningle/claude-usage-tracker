@@ -2,6 +2,7 @@ using System.IO;
 using System.Security.Cryptography;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.CodexCli;
+using ClaudeUsageTracker.App.Localisation;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.Core.Billing;
 using ClaudeUsageTracker.Core.Providers.Codex;
@@ -69,7 +70,9 @@ public sealed class ClaudeAiUsageSource(ClaudeAiClient client, IClaudeAiTranspor
 /// <summary>
 /// Usage of a Codex login. A login in the Codex CLI's <c>auth.json</c> is the CLI's: it is read through and
 /// never renewed here, and a rejected one waits for the CLI (a Codex takeover is not verified, plan.md
-/// section 2). Credentials the user pasted are the tracker's own and are renewed by it, as upstream does.
+/// section 2). Credentials the user pasted are the tracker's own and are renewed by it, as upstream does. When
+/// several profiles hold the same pasted login, a renewal is saved in each with a record of the token it used up,
+/// so a profile it could not reach at once is given it later, even after a restart, and never sends that token.
 /// </summary>
 public sealed class CodexUsageSource(
     ProfileSecretStore secrets, CredentialLock credentialLock, OAuthTokenClient tokens, CodexClient client, TimeProvider time,
@@ -117,9 +120,15 @@ public sealed class CodexUsageSource(
             };
         }
 
-        // A renewed login that could not be saved is saved now; until then the failure stays visible.
+        // A renewed login that could not be saved is saved now, and one that has not reached every profile holding the
+        // same login is given to them; until then the failure stays visible.
         var unsavedError = await SaveUnsavedAsync(watch.ProfileId, cancellation).ConfigureAwait(false);
-        var (json, error) = LoadPasted(watch.ProfileId);
+        var (json, _, pending, error) = LoadPasted(watch.ProfileId);
+        if (pending is not null)
+        {
+            error ??= await SettleAsync(watch.ProfileId, cancellation).ConfigureAwait(false);
+        }
+
         error ??= unsavedError;
         if (json is null)
         {
@@ -181,14 +190,17 @@ public sealed class CodexUsageSource(
 
     /// <summary>
     /// Renews pasted credentials under the credential lock and saves them before they are used. Returns the
-    /// credentials to use: renewed ones, or ones another check renewed meanwhile; null when the renewal failed.
+    /// credentials to use: renewed ones, or ones another check renewed or handed over meanwhile; null when the
+    /// renewal failed. The same login pasted into other profiles is renewed for them too, since the renewal uses up
+    /// their token as well; it is not renewed while another profile's credentials cannot be read, as they might
+    /// hold it, nor while an earlier renewal of it has not reached every profile that held it.
     /// </summary>
     private async Task<(CodexCredentials? Credentials, RefreshResult? Outcome, string? SaveError)> RenewAsync(
         Guid profileId, CodexCredentials stale, CancellationToken cancellation)
     {
         using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
-            var (json, error) = LoadPasted(profileId);
+            var (json, saved, _, error) = LoadPasted(profileId);
             if (json is null || CodexAuthJson.Parse(json) is not { } current)
             {
                 return (null, null, error);
@@ -216,6 +228,51 @@ public sealed class CodexUsageSource(
                 }
             }
 
+            // Renewals saved by any profile, in this run or an earlier one, first reach the profiles still holding the
+            // token they used up. This profile, if it holds one, takes that renewal and sends nothing; while a profile
+            // has not taken one, nothing in that login is renewed again.
+            var waiting = new List<(PendingWriteBack Record, string? HolderToken, string? Error)>();
+            foreach (var holder in secrets.ProfileIds())
+            {
+                var (_, holderSaved, pending, loadError) = LoadPasted(holder);
+                if (loadError is not null)
+                {
+                    return (null, RefreshResult.Failed, Strings.Get("windows.codex.other_copy_unreadable"));
+                }
+
+                if (pending is not null && Settle(holder, holderSaved!, pending) is ({ } remaining, var settleError))
+                {
+                    waiting.Add((remaining, CodexAuthJson.Parse(holderSaved!)?.RefreshToken, settleError));
+                }
+            }
+
+            var blocked = waiting.FirstOrDefault(w => w.Record.ConsumedRefreshToken == current.RefreshToken || w.HolderToken == current.RefreshToken);
+            if (LoadPasted(profileId).Json is { } given && given != json && CodexAuthJson.Parse(given) is { } handedOver)
+            {
+                // Handed over; if only in memory, because this profile's file cannot be written, that is reported.
+                return (handedOver, RefreshResult.Succeeded, error ?? blocked.Error);
+            }
+
+            if (blocked.Record is not null)
+            {
+                return (null, RefreshResult.Failed, blocked.Error);
+            }
+
+            var copies = new List<(Guid ProfileId, string Json, string Saved)>();
+            foreach (var other in secrets.ProfileIds().Where(id => id != profileId))
+            {
+                var (otherJson, otherSaved, _, otherError) = LoadPasted(other);
+                if (otherError is not null)
+                {
+                    return (null, RefreshResult.Failed, Strings.Get("windows.codex.other_copy_unreadable"));
+                }
+
+                if (otherJson is not null && CodexAuthJson.Parse(otherJson)?.RefreshToken == current.RefreshToken)
+                {
+                    copies.Add((other, otherJson, otherSaved!));
+                }
+            }
+
             var outcome = await tokens.RefreshCodexAsync(current, cancellation).ConfigureAwait(false);
             if (outcome.Credentials is not { } renewed)
             {
@@ -234,7 +291,6 @@ public sealed class CodexUsageSource(
                 return (null, outcome.Result, error);
             }
 
-            var serialised = CodexAuthJson.SerialiseAuthJson(renewed, json, time.GetUtcNow());
             lock (_gate)
             {
                 _renewalHolds.Clear(profileId);
@@ -244,8 +300,78 @@ public sealed class CodexUsageSource(
                 }
             }
 
-            return (renewed, RefreshResult.Succeeded, SavePasted(profileId, json, serialised));
+            // Each profile saves the renewal with a record of the others, so whichever saves fail, those profiles are given
+            // it from one that succeeded, even after a restart. A save that fails is also retried at that profile's checks.
+            List<(Guid ProfileId, string Json, string Saved)> holders = [(profileId, json, saved!), .. copies];
+            string? saveError = null;
+            foreach (var holder in holders)
+            {
+                var others = holders.Where(h => h.ProfileId != holder.ProfileId).Select(h => h.ProfileId.ToString("N")).ToList();
+                var record = others.Count == 0 ? null : new PendingWriteBack(current.RefreshToken, time.GetUtcNow(), others);
+                var failure = SavePasted(holder.ProfileId, holder.Saved, CodexAuthJson.SerialiseAuthJson(renewed, holder.Json, time.GetUtcNow()), record);
+                if (failure is not null)
+                {
+                    saveError ??= holder.ProfileId == profileId ? failure : Strings.Format("windows.codex.copy_not_saved", failure);
+                }
+            }
+
+            return (renewed, RefreshResult.Succeeded, saveError);
         }
+    }
+
+    /// <summary>Gives this profile's renewal to the other profiles that held the same login. Returns the failure while one remains.</summary>
+    private async Task<string?> SettleAsync(Guid profileId, CancellationToken cancellation)
+    {
+        using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
+        {
+            var (_, saved, pending, error) = LoadPasted(profileId);
+            return error ?? (pending is null ? null : Settle(profileId, saved!, pending).Error);
+        }
+    }
+
+    /// <summary>
+    /// Gives a holder's renewal to the profiles its record lists that still hold the token it used up, and drops the
+    /// others from the record: those that have it already, or were given other credentials or none. Returns what remains
+    /// of the record and the failure. The caller holds the credential lock.
+    /// </summary>
+    private (PendingWriteBack? Remaining, string? Error) Settle(Guid holderId, string holderSaved, PendingWriteBack record)
+    {
+        var renewal = CodexAuthJson.Parse(holderSaved)!;
+        var remaining = new List<string>();
+        string? error = null;
+        foreach (var target in record.Targets)
+        {
+            var targetId = Guid.ParseExact(target, "N");
+            // What the profile's file holds counts, not a renewal of it still waiting in memory, which a restart loses.
+            var (_, saved, _, failure) = LoadPasted(targetId);
+            if (failure is null && saved is not null && CodexAuthJson.Parse(saved)?.RefreshToken == record.ConsumedRefreshToken)
+            {
+                failure = SavePasted(targetId, saved, CodexAuthJson.SerialiseAuthJson(renewal, saved, renewal.LastRefresh ?? time.GetUtcNow()), null);
+            }
+
+            if (failure is not null)
+            {
+                remaining.Add(target);
+                error ??= Strings.Format("windows.codex.copy_not_saved", failure);
+            }
+        }
+
+        var left = remaining.Count == 0 ? null : new PendingWriteBack(record.ConsumedRefreshToken, record.CreatedAt, remaining);
+        if (remaining.Count < record.Targets.Count)
+        {
+            try
+            {
+                var bundle = secrets.Load(holderId);
+                bundle.CodexPending = left;
+                secrets.Save(holderId, bundle);
+            }
+            catch (Exception e) when (IsStorageFailure(e))
+            {
+                // The record still names profiles that have the renewal now; the next settling drops them.
+            }
+        }
+
+        return (left, error);
     }
 
     /// <summary>Saves renewed credentials that an earlier save failed for. Returns the error while it still fails.</summary>
@@ -262,7 +388,7 @@ public sealed class CodexUsageSource(
         using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
         {
             // Loading drops a renewal whose credentials were replaced or removed meanwhile.
-            var (_, error) = LoadPasted(profileId);
+            var (_, _, _, error) = LoadPasted(profileId);
             (string Replaced, string Renewed) unsaved;
             lock (_gate)
             {
@@ -272,20 +398,25 @@ public sealed class CodexUsageSource(
                 }
             }
 
-            return SavePasted(profileId, unsaved.Replaced, unsaved.Renewed);
+            return SavePasted(profileId, unsaved.Replaced, unsaved.Renewed, null);
         }
     }
 
     /// <summary>
-    /// Stores renewed credentials in place of the saved ones they renewed. The caller holds the credential lock
-    /// and has just read <paramref name="replaced"/> from the bundle.
+    /// Stores renewed credentials in place of the saved ones they renewed, with the record of other profiles that held
+    /// them, if any. The caller holds the credential lock and has just read <paramref name="replaced"/> from the bundle.
     /// </summary>
-    private string? SavePasted(Guid profileId, string replaced, string renewed)
+    private string? SavePasted(Guid profileId, string replaced, string renewed, PendingWriteBack? pending)
     {
         try
         {
             var bundle = secrets.Load(profileId);
             bundle.CodexAuthJson = renewed;
+            if (pending is not null)
+            {
+                bundle.CodexPending = pending;
+            }
+
             secrets.Save(profileId, bundle);
             lock (_gate)
             {
@@ -307,18 +438,21 @@ public sealed class CodexUsageSource(
 
     /// <summary>
     /// The pasted credentials: renewed ones still waiting to be saved while the saved ones are those they
-    /// renewed, otherwise the saved ones.
+    /// renewed, otherwise the saved ones. <c>Saved</c> and <c>Pending</c> are what the profile's file holds.
     /// </summary>
-    private (string? Json, string? Error) LoadPasted(Guid profileId)
+    private (string? Json, string? Saved, PendingWriteBack? Pending, string? Error) LoadPasted(Guid profileId)
     {
         string? saved;
+        PendingWriteBack? pending;
         try
         {
-            saved = secrets.Load(profileId).CodexAuthJson;
+            var bundle = secrets.Load(profileId);
+            saved = bundle.CodexAuthJson;
+            pending = bundle.CodexPending;
         }
         catch (Exception e) when (IsStorageFailure(e))
         {
-            return (null, e.Message);
+            return (null, null, null, e.Message);
         }
 
         lock (_gate)
@@ -327,7 +461,7 @@ public sealed class CodexUsageSource(
             {
                 if (unsaved.Replaced == saved)
                 {
-                    return (unsaved.Renewed, null);
+                    return (unsaved.Renewed, saved, pending, null);
                 }
 
                 // The credentials were replaced or removed since; the renewal belonged to the old ones.
@@ -335,7 +469,7 @@ public sealed class CodexUsageSource(
             }
         }
 
-        return (saved, null);
+        return (saved, saved, pending, null);
     }
 
     private static bool IsStorageFailure(Exception e) =>
@@ -343,7 +477,13 @@ public sealed class CodexUsageSource(
 }
 
 /// <param name="Usage">The billing; null when the request failed or no session key is saved.</param>
-public sealed record BillingFetch(ApiUsage? Usage, FetchFailure? Failure, int? Status, TimeSpan? RetryAfter, string? StorageError);
+/// <param name="KeyRenewed">
+/// The Console renewed the session cookie, and it was saved in place of the key sent. <paramref name="KeyExpiry"/> is its
+/// expiry, null when the Console gave none.
+/// </param>
+public sealed record BillingFetch(
+    ApiUsage? Usage, FetchFailure? Failure, int? Status, TimeSpan? RetryAfter, string? StorageError, bool KeyRenewed = false,
+    DateTimeOffset? KeyExpiry = null);
 
 /// <summary>Console billing of a profile, with the session key from its encrypted secret file.</summary>
 public sealed class ConsoleBillingSource(ProfileSecretStore secrets, CredentialLock credentialLock, ConsoleClient client)
@@ -367,18 +507,21 @@ public sealed class ConsoleBillingSource(ProfileSecretStore secrets, CredentialL
 
         var result = await client.FetchApiUsageAsync(key.SessionKey, watch.Console!.OrganizationId, cancellation).ConfigureAwait(false);
         string? storageError = null;
+        var keyRenewed = false;
         if (result.RenewedKey is { } renewed)
         {
-            // The Console replaced the session cookie; the old one may stop working, so the new one is saved at once.
+            // The Console replaced the session cookie; the old one may stop working, so the new one is saved at once. It
+            // replaces only the key this request sent: a key signed in or removed meanwhile wins.
             using (await credentialLock.AcquireAsync(cancellation).ConfigureAwait(false))
             {
                 try
                 {
                     var bundle = secrets.Load(watch.ProfileId);
-                    if (bundle.Console is not null)
+                    if (bundle.Console?.SessionKey == key.SessionKey)
                     {
                         bundle.Console = renewed;
                         secrets.Save(watch.ProfileId, bundle);
+                        keyRenewed = true;
                     }
                 }
                 catch (Exception e) when (e is SecretStoreException or IOException or UnauthorizedAccessException or CryptographicException)
@@ -388,6 +531,7 @@ public sealed class ConsoleBillingSource(ProfileSecretStore secrets, CredentialL
             }
         }
 
-        return new BillingFetch(result.Value, result.Failure, result.Status, result.RetryAfter, storageError);
+        return new BillingFetch(
+            result.Value, result.Failure, result.Status, result.RetryAfter, storageError, keyRenewed, keyRenewed ? result.RenewedKey!.Expires : null);
     }
 }

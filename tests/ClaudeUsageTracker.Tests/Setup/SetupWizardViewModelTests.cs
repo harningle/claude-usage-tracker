@@ -334,6 +334,69 @@ public sealed class SetupWizardViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ProfileSwitchedWhileTheWizardIsOpenKeepsTheSignInAndSaveOnTheProfileItOpenedFor()
+    {
+        var opened = new ProfileSettings { Name = "Opened" };
+        var other = new ProfileSettings { Name = "Other" };
+        var settings = new AppSettings { Profiles = [opened, other], ActiveProfileId = opened.Id };
+        var (wizard, _, _, transport, _) = Create(settings: settings);
+        wizard.SetUpWithClaudeAi();
+        await wizard.SignInAsync(CancellationToken.None);
+
+        // The Next Profile shortcut or the profile switcher, while the wizard stays open.
+        settings.ActiveProfileId = other.Id;
+        await wizard.TestAsync(CancellationToken.None);
+        // Closing the wizard now would discard an unsaved sign-in from this profile's browser context.
+        Assert.Equal(opened.Id, wizard.TargetProfileId);
+        await wizard.SaveAsync(CancellationToken.None);
+
+        Assert.Equal("org-1", opened.ClaudeAi?.OrganizationId);
+        Assert.Null(other.ClaudeAi);
+        Assert.All(transport.Requests, r => Assert.Equal(opened.Id, r.ProfileId));
+    }
+
+    [Fact]
+    public async Task ConsoleKeyIsSavedForTheProfileTheWizardOpenedFor()
+    {
+        var opened = new ProfileSettings { Name = "Opened" };
+        var other = new ProfileSettings { Name = "Other" };
+        var settings = new AppSettings { Profiles = [opened, other], ActiveProfileId = opened.Id };
+        var (wizard, _, _, _, links) = Create(settings: settings);
+        wizard.Start(WizardRoute.Console);
+        await wizard.SignInAsync(CancellationToken.None);
+        await wizard.TestAsync(CancellationToken.None);
+
+        settings.ActiveProfileId = other.Id;
+        await wizard.SaveAsync(CancellationToken.None);
+
+        Assert.Equal("org-api", opened.Console?.OrganizationId);
+        Assert.Equal("sk-ant-sid01-synthetic-console", links.Secrets.Load(opened.Id).Console?.SessionKey);
+        Assert.Null(other.Console);
+        Assert.False(links.Secrets.Exists(other.Id));
+    }
+
+    [Fact]
+    public async Task ProfileDeletedWhileTheWizardIsOpenIsNotRecreatedOrReplaced()
+    {
+        var opened = new ProfileSettings { Name = "Opened" };
+        var other = new ProfileSettings { Name = "Other" };
+        var settings = new AppSettings { Profiles = [opened, other], ActiveProfileId = opened.Id };
+        var (wizard, _, _, _, _) = Create(settings: settings);
+        wizard.SetUpWithClaudeAi();
+        await wizard.SignInAsync(CancellationToken.None);
+        await wizard.TestAsync(CancellationToken.None);
+
+        settings.Profiles.Remove(opened);
+        settings.ActiveProfileId = other.Id;
+        await wizard.SaveAsync(CancellationToken.None);
+
+        Assert.Equal(WizardStep.Review, wizard.Step);
+        Assert.Contains("deleted", wizard.Message, StringComparison.Ordinal);
+        Assert.Equal([other], settings.Profiles);
+        Assert.Null(other.ClaudeAi);
+    }
+
+    [Fact]
     public async Task CancelledSignInChangesNothing()
     {
         _signIn.ClaudeAiResult = false;

@@ -33,6 +33,7 @@
 /* MARK: - Setup */
 "windows.setup.error.changed_since_test" = "The Claude Code login changed after the test. Test again before saving.";
 "windows.setup.error.save_failed" = "Couldn't save the configuration: %@";
+"windows.setup.error.profile_deleted" = "This profile was deleted while setup was open, so nothing was saved. Close setup and start again.";
 "windows.setup.window_title" = "Claude Usage Tracker Setup";
 "windows.setup.not_found.title" = "No usable Claude Code login";
 "windows.setup.not_found.none" = "No Claude Code login was found. Sign in with the claude command (/login), then check again.";
@@ -174,6 +175,8 @@
 "windows.codex.connect" = "Connect Codex";
 "windows.codex.remove_confirm.title" = "Remove Codex Account?";
 "windows.codex.remove_confirm.message" = "This removes the Codex link and any pasted credentials from this profile. The Codex CLI stays signed in.";
+"windows.codex.other_copy_unreadable" = "Another profile's saved credentials could not be read, so the tracker will not renew these credentials until it can.";
+"windows.codex.copy_not_saved" = "A renewal of this login, which another profile holds too, could not be saved in every profile yet. The tracker keeps trying and renews the login again only once it is: %@";
 "windows.appearance.multi_note" = "Multi-profile display is on: the tray uses the options under Manage Profiles. These options apply in single-profile mode.";
 "windows.history.earlier" = "Earlier";
 "windows.history.later" = "Later";

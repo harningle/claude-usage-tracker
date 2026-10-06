@@ -182,6 +182,23 @@ public sealed class ProfileService(
         }
     }
 
+    /// <summary>
+    /// Takes the expiry of a Console session cookie that billing renewed and saved in place of the key of the link
+    /// linked at <paramref name="linkedAt"/>, for the settings page and the expiry warning. A link replaced or removed
+    /// since keeps its own expiry.
+    /// </summary>
+    public void ConsoleKeyRenewed(Guid profileId, DateTimeOffset linkedAt, DateTimeOffset? expiry)
+    {
+        if (settings.Profiles.FirstOrDefault(p => p.Id == profileId)?.Console is not { } link
+            || link.LinkedAt != linkedAt || link.SessionKeyExpiry == expiry)
+        {
+            return;
+        }
+
+        var previous = link.SessionKeyExpiry;
+        Change(() => link.SessionKeyExpiry = expiry, () => link.SessionKeyExpiry = previous);
+    }
+
     /// <summary>Removes a profile's Codex link and any pasted credentials. The Codex CLI's own files are untouched.</summary>
     public async Task UnlinkCodexAsync(ProfileSettings profile, Action linkRemoved)
     {

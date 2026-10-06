@@ -33,9 +33,9 @@ internal sealed class IntegrationHarness : IDisposable
             () => Reservations, KnownFolders, time, action => action());
         Files = new StatuslineFiles(Data);
         Coordinator = new IntegrationCoordinator(
-            settings, () => Saves++, Service, Hud, Files, new StatuslineSync(Files, Read, Home), KnownFolders, () => GitBash,
+            settings, Save, Service, Hud, Files, new StatuslineSync(Files, Read, Home), KnownFolders, () => GitBash,
             id => Fetched.GetValueOrDefault(id));
-        Pages = new IntegrationPages(settings, Coordinator, () => Saves++, () => ActiveState, Read, _ => OnPath, Home, time);
+        Pages = new IntegrationPages(settings, Coordinator, Save, () => ActiveState, Read, _ => OnPath, Home, time);
     }
 
     public AppSettings Settings { get; }
@@ -63,6 +63,9 @@ internal sealed class IntegrationHarness : IDisposable
     /// <summary>How often the settings were saved.</summary>
     public int Saves { get; private set; }
 
+    /// <summary>Makes every save fail, as a full disk or a locked settings file would.</summary>
+    public bool SaveFails { get; set; }
+
     public IntegrationService Service { get; }
 
     public HudService Hud { get; }
@@ -80,4 +83,16 @@ internal sealed class IntegrationHarness : IDisposable
     public CliSnapshot Read(CliConfigDirectory directory) => CliStore.Read(directory, DateTimeOffset.UtcNow);
 
     public void Dispose() => Hud.Dispose();
+
+    /// <summary>Stands for the app's save of the settings: false when it failed, which the app has shown.</summary>
+    private bool Save()
+    {
+        if (SaveFails)
+        {
+            return false;
+        }
+
+        Saves++;
+        return true;
+    }
 }

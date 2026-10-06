@@ -531,6 +531,33 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task RenewedConsoleCookieIsAnnouncedWithTheLinkItWasFetchedFor()
+    {
+        var (coordinator, _) = Create((request, _) =>
+        {
+            if (ConsoleEndpoint.Answer(request.RequestUri!) is not { } console)
+            {
+                return Usage(12);
+            }
+
+            return Json(console.Status, console.Body, response => response.Headers.TryAddWithoutValidation(
+                "Set-Cookie", "sessionKey=sk-ant-sid01-synthetic-renewed; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2026 12:00:00 GMT"));
+        });
+        var renewals = new ConcurrentQueue<(Guid ProfileId, DateTimeOffset LinkedAt, DateTimeOffset? Expiry)>();
+        coordinator.ConsoleKeyRenewed += (profileId, linkedAt, expiry) => renewals.Enqueue((profileId, linkedAt, expiry));
+        var browserId = Guid.NewGuid();
+        var bundle = _links.Secrets.Load(browserId);
+        bundle.Console = new ConsoleSecret("sk-ant-sid01-synthetic-console", Start.AddDays(7));
+        _links.Secrets.Save(browserId, bundle);
+        var linkedAt = Start.AddDays(-1);
+
+        coordinator.Watch(ClaudeAiProfile(browserId, new ConsoleLink { OrganizationId = "org-api", LinkedAt = linkedAt }));
+        await UntilAsync(browserId, s => s.Api is not null && !s.ApiFromCache);
+
+        Assert.Equal((browserId, linkedAt, new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero)), Assert.Single(renewals));
+    }
+
+    [Fact]
     public async Task BillingFailureNeverStopsUsage()
     {
         var (coordinator, _) = Create((_, _) => Json(HttpStatusCode.Unauthorized, "{}"));

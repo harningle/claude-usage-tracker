@@ -72,6 +72,13 @@ public sealed class RefreshCoordinator : IAsyncDisposable
     /// </summary>
     public event Action<Guid, CachedUsage>? UsageFetched;
 
+    /// <summary>
+    /// Raised on the UI thread when Console billing saved a renewed session cookie: the profile, the
+    /// <see cref="ConsoleLink.LinkedAt"/> of the link it was fetched for, and the cookie's expiry (null when the Console
+    /// gave none).
+    /// </summary>
+    public event Action<Guid, DateTimeOffset, DateTimeOffset?>? ConsoleKeyRenewed;
+
     /// <summary>Starts polling a profile, or applies its changed links or interval.</summary>
     public void Watch(ProfileSettings profile)
     {
@@ -611,6 +618,13 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             }
 
             var fetch = await _owner._billing.FetchAsync(watch, cycle).ConfigureAwait(false);
+            if (fetch.KeyRenewed)
+            {
+                // The key is saved already, whether or not this result is still current.
+                var linkedAt = watch.Console!.LinkedAt;
+                _owner._post(() => _owner.ConsoleKeyRenewed?.Invoke(_profileId, linkedAt, fetch.KeyExpiry));
+            }
+
             now = _owner._time.GetUtcNow();
             if (!IsCurrent(generation))
             {

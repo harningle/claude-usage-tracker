@@ -474,7 +474,13 @@ public sealed class AccessibilityTests : IDisposable
         var history = new UsageHistoryService(new UsageHistoryStore(Path.Combine(_temp.Path, "history")), _time);
         var profiles = new ProfileService(store, settings, links.Service, links.Secrets, links.Lock, cache, history, _time);
         return new SettingsViewModel(
-            settings, () => store.Save(settings), () => { }, profiles, new HistoryViewModel(history, _time, () => true),
+            settings,
+            () =>
+            {
+                store.Save(settings);
+                return true;
+            },
+            () => { }, profiles, new HistoryViewModel(history, _time, () => true),
             new RequestLog(Path.Combine(_temp.Path, "diagnostics")), taskbarDark: true,
             new SettingsIntegrations
             {

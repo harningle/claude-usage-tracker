@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using ClaudeUsageTracker.App.ClaudeCode;
@@ -14,12 +15,12 @@ namespace ClaudeUsageTracker.App.ViewModels;
 /// <summary>What the Milestone 5 settings pages need from the app.</summary>
 public sealed class IntegrationPages
 {
-    /// <param name="persist">Saves the settings after an edit made on one of these pages.</param>
+    /// <param name="persist">Saves the settings after an edit made on one of these pages; false when the save failed, which it has shown.</param>
     /// <param name="activeState">The active profile's usage state, for the status line preview.</param>
     /// <param name="readFolder">Reads a Claude Code folder's login, to tell whether a launcher's folder is signed in.</param>
     /// <param name="onPath">Whether a folder is on the PATH new terminals get.</param>
     public IntegrationPages(
-        AppSettings settings, IntegrationCoordinator coordinator, Action persist, Func<ProfileUsageState?> activeState,
+        AppSettings settings, IntegrationCoordinator coordinator, Func<bool> persist, Func<ProfileUsageState?> activeState,
         Func<CliConfigDirectory, CliSnapshot> readFolder, Func<string, bool> onPath, string userProfile, TimeProvider time)
     {
         Statusline = new StatuslineViewModel(settings, coordinator, persist, activeState, time);
@@ -93,7 +94,7 @@ public sealed class StatuslineViewModel : ObservableObject
 {
     private readonly AppSettings _settings;
     private readonly IntegrationCoordinator _coordinator;
-    private readonly Action _persist;
+    private readonly Func<bool> _persist;
     private readonly Func<ProfileUsageState?> _activeState;
     private readonly TimeProvider _time;
     private string? _message;
@@ -102,7 +103,7 @@ public sealed class StatuslineViewModel : ObservableObject
     private HelperState _helper;
 
     public StatuslineViewModel(
-        AppSettings settings, IntegrationCoordinator coordinator, Action persist, Func<ProfileUsageState?> activeState, TimeProvider time)
+        AppSettings settings, IntegrationCoordinator coordinator, Func<bool> persist, Func<ProfileUsageState?> activeState, TimeProvider time)
     {
         _settings = settings;
         _coordinator = coordinator;
@@ -348,11 +349,24 @@ public sealed class StatuslineViewModel : ObservableObject
         Message = message;
     }
 
+    /// <summary>
+    /// Saves an edit of the status line's choices; an applied status line follows. A failed save is shown and the choices go
+    /// back to what is saved, which Claude Code's status line keeps showing.
+    /// </summary>
     private void Edit(Action change)
     {
+        var saved = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(Config, StatuslineJson.Default.StatuslineConfig),
+            StatuslineJson.Default.StatuslineConfig)!;
         change();
-        _persist();
-        _coordinator.StatuslineConfigChanged();
+        if (_persist())
+        {
+            _coordinator.StatuslineConfigChanged();
+        }
+        else
+        {
+            _settings.Statusline = saved;
+        }
+
         RaiseAll();
     }
 
@@ -393,10 +407,10 @@ public sealed class HudSettingsViewModel : ObservableObject
 {
     private readonly AppSettings _settings;
     private readonly IntegrationCoordinator _coordinator;
-    private readonly Action _persist;
+    private readonly Func<bool> _persist;
     private IReadOnlyList<HookFolderStatus> _folders = [];
 
-    public HudSettingsViewModel(AppSettings settings, IntegrationCoordinator coordinator, Action persist)
+    public HudSettingsViewModel(AppSettings settings, IntegrationCoordinator coordinator, Func<bool> persist)
     {
         _settings = settings;
         _coordinator = coordinator;
@@ -421,8 +435,13 @@ public sealed class HudSettingsViewModel : ObservableObject
         get => _settings.HudAutoHide;
         set
         {
+            var previous = _settings.HudAutoHide;
             _settings.HudAutoHide = value;
-            _persist();
+            if (!_persist())
+            {
+                _settings.HudAutoHide = previous;
+            }
+
             Refresh();
         }
     }

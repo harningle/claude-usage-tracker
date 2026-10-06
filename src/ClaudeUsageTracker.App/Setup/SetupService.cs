@@ -17,33 +17,37 @@ namespace ClaudeUsageTracker.App.Setup;
 public sealed class SetupException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
+/// The profile one run of the wizard configures, fixed when it opens. A browser sign-in made before saving
+/// uses its ID, so the session lands in the browser context the saved profile uses.
+/// </summary>
+/// <param name="IsNew">No profile existed when the wizard opened; the save creates one with this ID.</param>
+public sealed record SetupTarget(Guid ProfileId, bool IsNew);
+
+/// <summary>
 /// Saves tested configurations: a Claude Code link, a claude.ai organisation, a Console organisation or a
 /// Codex login. Upstream's routes saved without a test or review and could lose a credential to a stale
 /// in-memory save. Here every save writes the settings first and the secret second, and restores the
-/// settings if the secret cannot be written, so a profile never ends up linked to something it holds no
-/// credentials for. As upstream, the wizard configures the active profile, and the profile's provider
-/// changes only when a route completes.
+/// settings if the secret is not written, so a profile never ends up linked to something it holds no
+/// credentials for. As upstream, the wizard configures the active profile: the one active when it opened,
+/// even if another is chosen meanwhile. The profile's provider changes only when a route completes.
 /// </summary>
 public sealed class SetupService(
     SettingsStore store, AppSettings settings, CliLinkService links, ProfileSecretStore secrets, CredentialLock credentialLock,
     UsageCacheStore cache, TimeProvider time)
 {
-    private Guid _newProfileId = Guid.NewGuid();
+    /// <summary>The profile a wizard opened now configures: the active one, or a new one when none exists.</summary>
+    public SetupTarget CaptureTarget() =>
+        settings.ActiveProfile is { } active ? new SetupTarget(active.Id, false) : new SetupTarget(Guid.NewGuid(), true);
 
-    /// <summary>The profile setup will configure: the active one, or a new one when none exists.</summary>
-    public ProfileSettings? TargetProfile => settings.ActiveProfile;
-
-    /// <summary>
-    /// The ID the target profile has or will get. A browser sign-in made before saving uses it, so the
-    /// session lands in the browser context the saved profile will use.
-    /// </summary>
-    public Guid TargetProfileId => TargetProfile?.Id ?? _newProfileId;
+    /// <summary>The target's profile: null before a new one is saved, or after it was deleted.</summary>
+    public ProfileSettings? Find(SetupTarget target) => settings.Profiles.FirstOrDefault(p => p.Id == target.ProfileId);
 
     /// <summary>
     /// Links a Claude Code login. The folder is re-read first, and a login whose account changed since the
     /// test is refused.
     /// </summary>
-    public async Task<ProfileSettings> SaveCliAsync(CliSnapshot tested, UsageData testedUsage, DateTimeOffset observedAt, CancellationToken cancellation)
+    public async Task<ProfileSettings> SaveCliAsync(
+        SetupTarget target, CliSnapshot tested, UsageData testedUsage, DateTimeOffset observedAt, CancellationToken cancellation)
     {
         var current = links.Read(tested.Directory);
         if (current.State != CliLoginState.Usable || current.Credentials is null)
@@ -60,6 +64,7 @@ public sealed class SetupService(
 
         var link = links.CreateLink(current);
         var profile = await SaveAsync(
+            target,
             Provider.Anthropic,
             p =>
             {
@@ -78,9 +83,11 @@ public sealed class SetupService(
     /// Links a claude.ai organisation. The session itself is already in the profile's browser context; only
     /// the organisation is saved.
     /// </summary>
-    public async Task<ProfileSettings> SaveClaudeAiAsync(ClaudeOrganization organization, UsageData testedUsage, DateTimeOffset observedAt)
+    public async Task<ProfileSettings> SaveClaudeAiAsync(
+        SetupTarget target, ClaudeOrganization organization, UsageData testedUsage, DateTimeOffset observedAt)
     {
         var profile = await SaveAsync(
+            target,
             Provider.Anthropic,
             p =>
             {
@@ -99,8 +106,10 @@ public sealed class SetupService(
     }
 
     /// <summary>Links an Anthropic Console organisation and saves its session key in the profile's encrypted file.</summary>
-    public Task<ProfileSettings> SaveConsoleAsync(ConsoleOrganization organization, ConsoleSecret key, CancellationToken cancellation) =>
+    public Task<ProfileSettings> SaveConsoleAsync(
+        SetupTarget target, ConsoleOrganization organization, ConsoleSecret key, CancellationToken cancellation) =>
         SaveAsync(
+            target,
             Provider.Anthropic,
             p =>
             {
@@ -121,7 +130,8 @@ public sealed class SetupService(
     /// or credentials the user pasted, which are saved in the profile's encrypted file.
     /// </summary>
     public async Task<ProfileSettings> SaveCodexAsync(
-        string codexHome, string? pastedJson, CodexCredentials tested, UsageData testedUsage, DateTimeOffset observedAt, CancellationToken cancellation)
+        SetupTarget target, string codexHome, string? pastedJson, CodexCredentials tested, UsageData testedUsage, DateTimeOffset observedAt,
+        CancellationToken cancellation)
     {
         var link = new CodexLink
         {
@@ -132,6 +142,7 @@ public sealed class SetupService(
             LinkedAt = time.GetUtcNow(),
         };
         var profile = await SaveAsync(
+            target,
             Provider.Codex,
             p =>
             {
@@ -148,16 +159,23 @@ public sealed class SetupService(
     }
 
     /// <summary>
-    /// Applies one route to the target profile. Settings are written first and the secret second; if the
-    /// secret cannot be written, the settings are restored.
+    /// Applies one route to the target profile and makes it the active one. Settings are written first and
+    /// the secret second; if the secret is not written, whether it failed or the save was cancelled, the
+    /// settings are restored.
     /// </summary>
     /// <param name="apply">Sets the link and returns how to undo it.</param>
-    private async Task<ProfileSettings> SaveAsync(Provider provider, Func<ProfileSettings, Action> apply, Func<ProfileSettings, Task>? writeSecrets)
+    private async Task<ProfileSettings> SaveAsync(
+        SetupTarget target, Provider provider, Func<ProfileSettings, Action> apply, Func<ProfileSettings, Task>? writeSecrets)
     {
-        var existing = settings.ActiveProfile;
+        var existing = Find(target);
+        if (existing is null && !target.IsNew)
+        {
+            throw new SetupException(Strings.Get("windows.setup.error.profile_deleted"));
+        }
+
         var profile = existing ?? new ProfileSettings
         {
-            Id = _newProfileId,
+            Id = target.ProfileId,
             Name = FunnyNames.Random(settings.Profiles.Select(p => p.Name)),
             CreatedAt = time.GetUtcNow(),
         };
@@ -201,10 +219,12 @@ public sealed class SetupService(
         {
             try
             {
-                await writeSecrets(profile).ConfigureAwait(false);
+                // The settings are restored on the caller's (UI) thread, which owns them.
+                await writeSecrets(profile).ConfigureAwait(true);
             }
-            catch (Exception e) when (e is SecretStoreException or IOException or UnauthorizedAccessException or CryptographicException)
+            catch (Exception e)
             {
+                // A cancelled save (the wizard closed while the secret waited for the credential lock) is undone too.
                 Restore();
                 try
                 {
@@ -215,13 +235,13 @@ public sealed class SetupService(
                     throw new SetupException(Strings.Format("windows.setup.error.save_failed", $"{e.Message} {restore.Message}"), e);
                 }
 
-                throw new SetupException(Strings.Format("windows.setup.error.save_failed", e.Message), e);
-            }
-        }
+                if (e is SecretStoreException or IOException or UnauthorizedAccessException or CryptographicException)
+                {
+                    throw new SetupException(Strings.Format("windows.setup.error.save_failed", e.Message), e);
+                }
 
-        if (existing is null)
-        {
-            _newProfileId = Guid.NewGuid();
+                throw;
+            }
         }
 
         return profile;

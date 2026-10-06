@@ -225,6 +225,19 @@ public partial class App : Application
                 UpdateViews();
             }
         };
+        _coordinator.ConsoleKeyRenewed += (profileId, linkedAt, expiry) =>
+        {
+            try
+            {
+                _profiles.ConsoleKeyRenewed(profileId, linkedAt, expiry);
+            }
+            catch (SetupException error)
+            {
+                MessageBox.Show(error.Message, Strings.Get("app.name"), MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+
+            UpdateViews();
+        };
         _coordinator.StatusChanged += status =>
         {
             // A failed status check keeps the last known status, as upstream does.
@@ -643,10 +656,16 @@ public partial class App : Application
         }
     }
 
-    private void OnSettingsEdited()
+    /// <summary>After an edit on the settings pages: saves and applies it. False when the save failed; the page then undoes the edit.</summary>
+    private bool OnSettingsEdited()
     {
-        Persist();
+        if (!Persist())
+        {
+            return false;
+        }
+
         OnSettingsApplied();
+        return true;
     }
 
     /// <summary>After settings changed and were saved: poll what is now shown and redraw.</summary>
