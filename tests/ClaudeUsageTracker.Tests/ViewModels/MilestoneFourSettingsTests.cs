@@ -209,8 +209,13 @@ public sealed class MilestoneFourSettingsTests : IDisposable
         Assert.True(profile.AutoStartSessionEnabled);
         Assert.False(profile.NotificationSettings.Threshold90Enabled);
         Assert.Equal("mail", profile.NotificationSettings.SoundName);
-        // Without a claude.ai sign-in the page says nothing is sent yet.
+        // Without a claude.ai sign-in the page says it cannot auto-start, and the switch is greyed.
         Assert.True(model.AutoStartNeedsClaudeAi);
+        Assert.False(model.CanSwitchAutoStart);
+
+        Profile.ClaudeAi = new ClaudeAiLink { OrganizationId = "org" };
+        Assert.False(model.AutoStartNeedsClaudeAi);
+        Assert.True(model.CanSwitchAutoStart);
     });
 
     [Fact]

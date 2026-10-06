@@ -51,7 +51,7 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
 
 ## Automated tests
 
-1,320 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus the 8 new ones below and 21 for defects 4 to 10:
+1,321 tests pass, none skipped, with no build warnings. That is 1,296 before, less the 5 language cases, plus the 8 new ones below, 21 for defects 4 to 10 and 1 for defect 11:
 
 - **`TheFirstCheckOnANewViewSucceedsAndNavigatesOnce`.**
   - The setup: a real WebView2 context on its own dispatcher thread, parked on a page of a small HTTP server on 127.0.0.1, sends the three requests of a usage check at once.
@@ -120,6 +120,13 @@ Your code review before publishing (2026-10-06) found defects 4 to 7; fixing the
     - The effect: the error was shown, but the app went on with the unsaved choice until it was restarted, which then quietly brought back the old one. Some of these choices act outside the app: session auto-start sends messages, a global shortcut is registered, and the HUD installs hooks in Claude Code's settings.
     - The fix: the settings pages, the status line choices and the HUD switches apply an edit only once it is saved. A failed save is shown and the edit undone, as profile actions already were. Records of what has already been done outside the app, such as an applied status line or an installed launcher, still follow what was done.
     - Checked by `AnEditWhoseSaveFailsIsUndone` and `ChoicesWhoseSaveFailsAreUndoneAndNotApplied`.
+
+You found defect 11 in daily use of the published build (2026-10-06):
+
+11. **The auto-start switch looked usable on a profile without a claude.ai sign-in.**
+    - The effect: of two Claude profiles with auto-start on, only one started sessions. The other had only a Claude Code login, and auto-start sends through a claude.ai session, so it was skipped at every check. The card's note was easy to miss.
+    - The fix: without a claude.ai sign-in the switch is greyed, showing what is stored (your choice), and the note says the profile can't auto-start. A profile switched on earlier starts sending once it is signed in. Parity difference 39.
+    - Checked by `TheAutoStartSwitchIsGreyedWithoutAClaudeAiSignIn`, which realises the settings window and failed with the binding removed. The Tab check's settings now include a claude.ai sign-in, so the switch is still reached there.
 
 ## Delivery checks in fixture mode
 

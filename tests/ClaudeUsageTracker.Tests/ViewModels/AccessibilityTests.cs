@@ -219,6 +219,33 @@ public sealed class AccessibilityTests : IDisposable
         window.Close();
     });
 
+    /// <summary>
+    /// Auto-start sends through the profile's claude.ai session, so without one its switch is greyed, which also takes it
+    /// out of the Tab order. It still shows what is stored, and a sign-in makes it usable.
+    /// </summary>
+    [Fact]
+    public Task TheAutoStartSwitchIsGreyedWithoutAClaudeAiSignIn() => WpfApplication.Run(() =>
+    {
+        var profile = new ProfileSettings { Name = "Work", AutoStartSessionEnabled = true };
+        var model = SettingsModel(new AppSettings { Profiles = [profile], ActiveProfileId = profile.Id });
+        var window = new SettingsWindow(model);
+        window.Navigate(SettingsSection.General);
+        Show(window);
+        var controls = new List<FrameworkElement>();
+        Operable(window, controls);
+        var toggle = controls.OfType<CheckBox>().Single(c => AutomationProperties.GetName(c) == "Auto-Start New Session");
+
+        Assert.False(toggle.IsEnabled);
+        Assert.True(toggle.IsChecked);
+
+        profile.ClaudeAi = new ClaudeAiLink { OrganizationId = "org" };
+        model.Reload();
+        Settle();
+        Assert.True(toggle.IsEnabled);
+        Assert.True(toggle.IsChecked);
+        window.Close();
+    });
+
     private static List<TextBox> RenameBoxes(Window window)
     {
         var controls = new List<FrameworkElement>();
@@ -226,10 +253,13 @@ public sealed class AccessibilityTests : IDisposable
         return [.. controls.OfType<TextBox>().Where(t => t.Tag is Guid)];
     }
 
-    /// <summary>The settings window with every optional part shown: API metric, notifications, several profiles displayed.</summary>
+    /// <summary>
+    /// The settings window with every optional part shown: API metric, notifications, several profiles displayed, and a
+    /// claude.ai sign-in, without which the auto-start switch is greyed.
+    /// </summary>
     private (SettingsWindow Window, AppSettings Settings) FullSettingsWindow()
     {
-        var profile = new ProfileSettings { Name = "Work", Console = new ConsoleLink() };
+        var profile = new ProfileSettings { Name = "Work", Console = new ConsoleLink(), ClaudeAi = new ClaudeAiLink { OrganizationId = "org" } };
         var settings = new AppSettings
         {
             Profiles = [profile, new ProfileSettings { Name = "Home" }], ActiveProfileId = profile.Id, IsMultiProfile = true,

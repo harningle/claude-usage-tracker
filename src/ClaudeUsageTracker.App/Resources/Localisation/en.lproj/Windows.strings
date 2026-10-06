@@ -213,7 +213,7 @@
 "windows.general.autostart_description" = "When this profile's 5-hour session has not started, send one short message (\"Hi\", to Claude Haiku) through its claude.ai session, then delete that conversation. This uses your usage. It is sent only when switched on here, never by usage checks.";
 "windows.general.autostart_requirements" = "Requirements:";
 "windows.general.autostart_requirement" = "• A claude.ai sign-in for this profile (Credentials → Claude.ai)";
-"windows.general.autostart_needs_claude_ai" = "This profile has no claude.ai sign-in yet, so nothing is sent.";
+"windows.general.autostart_needs_claude_ai" = "This profile can't auto-start a session because it has no claude.ai sign-in.";
 "windows.autostart.failed_status" = "claude.ai answered with HTTP %d.";
 "windows.autostart.failed_network" = "No response arrived.";
 "windows.autostart.failed_response" = "The response was not understood.";

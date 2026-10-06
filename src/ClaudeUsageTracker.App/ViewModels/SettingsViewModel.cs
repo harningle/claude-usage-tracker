@@ -240,6 +240,12 @@ public sealed class SettingsViewModel : ObservableObject
     /// <summary>Upstream's requirement: a claude.ai session, through which the message is sent.</summary>
     public bool AutoStartNeedsClaudeAi => CanAutoStart && Profile?.ClaudeAi is null;
 
+    /// <summary>
+    /// Unlike upstream, the switch is greyed without a claude.ai sign-in, since it could not send anything. It still shows
+    /// what is stored, so a profile switched on earlier starts sending once it is signed in.
+    /// </summary>
+    public bool CanSwitchAutoStart => CanAutoStart && Profile?.ClaudeAi is not null;
+
     private NotificationSettings Notify => Profile?.NotificationSettings ?? new NotificationSettings();
 
     public bool NotificationsEnabled
