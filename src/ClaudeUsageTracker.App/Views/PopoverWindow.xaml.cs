@@ -57,6 +57,9 @@ public partial class PopoverWindow : Window
     /// <summary>A profile was chosen in the switcher menu.</summary>
     public event Action<Guid>? ProfileSelected;
 
+    /// <summary>The switch of Claude Code's account that waits for Claude Code to close was cancelled.</summary>
+    public event EventHandler? CancelSwitchRequested;
+
     public bool IsDetached => _detached;
 
     /// <summary>
@@ -200,6 +203,8 @@ public partial class PopoverWindow : Window
     }
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnCancelSwitchClick(object sender, RoutedEventArgs e) => CancelSwitchRequested?.Invoke(this, EventArgs.Empty);
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {

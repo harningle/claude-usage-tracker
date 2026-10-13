@@ -54,7 +54,8 @@ public sealed class AccessibilityTests : IDisposable
         var other = new ProfileSettings { Name = "Home" };
         var settings = new AppSettings { Profiles = [profile, other], ActiveProfileId = profile.Id };
         var model = new PopoverViewModel();
-        model.Update(settings, profile, State(profile.Id), null, Now);
+        // With a switch of Claude Code waiting, so its Cancel button is checked too.
+        model.Update(settings, profile, State(profile.Id), null, Now, pendingSwitch: other);
         var window = new PopoverWindow(model, new PopoverToggle(TimeProvider.System));
 
         Assert.Empty(Audit(window));
@@ -521,6 +522,7 @@ public sealed class AccessibilityTests : IDisposable
                 ApplyShortcuts = () => [],
                 SuspendShortcuts = () => { },
                 Pages = new Integration.IntegrationHarness(Path.Combine(_temp.Path, "integration"), settings, _time).Pages,
+                ProfilePicked = _ => { },
             });
     }
 

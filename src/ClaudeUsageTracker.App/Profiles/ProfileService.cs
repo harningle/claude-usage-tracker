@@ -13,8 +13,8 @@ namespace ClaudeUsageTracker.App.Profiles;
 /// <summary>
 /// The profile lifecycle: create, rename, activate, delete, which profiles are shown, and removing a
 /// profile's links. Port of upstream <c>ProfileManager</c>, with two differences. Activating a profile
-/// only changes which profile is viewed; it never writes a login into Claude Code's files (plan.md
-/// section 2 separates viewing from synchronising the CLI account, which is Milestone 4). And a removal
+/// here only changes which profile is viewed; it never writes a login into Claude Code's files. When the
+/// user picks a profile, the app asks <c>CliSwitcher</c> for the guarded switch (plan.md section 2). And a removal
 /// is recoverable: the settings are saved first, and whatever data could not be deleted at once is listed
 /// in the settings and deleted at the next start.
 /// </summary>

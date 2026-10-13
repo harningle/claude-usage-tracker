@@ -13,9 +13,17 @@ namespace ClaudeUsageTracker.App.ClaudeCode;
 /// <summary>A switch waiting for Claude Code to close.</summary>
 /// <param name="AutomaticFrom">For a switch requested by auto-switch rather than by the user: the profile that reached its limit.</param>
 /// <param name="ConfirmedOccupant">The login the user agreed to sign out, if the switch needed that.</param>
-public sealed record PendingCliSwitch(Guid TargetProfileId, Guid? AutomaticFrom, string? ConfirmedOccupant, DateTimeOffset RequestedAt)
+/// <param name="FromActivation">Requested by picking the profile rather than on the CLI Account page.</param>
+public sealed record PendingCliSwitch(
+    Guid TargetProfileId, Guid? AutomaticFrom, string? ConfirmedOccupant, DateTimeOffset RequestedAt, bool FromActivation = false)
 {
     public bool Automatic => AutomaticFrom is not null;
+
+    /// <summary>
+    /// Whether its wait for Claude Code was reported. One queued while another switch ran is reported at its first attempt
+    /// that finds Claude Code running, since only then is that why it waits.
+    /// </summary>
+    public bool WaitReported { get; init; }
 }
 
 /// <summary>What the CLI Account page shows about switching Claude Code to the active profile's account.</summary>
@@ -27,11 +35,11 @@ public sealed record PendingCliSwitch(Guid TargetProfileId, Guid? AutomaticFrom,
 public sealed record CliSwitchView(bool InUse, bool CanSwitch, bool Pending, string? Message, string Folder, bool NeedsSignIn = false);
 
 /// <summary>
-/// The "Use in Claude Code" action and auto-switch's switches, on top of <see cref="CliLinkService.SwitchAsync"/>. Viewing
-/// a profile never switches Claude Code (plan.md section 2 separates the two). A switch that has to wait because Claude
-/// Code is or may be running is kept, one at a time, shown in the settings and tried again every few seconds; it can be
-/// cancelled. The queue is in memory only, so a restart drops it. An unfinished switch from an earlier run is settled
-/// first. Use it from the UI thread only.
+/// The "Use in Claude Code" action, the switch that picking a profile asks for, and auto-switch's switches, on top of
+/// <see cref="CliLinkService.SwitchAsync"/> (plan.md section 2). Viewing a profile never switches Claude Code. A switch
+/// that has to wait because Claude Code is or may be running is kept, one at a time, shown in the popover and the
+/// settings and tried again every few seconds; it can be cancelled. The queue is in memory only, so a restart drops it.
+/// An unfinished switch from an earlier run is settled first. Use it from the UI thread only.
 /// </summary>
 public sealed class CliSwitcher
 {
@@ -76,7 +84,11 @@ public sealed class CliSwitcher
     /// outcome; <see cref="CliSwitchOutcome.NeedsConfirmation"/> asks the caller to confirm and call again.
     /// </summary>
     /// <param name="automaticFrom">Set by auto-switch: the profile that reached its limit, whose account Claude Code is on.</param>
-    public async Task<CliSwitchResult> RequestAsync(ProfileSettings target, Guid? automaticFrom, string? confirmedOccupant)
+    /// <param name="fromActivation">
+    /// Asked for by picking the profile. Its outcome is announced by a notification even when it switches at once, and it
+    /// never asks to sign out a login no profile follows: such a login is left as it is.
+    /// </param>
+    public async Task<CliSwitchResult> RequestAsync(ProfileSettings target, Guid? automaticFrom, string? confirmedOccupant, bool fromActivation = false)
     {
         var automatic = automaticFrom is not null;
         // The newest request is the one that counts: a switch still waiting for another profile is dropped.
@@ -86,7 +98,7 @@ public sealed class CliSwitcher
         {
             // Another switch or a settlement is running: this one waits its turn rather than being lost, and its outcome
             // is reported when it runs.
-            Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow());
+            Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow(), fromActivation);
             Changed?.Invoke();
             KeepTrying();
             return new CliSwitchResult(CliSwitchOutcome.Deferred);
@@ -95,7 +107,9 @@ public sealed class CliSwitcher
         var result = await RunAsync(target.Id, confirmedOccupant, automaticFrom);
         if (result.Refusal == CliSwitchRefusal.NoLongerApplies)
         {
-            // Dropped as a queued one would be: nothing was changed, so there is nothing to report.
+            // Dropped as a queued one would be: nothing was changed, so there is nothing to report. A switch that was
+            // waiting was dropped by this request, so the views are drawn again.
+            Changed?.Invoke();
             KeepTrying();
             return result;
         }
@@ -109,10 +123,10 @@ public sealed class CliSwitcher
                 return result;
             }
 
-            Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow());
+            Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow(), fromActivation) { WaitReported = true };
         }
 
-        Report(target.Id, result, automatic, queued: false);
+        Report(target.Id, result, automatic, queued: false, fromActivation);
         KeepTrying();
         return result;
     }
@@ -256,7 +270,12 @@ public sealed class CliSwitcher
 
         var result = await RunAsync(target.Id, pending.ConfirmedOccupant, pending.AutomaticFrom);
         // A newer request made meanwhile replaced this one and stays queued.
-        if (result.Outcome != CliSwitchOutcome.Deferred && ReferenceEquals(Pending, pending))
+        if (result.Outcome == CliSwitchOutcome.Deferred && ReferenceEquals(Pending, pending) && !pending.WaitReported)
+        {
+            Pending = pending with { WaitReported = true };
+            Report(target.Id, result, pending.Automatic, queued: true, pending.FromActivation);
+        }
+        else if (result.Outcome != CliSwitchOutcome.Deferred && ReferenceEquals(Pending, pending))
         {
             if (result.Refusal == CliSwitchRefusal.NoLongerApplies)
             {
@@ -265,7 +284,7 @@ public sealed class CliSwitcher
             else
             {
                 Pending = null;
-                Report(target.Id, result, pending.Automatic, queued: true);
+                Report(target.Id, result, pending.Automatic, queued: true, pending.FromActivation);
             }
         }
 
@@ -313,6 +332,14 @@ public sealed class CliSwitcher
         try
         {
             var folder = _sharedFolder();
+            // A folder that already holds the account needs no switch, so none is left waiting for Claude Code to close.
+            if (_settings.Profiles.FirstOrDefault(p => p.Id == targetId)?.CliLink is { } link
+                && _links.Read(folder) is { Credentials: not null } shared
+                && CliLoginLabels.Compare(link.Identity, shared.Account?.Identity, null, null) == CliAccountMatch.SameAccount)
+            {
+                return new CliSwitchResult(CliSwitchOutcome.AlreadyInUse, Detail: folder.Path);
+            }
+
             var stillWanted = automaticFrom is { } origin ? AutomaticConditions(origin) : null;
             var result = await _links.SwitchAsync(targetId, LinkedProfiles(), folder, confirmedOccupant, stillWanted, CancellationToken.None);
             if (result.Outcome == CliSwitchOutcome.Switched)
@@ -351,10 +378,12 @@ public sealed class CliSwitcher
         _applied();
     }
 
-    private void Report(Guid targetId, CliSwitchResult result, bool automatic, bool queued)
+    private void Report(Guid targetId, CliSwitchResult result, bool automatic, bool queued, bool fromActivation)
     {
         var target = _settings.Profiles.FirstOrDefault(p => p.Id == targetId);
-        _messages[targetId] = Describe(result, target);
+        _messages[targetId] = fromActivation && result.Outcome == CliSwitchOutcome.NeedsConfirmation
+            ? Strings.Format("windows.cli.switch.untracked_kept", result.Detail ?? "")
+            : Describe(result, target);
         _messages.Remove(Guid.Empty);
         Changed?.Invoke();
         if (target is null || !target.NotificationSettings.Enabled)
@@ -362,19 +391,22 @@ public sealed class CliSwitcher
             return;
         }
 
-        // A switch the user is not watching happen is announced: an automatic one, or one that waited for Claude Code.
-        if (result.Outcome == CliSwitchOutcome.Switched && (automatic || queued))
+        // A switch the user is not watching happen on the CLI Account page is announced: an automatic one, one that
+        // waited for Claude Code, or one asked for by picking the profile. An automatic or picked one is also announced,
+        // once, when it is found to wait for Claude Code.
+        var announced = automatic || queued || fromActivation;
+        if (result.Outcome == CliSwitchOutcome.Switched && announced)
         {
             _automation.Notifier.Show(new AppAlert(
                 Strings.Get("windows.cli.switch.notification.title"), Strings.Format("windows.cli.switch.done", target.Name), target.Id, "none"));
         }
-        else if (result.Outcome == CliSwitchOutcome.Deferred && automatic && !queued)
+        else if (result.Outcome == CliSwitchOutcome.Deferred && (automatic || fromActivation))
         {
             _automation.Notifier.Show(new AppAlert(
                 Strings.Get("windows.cli.switch.notification.title"), Strings.Format("windows.cli.switch.deferred", target.Name), target.Id,
                 target.NotificationSettings.SoundName));
         }
-        else if ((automatic || queued)
+        else if (announced
                  && result.Outcome is CliSwitchOutcome.Refused or CliSwitchOutcome.Conflict or CliSwitchOutcome.RepairNeeded or CliSwitchOutcome.NeedsConfirmation)
         {
             _automation.Notifier.Show(new AppAlert(

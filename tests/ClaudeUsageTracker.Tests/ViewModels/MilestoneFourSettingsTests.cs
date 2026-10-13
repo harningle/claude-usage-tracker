@@ -94,6 +94,7 @@ public sealed class MilestoneFourSettingsTests : IDisposable
                 },
                 SuspendShortcuts = () => _calls.Add("suspend"),
                 Pages = new Integration.IntegrationHarness(Path.Combine(_temp.Path, "integration"), _settings, _time).Pages,
+                ProfilePicked = p => _calls.Add("picked:" + p.Name),
             });
     }
 
@@ -111,6 +112,34 @@ public sealed class MilestoneFourSettingsTests : IDisposable
     [Fact]
     public void ShortcutsAreWrittenTheWindowsWay() =>
         Assert.Equal("Ctrl+Shift+U", Shortcuts.Describe(new KeyCombo { VirtualKey = U, Modifiers = Control | Shift }));
+
+    [Fact]
+    public Task PickingAProfileAsksForClaudeCodeToFollowItEachTime() => OnSta(model =>
+    {
+        // As in the popover's switcher, picking the active profile again asks again (after a restart dropped a waiting switch).
+        var home = new ProfileSettings { Name = "Home" };
+        _settings.Profiles.Add(home);
+
+        model.ActivateProfile(home.Id);
+        model.ActivateProfile(home.Id);
+
+        Assert.Equal(home.Id, _settings.ActiveProfileId);
+        Assert.Equal(["picked:Home", "picked:Home"], _calls);
+    });
+
+    [Fact]
+    public Task APickThatCouldNotBeSavedAsksForNoSwitch() => OnSta(model =>
+    {
+        var home = new ProfileSettings { Name = "Home" };
+        _settings.Profiles.Add(home);
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "settings.json"));
+
+        model.ActivateProfile(home.Id);
+
+        Assert.Equal(Profile.Id, _settings.ActiveProfileId);
+        Assert.NotNull(model.ProfileError);
+        Assert.Empty(_calls);
+    });
 
     [Fact]
     public Task RecordingTakesAShortcutAndRegistersTheShortcutsAgain() => OnSta(model =>

@@ -91,6 +91,9 @@ public sealed class SettingsIntegrations
 
     /// <summary>The Milestone 5 pages: the status line, the activity HUD and the launcher card.</summary>
     public required IntegrationPages Pages { get; init; }
+
+    /// <summary>A profile was picked and is now active: Claude Code is switched to its account too, if it can be.</summary>
+    public required Action<ProfileSettings> ProfilePicked { get; init; }
 }
 
 /// <summary>
@@ -773,12 +776,20 @@ public sealed class SettingsViewModel : ObservableObject
         }
     });
 
-    /// <summary>Makes a profile the one that is viewed and configured here. Claude Code's own login is not touched.</summary>
+    /// <summary>
+    /// Makes a profile the one that is viewed and configured here, and asks for Claude Code to be switched to its account,
+    /// as picking it in the popover does; picking the active profile again asks again.
+    /// </summary>
     public void ActivateProfile(Guid id) => Run(() =>
     {
-        if (Find(id) is { } profile && profile.Id != Profile?.Id)
+        if (Find(id) is { } profile)
         {
-            _profiles.Activate(profile);
+            if (profile.Id != Profile?.Id)
+            {
+                _profiles.Activate(profile);
+            }
+
+            _integrations.ProfilePicked(profile);
         }
     });
 

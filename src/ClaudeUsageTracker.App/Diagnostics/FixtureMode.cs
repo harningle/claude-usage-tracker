@@ -85,9 +85,15 @@ public sealed partial class FixtureMode
     /// <summary>A sign-in that succeeds at once, so the claude.ai and Console routes can be shown without a browser.</summary>
     public IBrowserSignIn SignIn() => new FixtureSignIn();
 
-    /// <summary>A process guard that sees no Claude Code process, so no real process is ever read.</summary>
-    public static CliProcessGuard ProcessGuard() =>
-        new(() => Array.Empty<ProcessEntry>(), () => new Dictionary<string, LauncherImage>());
+    /// <summary>
+    /// A process guard that never reads a real process. While <c>claude-running</c> exists in the responses folder it sees
+    /// one Claude Code process using the shared folder, so a switch waits as it would beside an open Claude Code.
+    /// </summary>
+    public CliProcessGuard ProcessGuard() =>
+        new(() => File.Exists(Path.Combine(Responses, "claude-running"))
+                ? [new ProcessEntry(1, 0, CliProcessGuard.ImageName, true, null, DateTime.UnixEpoch)]
+                : [],
+            () => new Dictionary<string, LauncherImage>());
 
     /// <summary>
     /// The Codex auto-start, in place of running the Codex CLI: <c>codex-auto-start.jsonl</c> holds the events it would

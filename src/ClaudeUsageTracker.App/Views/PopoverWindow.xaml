@@ -140,6 +140,26 @@
       </Border>
     </Button>
 
+    <!-- A switch of Claude Code's account that waits for Claude Code to close, whichever profile is shown. -->
+    <Border Background="{DynamicResource Banner.Info}" CornerRadius="6" Padding="14,6" Margin="10,4,10,0"
+            Visibility="{Binding PendingSwitch, Converter={x:Static views:Converters.NotNullToVisible}}">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE895;" FontSize="11" Foreground="{DynamicResource Status.Info}" />
+        <TextBlock Grid.Column="1" Style="{StaticResource Text.Base}" Text="{Binding PendingSwitch}" FontSize="11" FontWeight="Medium"
+                   Margin="8,0" TextWrapping="Wrap" VerticalAlignment="Center" />
+        <Button x:Name="CancelSwitchButton" Grid.Column="2" Style="{StaticResource PlainButton}" Padding="4,2" Click="OnCancelSwitchClick"
+                AutomationProperties.Name="{Binding CancelSwitchLabel}">
+          <TextBlock Style="{StaticResource Text.Base}" Text="{Binding CancelSwitchLabel}" FontSize="11" FontWeight="SemiBold"
+                     Foreground="{DynamicResource Status.Info}" />
+        </Button>
+      </Grid>
+    </Border>
+
     <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Placeholder}" FontSize="12" Margin="14,16,14,10"
                TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"
                Visibility="{Binding Placeholder, Converter={x:Static views:Converters.NotNullToVisible}}" />

@@ -1,5 +1,6 @@
 using System.IO;
 using ClaudeUsageTracker.App.Automation;
+using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Diagnostics;
 
 namespace ClaudeUsageTracker.Tests.Diagnostics;
@@ -34,6 +35,21 @@ public sealed class FixtureModeTests : IDisposable
     [InlineData("--fixtures", "folder")]
     public void MalformedFixtureArgumentIsRejected(params string[] args) =>
         Assert.Throws<ArgumentException>(() => FixtureMode.FromArguments(args));
+
+    [Fact]
+    public void AClaudeCodeIsSeenRunningOnlyWhileItsMarkerFileExists()
+    {
+        var fixture = FixtureMode.FromArguments(["--fixture", _temp.Path])!;
+        var guard = fixture.ProcessGuard();
+        var shared = CliStore.Inventory(fixture.UserProfile, null, [])[0];
+        Directory.CreateDirectory(fixture.Responses);
+
+        Assert.Equal(StoreActivity.Idle, guard.ActivityFor(shared));
+        File.WriteAllText(Path.Combine(fixture.Responses, "claude-running"), "");
+        Assert.Equal(StoreActivity.InUse, guard.ActivityFor(shared));
+        File.Delete(Path.Combine(fixture.Responses, "claude-running"));
+        Assert.Equal(StoreActivity.Idle, guard.ActivityFor(shared));
+    }
 
     [Fact]
     public void RepeatedFixtureArgumentIsRejected() =>

@@ -158,6 +158,40 @@ At your request, a Codex profile can now auto-start its session as well. Upstrea
   - **A rate limit on the confirmation read did not reach polling.** For a polled profile the confirmation was a request of its own beside the polling loop, and a `Retry-After` on it stayed with the auto-start, so the loop kept checking. The loop now makes that read itself when asked (`RefreshCoordinator.CheckNowAsync`), so its schedule and server-requested waits apply, and the auto-start again never requests beside a loop. Its tests show the check made at once and answered only once done, nothing sent during a server-requested wait, and an answer when the profile stops being polled. `APolledProfileIsDecidedAndConfirmedByItsPollingLoopAlone` and `AConfirmationTheLoopCouldNotMakeStartsNothing` cover the auto-start's side.
   - **A project-level test run did not build the stand-in `codex.exe`,** so all `CodexExecTests` failed unless the whole solution was built. The test project now references `tests/FakeCodex` as it does `tests/FakeClaude`, without referencing its assembly. A run of the test project alone, with the stand-in's output deleted first, passed.
 
+## Claude Code follows the picked profile (added 2026-10-13)
+
+At your request after daily use, picking a profile now switches Claude Code to its account too, as upstream's activation did. This replaces your decision of 2026-10-02, under which only "Use in Claude Code" switched it (plan.md section 2; parity differences 29 and 41).
+
+- **What prompted it:** on 2026-10-13 you reported that switching did not work after a few days away. The settings showed Activate pressed at 20:15:06 and 20:16:06 UTC, which then changed only the viewed profile, and no "Use in Claude Code" in that run.
+- **What asks for the switch:**
+  - The profile menus of the popover and the settings window, Activate in Manage Profiles and the next-profile shortcut.
+  - Picking the active profile again asks again, which is how to ask after a restart dropped a waiting switch.
+  - Only a Claude profile linked to the folder the plain `claude` command uses asks. A profile linked to a launcher's folder is used through its launcher.
+- **What does not:**
+  - Clicking a tray icon in multi-profile mode.
+  - A notification click, which would otherwise move Claude Code onto a profile nearing its limit.
+  - Auto-switch, which is unchanged: only when Claude Code was on the profile that reached its limit.
+  - Finishing the setup wizard.
+- **The wait** is the existing queue of "Use in Claude Code". While any Claude Code may be running, the switch waits in memory, is tried every five seconds and is dropped by a restart. The popover now shows it under the banner, whichever profile it shows, with Cancel Switch. Picking the profile Claude Code is already on drops it too, and it ends once Claude Code is signed in to its account.
+- **Notifications:** a picked switch is announced when it starts to wait ("Claude Code is running, so it keeps its account until it closes. Then it switches to the account of profile …", as for auto-switch), and again when it is made or refused, also when it did not have to wait. The wait is announced once. A pick made while another switch is still being made waits its turn; it is announced at its first attempt that finds Claude Code running, or, if that attempt switches at once, only when it is made. A switch made at once from the CLI Account page is still shown only there.
+- **Untracked logins:** a picked switch never signs out a login that no profile follows. It leaves it and says so in its notification; "Use in Claude Code" keeps its confirmation.
+- **Fixture mode** sees one running Claude Code while a `claude-running` file exists in its responses folder, so the wait can be shown there.
+- **Tests:** 13 new; 1,386 pass, none skipped, with no build warnings.
+  - `CliSwitcherTests`: `OnlyAPickedSwitchIsAnnouncedWhenItHappensAtOnce` (2 cases), `APickedSwitchThatWaitsIsAnnouncedWhenQueuedAndWhenMade`, `APickedSwitchNeverSignsOutALoginNoProfileFollows` (at once and after a wait), `AnAutomaticRequestThatNoLongerAppliesRedrawsTheWaitingSwitchItDropped`, `PickingTheAccountClaudeCodeIsOnWhileItRunsDropsTheWaitingSwitch`, `AWaitingSwitchEndsOnceClaudeCodeIsSignedInToItsAccount` and `APickMadeWhileAnotherSwitchRunsIsAnnouncedOnceItWaitsForClaudeCode`. `TheNewestRequestReplacesOneThatWaits` now starts with Claude Code on a third account, since a switch to the account it is on no longer waits.
+  - `MilestoneFourSettingsTests`: `PickingAProfileAsksForClaudeCodeToFollowItEachTime` and `APickThatCouldNotBeSavedAsksForNoSwitch`.
+  - `PopoverWindowTests`: `AWaitingSwitchOfClaudeCodeIsShownWithItsCancelWhicheverProfileIsShown`. `AccessibilityTests` now audits the popover with a waiting switch, so its Cancel Switch button is checked too.
+  - `FixtureModeTests`: `AClaudeCodeIsSeenRunningOnlyWhileItsMarkerFileExists`.
+  - A mutation check broke fourteen guards in turn, and each was caught: the notification of a picked switch when it is made and when it starts to wait, the report of a wait found at a later attempt, reporting it only once (three ways), the untracked-login message, keeping the flag on a waiting switch and on its later attempt, the redraw after a dropped switch, the settings menu asking at all, asking only after a successful save, asking again for the active profile, and the popover's line.
+- **Fixture check (2026-10-13),** with synthetic accounts A and B, driven through UI Automation:
+  1. With B in the fixture folder and `claude-running` present, picking Fixture A in the popover's menu showed "Claude Code switches to Fixture A when it closes." with Cancel Switch, below the existing banner ([media/popover-switch-pending-fixture.png](media/popover-switch-pending-fixture.png)).
+  2. After the marker was removed, the folder held A's login and account record within 8 seconds, with `mcpOAuth` kept, one encrypted backup and no journal. The line was gone, and Windows' notification history held "Claude Code Account | Fixture data: Claude Code now uses the account of profile Fixture A."
+  3. Picking Fixture B with no marker switched at once and was announced the same way.
+  4. With the marker back, picking Fixture A and then Cancel Switch in the popover removed the line. After the marker was removed, the folder still held B 8 seconds later.
+  5. From Manage Profiles, with the marker present: Activate on Fixture A showed the popover's line, and after the marker was removed the folder held A and the notification followed. Activate on Fixture B, the account Claude Code was on, left nothing waiting.
+  6. After your review asked for a notification when a picked switch is queued (and, in a second review, for one queued while another switch ran, covered by the automated test above): with the marker present, picking Fixture B in the popover posted "Claude Code is running, so it keeps its account until it closes. Then it switches to the account of profile Fixture B." After the marker was removed, the folder held B and "Claude Code now uses the account of profile Fixture B." followed. Steps 1 to 5 ran before that change.
+- **Found by the fixture check, and fixed:** picking the profile Claude Code was already on, while Claude Code ran, still queued a switch. The popover then said "Claude Code switches to Fixture B when it closes" while Claude Code was on B. The switch would have ended without writing anything once Claude Code closed, because the process check came before the check of the folder's account. The queue now reads the folder first and leaves nothing waiting when it already holds the account. The two tests above failed before the fix.
+- **Not checked:** the next-profile shortcut, beyond its one changed call. Nothing of this has run live; your installed copy predates it until it is republished.
+
 ## Delivery checks in fixture mode
 
 Run by Claude on 2026-10-05 with the published build and a synthetic fixture folder. The steps were driven through UI Automation, by the accessible names above.
@@ -248,6 +282,7 @@ These need your accounts or your PC, so they are yours to run:
    - a helper upgrade with real Claude Code
 4. **A clean PC** (D2), if you have one or a virtual machine: copy the published folder there, start it, set up a profile and confirm that a notification shows.
 5. **The Codex auto-start:** passed on the evening of 2026-10-06 (see above). Over the following days, check that it starts each new Codex window once, and only while Codex is idle.
+   - On 2026-10-13 the installed copy, started with Windows, ran it at 15:15:28 UTC with status 0, and Codex's weekly window then reset at 2026-10-20T15:15:16Z. That 5-hour window ended at 20:15:16. Your own Codex use at 20:16:41 came before the next five-minute check, so it started the following window itself.
 
 ## Reproducing
 

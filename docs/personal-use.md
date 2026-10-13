@@ -85,7 +85,7 @@ Logins are encrypted with Windows DPAPI for your Windows user on this PC, and th
 - An administrator resetting your Windows password (not you changing it) can make them unreadable too.
 - A backup of the data folder can be restored only by the same user on the same PC.
 
-Claude Code's and Codex's own login files are theirs. The tracker never writes Codex's. It writes Claude Code's only to hand back a login it renewed, or to switch Claude Code's account: when you choose Use in Claude Code, or through auto-switch if you have switched it on. Every other setting in them is kept.
+Claude Code's and Codex's own login files are theirs. The tracker never writes Codex's. It writes Claude Code's only to hand back a login it renewed, or to switch Claude Code's account: when you pick a Claude profile or choose Use in Claude Code, or through auto-switch if you have switched it on. Every other setting in them is kept.
 
 ## Removing it
 

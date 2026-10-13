@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using ClaudeUsageTracker.App.ClaudeCode;
 using ClaudeUsageTracker.App.Interop;
@@ -62,6 +64,35 @@ public class PopoverWindowTests
 
         // The check is only meaningful if the profiles really need different heights.
         Assert.True(heights[0] > heights[1], $"heights: {string.Join(", ", heights)}");
+        window.Close();
+    });
+
+    [Fact]
+    public Task AWaitingSwitchOfClaudeCodeIsShownWithItsCancelWhicheverProfileIsShown() => WpfApplication.Run(() =>
+    {
+        var work = new ProfileSettings { Name = "Work" };
+        var home = new ProfileSettings { Name = "Home" };
+        var settings = new AppSettings { Profiles = [work, home], ActiveProfileId = home.Id, IsMultiProfile = true };
+        var model = new PopoverViewModel();
+        var window = new PopoverWindow(model, new PopoverToggle(TimeProvider.System));
+        var cancelled = 0;
+        window.CancelSwitchRequested += (_, _) => cancelled++;
+        var cancel = (Button)window.FindName("CancelSwitchButton");
+        var strip = (Border)((Grid)cancel.Parent).Parent;
+
+        // Claude Code waits to switch to Home while the popover shows Work's icon.
+        model.Update(settings, work, TallState(work.Id), null, Now, pendingSwitch: home);
+        Settle();
+        Assert.Equal("Claude Code switches to Home when it closes.", model.PendingSwitch);
+        Assert.Equal(Visibility.Visible, strip.Visibility);
+
+        cancel.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Assert.Equal(1, cancelled);
+
+        model.Update(settings, work, TallState(work.Id), null, Now);
+        Settle();
+        Assert.Null(model.PendingSwitch);
+        Assert.Equal(Visibility.Collapsed, strip.Visibility);
         window.Close();
     });
 

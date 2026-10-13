@@ -192,7 +192,7 @@ public partial class App : Application
         _integration = new IntegrationService(_paths.Root, _userProfile, IntegrationService.DefaultBundledHelper, time);
         var processes = fixture is null
             ? CliProcessGuard.ForThisPc(() => _integration.LauncherImages, SessionObservedIn)
-            : FixtureMode.ProcessGuard();
+            : fixture.ProcessGuard();
         _links = new CliLinkService(secrets, time, _userProfile, credentialLock, tokens, processes,
             () => CliStore.Inventory(_userProfile, _configDirOverride, _linkedFolders),
             new CliSwitchRecords(_paths.CliSwitchJournalFile, new SecretStore(Path.Combine(_paths.SecretsDirectory, "backups"))));
@@ -340,7 +340,8 @@ public partial class App : Application
         _popover.SetupRequested += (_, _) => ShowWizard(null);
         _popover.ManageProfilesRequested += (_, _) => ShowSettings(SettingsSection.ManageProfiles);
         _popover.IntegrationRequested += (_, _) => ShowSettings(SettingsSection.ClaudeCode);
-        _popover.ProfileSelected += OnProfileSelected;
+        _popover.ProfileSelected += OnProfilePicked;
+        _popover.CancelSwitchRequested += (_, _) => _switcher.Cancel();
 
         _signalWait = ThreadPool.RegisterWaitForSingleObject(
             _showSignal, (_, _) => Dispatcher.BeginInvoke(ShowFromSecondLaunch), null, Timeout.Infinite, false);
@@ -466,7 +467,9 @@ public partial class App : Application
         var now = DateTimeOffset.UtcNow;
         var use24Hour = UsageDisplay.Uses24HourTime(_settings.TimeFormat, CultureInfo.CurrentCulture);
         _tray.Show(TrayModel.Build(_settings, id => _states.GetValueOrDefault(id), use24Hour, now, TimeZoneInfo.Local, Strings.Culture));
-        _popoverModel.Update(_settings, viewed, viewed is null ? null : _states.GetValueOrDefault(viewed.Id), _status, now, _integrationNeedsRepair);
+        _popoverModel.Update(
+            _settings, viewed, viewed is null ? null : _states.GetValueOrDefault(viewed.Id), _status, now, _integrationNeedsRepair,
+            _switcher.Pending is { } pending ? _settings.Profiles.FirstOrDefault(p => p.Id == pending.TargetProfileId) : null);
         if (_settingsModel is not null)
         {
             var active = _settings.ActiveProfile;
@@ -585,7 +588,7 @@ public partial class App : Application
                 var profiles = _settings.Profiles;
                 if (profiles.Count > 1 && _settings.ActiveProfile is { } active)
                 {
-                    OnProfileSelected(profiles[(profiles.IndexOf(active) + 1) % profiles.Count].Id);
+                    OnProfilePicked(profiles[(profiles.IndexOf(active) + 1) % profiles.Count].Id);
                 }
 
                 break;
@@ -691,12 +694,41 @@ public partial class App : Application
         }
     }
 
-    /// <summary>Upstream's switcher activates the chosen profile; Claude Code's own login is not touched.</summary>
-    private void OnProfileSelected(Guid profileId)
+    /// <summary>
+    /// The user picked a profile in the popover's switcher or with the next-profile shortcut: as upstream, it is activated
+    /// and Claude Code is switched to its account (see <see cref="SwitchCliTo"/>).
+    /// </summary>
+    private void OnProfilePicked(Guid profileId)
+    {
+        if (OnProfileSelected(profileId) && _settings.ActiveProfile is { } active)
+        {
+            SwitchCliTo(active);
+        }
+    }
+
+    /// <summary>
+    /// Asks for Claude Code to be switched to a picked profile's account (plan.md section 2): only for a Claude profile
+    /// linked to the folder the plain <c>claude</c> command uses, since a profile linked to a launcher's folder is used
+    /// there. The switch waits while Claude Code runs, and never signs out a login no profile follows.
+    /// </summary>
+    private void SwitchCliTo(ProfileSettings profile)
+    {
+        if (profile is { ProviderKind: Provider.Anthropic, CliLink: { } link }
+            && string.Equals(CliStore.Normalise(link.ConfigDirectory), SharedFolder().Path, StringComparison.OrdinalIgnoreCase))
+        {
+            _ = _switcher.RequestAsync(profile, null, null, fromActivation: true);
+        }
+    }
+
+    /// <summary>
+    /// Activates a profile, which changes only what is viewed; Claude Code's own login is not touched. False when the
+    /// profile is gone or the activation failed, which has been shown.
+    /// </summary>
+    private bool OnProfileSelected(Guid profileId)
     {
         if (_settings.Profiles.FirstOrDefault(p => p.Id == profileId) is not { } profile)
         {
-            return;
+            return false;
         }
 
         try
@@ -706,7 +738,7 @@ public partial class App : Application
         catch (SetupException error)
         {
             MessageBox.Show(error.Message, Strings.Get("app.name"), MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
+            return false;
         }
 
         _automation.UserTriggered(profile.Id);
@@ -716,6 +748,7 @@ public partial class App : Application
         _settingsModel?.Reload();
         _settingsWindow?.ProfileChanged();
         UpdateViews();
+        return true;
     }
 
     private void OnTrayActivated(TrayIcon icon, TrayActivation activation, Guid? profileId)
@@ -814,6 +847,7 @@ public partial class App : Application
                     ApplyShortcuts = () => _refusedShortcuts = _hotkeys!.Apply(_settings.Shortcuts),
                     SuspendShortcuts = () => _hotkeys!.Suspend(),
                     Pages = _pages,
+                    ProfilePicked = SwitchCliTo,
                 });
             _settingsWindow = new SettingsWindow(_settingsModel);
             _settingsWindow.SourceInitialized += (_, _) => _theme.StyleTitleBar(_settingsWindow);

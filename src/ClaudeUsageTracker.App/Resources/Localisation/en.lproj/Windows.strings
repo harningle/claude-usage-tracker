@@ -241,13 +241,15 @@
 "windows.cli.switch.pending" = "Claude Code switches to this account as soon as no Claude Code is running.";
 "windows.cli.switch.button" = "Use in Claude Code";
 "windows.cli.switch.cancel" = "Cancel Switch";
-"windows.cli.switch.about" = "This writes this profile's login into the folder the claude command uses, after saving the previous account's latest login to the profile that follows it. It happens only while no Claude Code is running. Both files are backed up, encrypted, and every other setting in them is kept. Activating a profile only changes what the tracker shows.";
+"windows.cli.switch.about" = "This writes this profile's login into the folder the claude command uses, after saving the previous account's latest login to the profile that follows it. It happens only while no Claude Code is running. Both files are backed up, encrypted, and every other setting in them is kept. Activating a profile linked to that folder asks for the same switch, but never signs out a login that no profile follows.";
 "windows.cli.switch.done" = "Claude Code now uses the account of profile %@.";
 "windows.cli.switch.already" = "Claude Code already uses this account.";
 "windows.cli.switch.waiting" = "Claude Code is running, so the switch waits until it closes.";
 "windows.cli.switch.deferred" = "Claude Code is running, so it keeps its account until it closes. Then it switches to the account of profile %@.";
 "windows.cli.switch.confirm.title" = "Sign Claude Code out of this account?";
 "windows.cli.switch.confirm.message" = "Claude Code is signed in to %@, which no profile follows. Switching signs it out of Claude Code, and you would need /login to use it there again. An encrypted backup of both files is kept. Switch anyway?";
+"windows.cli.switch.untracked_kept" = "Claude Code is signed in to %@, which no profile follows, so it was left as it is. To sign it out, choose Use in Claude Code on the CLI Account page.";
+"windows.popover.cli_switch_pending" = "Claude Code switches to %@ when it closes.";
 "windows.cli.switch.conflict" = "Claude Code's files changed during the switch, so it stopped and undid its own change. Try again.";
 "windows.cli.switch.repair" = "The switch could not be finished or undone (%@). The tracker settles it once no Claude Code is running.";
 "windows.cli.switch.sign_in_again" = "An unfinished switch left Claude Code's folder unclear: its login may not belong to the account it names. Until it is settled, the tracker renews no login. Sign in again in Claude Code (/login) with the account you want there, then choose Signed In Again.";

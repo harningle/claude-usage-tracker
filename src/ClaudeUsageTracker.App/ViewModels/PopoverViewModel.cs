@@ -95,6 +95,7 @@ public sealed class PopoverViewModel : ObservableObject
     private string? _credits;
     private ApiCreditsView? _apiCredits;
     private ApiCostView? _apiCost;
+    private string? _pendingSwitch;
 
     public string ProfileName { get => _profileName; private set => Set(ref _profileName, value); }
     public string StatusText { get => _statusText; private set => Set(ref _statusText, value); }
@@ -114,6 +115,11 @@ public sealed class PopoverViewModel : ObservableObject
     public ApiCreditsView? ApiCredits { get => _apiCredits; private set => Set(ref _apiCredits, value); }
     public ApiCostView? ApiCost { get => _apiCost; private set => Set(ref _apiCost, value); }
 
+    /// <summary>The switch of Claude Code's account that waits for Claude Code to close, whichever profile is shown; null when none waits.</summary>
+    public string? PendingSwitch { get => _pendingSwitch; private set => Set(ref _pendingSwitch, value); }
+
+    public string CancelSwitchLabel => Strings.Get("windows.cli.switch.cancel");
+
     /// <summary>The status page of the viewed profile's provider.</summary>
     public string StatusPage { get; private set; } = ServiceStatus.ClaudeStatusPage;
 
@@ -126,9 +132,10 @@ public sealed class PopoverViewModel : ObservableObject
 
     /// <param name="profile">The profile shown: the active one, or in multi-profile mode the one whose icon was clicked.</param>
     /// <param name="integrationNeedsRepair">Something installed for Claude Code is missing or broken; said when the profile itself has nothing more urgent.</param>
+    /// <param name="pendingSwitch">The profile Claude Code switches to once it closes, if a switch waits.</param>
     public void Update(
         AppSettings settings, ProfileSettings? profile, ProfileUsageState? state, ServiceStatus? status, DateTimeOffset now,
-        bool integrationNeedsRepair = false)
+        bool integrationNeedsRepair = false, ProfileSettings? pendingSwitch = null)
     {
         var use24Hour = UsageDisplay.Uses24HourTime(settings.TimeFormat, CultureInfo.CurrentCulture);
         var provider = profile?.ProviderKind ?? Provider.Anthropic;
@@ -166,6 +173,7 @@ public sealed class PopoverViewModel : ObservableObject
             _ => "Status.Unknown",
         });
         IsRefreshing = state?.IsRefreshing == true;
+        PendingSwitch = pendingSwitch is null ? null : Strings.Format("windows.popover.cli_switch_pending", pendingSwitch.Name);
         Placeholder = model.Placeholder;
         var banner = model.Banner
                      ?? (integrationNeedsRepair

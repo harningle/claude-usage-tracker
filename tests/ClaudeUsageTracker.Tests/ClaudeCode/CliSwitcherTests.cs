@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows.Threading;
 using ClaudeUsageTracker.App.ClaudeCode;
+using ClaudeUsageTracker.App.Localisation;
 using ClaudeUsageTracker.App.Notifications;
 using ClaudeUsageTracker.App.Profiles;
 using ClaudeUsageTracker.App.Storage;
@@ -18,6 +19,7 @@ public sealed class CliSwitcherTests : IDisposable
     private readonly TempDirectory _temp = new();
     private readonly FakeTimeProvider _time = new(Now);
     private readonly AppSettings _settings = new();
+    private readonly RecordingNotifier _notifier = new();
 
     public void Dispose() => _temp.Dispose();
 
@@ -70,7 +72,7 @@ public sealed class CliSwitcherTests : IDisposable
         var cache = new UsageCacheStore(Path.Combine(_temp.Path, "cache"));
         var history = new UsageHistoryService(new UsageHistoryStore(Path.Combine(_temp.Path, "history")), _time);
         var automation = new AutomationService(
-            _settings, new RecordingNotifier(), new AutomationStateStore(Path.Combine(_temp.Path, "automation.json")), _time, _ => null, (_, _) => { });
+            _settings, _notifier, new AutomationStateStore(Path.Combine(_temp.Path, "automation.json")), _time, _ => null, (_, _) => { });
         var switcher = new CliSwitcher(
             _settings, links.Service, new ProfileService(store, _settings, links.Service, links.Secrets, links.Lock, cache, history, _time), automation,
             () => CliStore.Inventory(UserProfile, null, [])[0], () => { }, _time, Dispatcher.CurrentDispatcher);
@@ -80,7 +82,9 @@ public sealed class CliSwitcherTests : IDisposable
     [Fact]
     public Task TheNewestRequestReplacesOneThatWaits() => OnSta(async () =>
     {
+        // Claude Code is on a third account, so both switches would change it.
         var (switcher, first, second, links) = await Create();
+        await LinkProfile(links, "acc-c", "Third");
         links.ClaudeRunning();
 
         Assert.Equal(CliSwitchOutcome.Deferred, (await switcher.RequestAsync(first, automaticFrom: null, null)).Outcome);
@@ -107,6 +111,40 @@ public sealed class CliSwitcherTests : IDisposable
         // the folder away from it at the next retry.
         Assert.Equal(CliSwitchOutcome.AlreadyInUse, (await switcher.RequestAsync(second, automaticFrom: null, null)).Outcome);
         Assert.Null(switcher.Pending);
+    });
+
+    [Fact]
+    public Task PickingTheAccountClaudeCodeIsOnWhileItRunsDropsTheWaitingSwitch() => OnSta(async () =>
+    {
+        // The folder holds the second profile's account. While Claude Code runs, the first is picked and then the second
+        // again: nothing is left waiting, and the popover must not say that Claude Code switches to the account it is on.
+        // Only the first pick, which was queued, was announced.
+        var (switcher, first, second, links) = await Create();
+        links.ClaudeRunning();
+        await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+
+        Assert.Equal(CliSwitchOutcome.AlreadyInUse, (await switcher.RequestAsync(second, automaticFrom: null, null, fromActivation: true)).Outcome);
+
+        Assert.Null(switcher.Pending);
+        Assert.Equal([Strings.Format("windows.cli.switch.deferred", "First")], _notifier.Shown.Select(a => a.Body));
+    });
+
+    [Fact]
+    public Task AWaitingSwitchEndsOnceClaudeCodeIsSignedInToItsAccount() => OnSta(async () =>
+    {
+        // A switch to the first profile waits; meanwhile the user signs Claude Code in to that account with /login. Only its
+        // queueing was announced: the tracker switched nothing.
+        var (switcher, first, _, links) = await Create();
+        links.ClaudeRunning();
+        await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+        File.WriteAllText(CredentialsFile, LinkHarness.Credentials("at-acc-a-new", "rt-acc-a-new", Now.AddHours(8)));
+        File.WriteAllText(AccountFile, LinkHarness.Account("acc-a", "acc-a@example.com"));
+
+        await switcher.TickAsync();
+
+        Assert.Null(switcher.Pending);
+        Assert.Contains("at-acc-a-new", File.ReadAllText(CredentialsFile), StringComparison.Ordinal);
+        Assert.Equal([Strings.Format("windows.cli.switch.deferred", "First")], _notifier.Shown.Select(a => a.Body));
     });
 
     [Fact]
@@ -214,6 +252,124 @@ public sealed class CliSwitcherTests : IDisposable
         Assert.Null(switcher.ViewFor(first, null).Message);
         Assert.Contains("acc-b", File.ReadAllText(AccountFile), StringComparison.Ordinal);
         Assert.Contains("at-acc-b", File.ReadAllText(CredentialsFile), StringComparison.Ordinal);
+    });
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task OnlyAPickedSwitchIsAnnouncedWhenItHappensAtOnce(bool fromActivation) => OnSta(async () =>
+    {
+        // The folder holds the second profile's account and no Claude Code runs. A switch made on the CLI Account page is
+        // watched there; one asked for by picking the profile in the popover is not.
+        var (switcher, first, _, _) = await Create();
+
+        Assert.Equal(CliSwitchOutcome.Switched, (await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation)).Outcome);
+
+        Assert.Contains("acc-a", File.ReadAllText(AccountFile), StringComparison.Ordinal);
+        Assert.Equal(fromActivation ? [Strings.Format("windows.cli.switch.done", "First")] : [], _notifier.Shown.Select(a => a.Body));
+    });
+
+    [Fact]
+    public Task APickedSwitchThatWaitsIsAnnouncedWhenQueuedAndWhenMade() => OnSta(async () =>
+    {
+        var (switcher, first, _, links) = await Create();
+        links.ClaudeRunning();
+
+        Assert.Equal(CliSwitchOutcome.Deferred, (await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true)).Outcome);
+        Assert.True(switcher.Pending?.FromActivation);
+        Assert.Equal([Strings.Format("windows.cli.switch.deferred", "First")], _notifier.Shown.Select(a => a.Body));
+
+        // Each retry while Claude Code still runs is not announced again.
+        await switcher.TickAsync();
+        Assert.Single(_notifier.Shown);
+
+        links.Processes.Clear();
+        await switcher.TickAsync();
+
+        Assert.Null(switcher.Pending);
+        Assert.Contains("acc-a", File.ReadAllText(AccountFile), StringComparison.Ordinal);
+        Assert.Equal(
+            [Strings.Format("windows.cli.switch.deferred", "First"), Strings.Format("windows.cli.switch.done", "First")],
+            _notifier.Shown.Select(a => a.Body));
+    });
+
+    [Fact]
+    public Task APickMadeWhileAnotherSwitchRunsIsAnnouncedOnceItWaitsForClaudeCode() => OnSta(async () =>
+    {
+        // A switch to the first profile holds the switcher (here: waiting for the credential lock, as during a renewal)
+        // when the first profile is picked again; meanwhile Claude Code starts.
+        var (switcher, first, _, links) = await Create();
+        var held = links.Lock.Acquire();
+        var older = switcher.RequestAsync(first, automaticFrom: null, null);
+        Assert.Equal(CliSwitchOutcome.Deferred, (await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true)).Outcome);
+        links.ClaudeRunning();
+        held.Dispose();
+        await older;
+        Assert.True(switcher.Pending?.FromActivation);
+
+        // Its first attempt finds Claude Code running: the wait is announced, once.
+        await switcher.TickAsync();
+        Assert.Equal([Strings.Format("windows.cli.switch.deferred", "First")], _notifier.Shown.Select(a => a.Body));
+        await switcher.TickAsync();
+        Assert.Single(_notifier.Shown);
+
+        links.Processes.Clear();
+        await switcher.TickAsync();
+
+        Assert.Null(switcher.Pending);
+        Assert.Contains("acc-a", File.ReadAllText(AccountFile), StringComparison.Ordinal);
+        Assert.Equal(
+            [Strings.Format("windows.cli.switch.deferred", "First"), Strings.Format("windows.cli.switch.done", "First")],
+            _notifier.Shown.Select(a => a.Body));
+    });
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task APickedSwitchNeverSignsOutALoginNoProfileFollows(bool queued) => OnSta(async () =>
+    {
+        // Claude Code was signed in to an account no profile follows. Picking a profile must not sign it out, now or once
+        // Claude Code closes; it says so instead of asking.
+        var (switcher, first, _, links) = await Create();
+        File.WriteAllText(CredentialsFile, LinkHarness.Credentials("at-acc-x", "rt-acc-x", Now.AddHours(8)));
+        File.WriteAllText(AccountFile, LinkHarness.Account("acc-x", "acc-x@example.com"));
+        var label = links.Service.Read(CliStore.Inventory(UserProfile, null, [])[0]).Label;
+        if (queued)
+        {
+            links.ClaudeRunning();
+            await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+            links.Processes.Clear();
+            await switcher.TickAsync();
+        }
+        else
+        {
+            Assert.Equal(CliSwitchOutcome.NeedsConfirmation, (await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true)).Outcome);
+        }
+
+        Assert.Null(switcher.Pending);
+        Assert.Contains("at-acc-x", File.ReadAllText(CredentialsFile), StringComparison.Ordinal);
+        Assert.Contains("acc-x", File.ReadAllText(AccountFile), StringComparison.Ordinal);
+        var kept = Strings.Format("windows.cli.switch.untracked_kept", label);
+        Assert.Equal(queued ? [Strings.Format("windows.cli.switch.deferred", "First"), kept] : [kept], _notifier.Shown.Select(a => a.Body));
+        Assert.Equal(kept, switcher.ViewFor(first, null).Message);
+    });
+
+    [Fact]
+    public Task AnAutomaticRequestThatNoLongerAppliesRedrawsTheWaitingSwitchItDropped() => OnSta(async () =>
+    {
+        var (switcher, first, second, links) = await Create();
+        links.ClaudeRunning();
+        await switcher.RequestAsync(first, automaticFrom: null, null);
+        links.Processes.Clear();
+        var changes = 0;
+        switcher.Changed += () => changes++;
+
+        // Auto-switch asks after it was switched off: nothing is switched, and the waiting switch it replaced is no
+        // longer shown in the popover.
+        Assert.Equal(CliSwitchRefusal.NoLongerApplies, (await switcher.RequestAsync(first, automaticFrom: second.Id, null)).Refusal);
+
+        Assert.Null(switcher.Pending);
+        Assert.True(changes > 0);
     });
 
     [Fact]
