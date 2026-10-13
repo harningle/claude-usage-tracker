@@ -23,6 +23,9 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>How long a test waits for an answer that a broken signal would never give.</summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
     private readonly TempDirectory _temp = new();
     private readonly TestTime _time = new(Start);
     private readonly ConcurrentQueue<ProfileUsageState> _states = new();
@@ -730,5 +733,67 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         Assert.Equal(1, UsageRequests(handler));
         coordinator.Refresh(_profileId);
         await UntilAsync(_ => UsageRequests(handler) == 2);
+    }
+
+    /// <summary>The Codex auto-start's confirmation read: one profile's loop checks now, and the caller learns when it is done.</summary>
+    [Fact]
+    public async Task CheckNowChecksOneProfileAtOnceAndAnswersOnceThatCheckIsDone()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var (coordinator, handler) = Create((_, _) => Usage(12));
+        coordinator.Watch(Profile(intervalSeconds: 300));
+        await UntilAsync(s => s.LastSuccessAt is not null && !s.IsRefreshing);
+
+        // Not debounced as CheckSoon is, and it answers only after its own check.
+        var state = await coordinator.CheckNowAsync(_profileId, TestContext.Current.CancellationToken).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, UsageRequests(handler));
+        Assert.False(state?.IsRefreshing);
+        Assert.Null(await coordinator.CheckNowAsync(Guid.NewGuid(), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CheckNowSendsNothingWhileTheServerAskedForAWait()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var (coordinator, handler) = Create((_, _) =>
+            Json(HttpStatusCode.TooManyRequests, "{}", r => r.Headers.TryAddWithoutValidation("Retry-After", "3600")));
+        coordinator.Watch(Profile());
+        await UntilAsync(s => s.RetryNotBefore is not null && !s.IsRefreshing);
+
+        var state = await coordinator.CheckNowAsync(_profileId, TestContext.Current.CancellationToken).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, UsageRequests(handler));
+        Assert.Equal(Start.AddHours(1), state?.RetryNotBefore);
+    }
+
+    [Fact]
+    public async Task CheckNowAnswersWhenTheProfileStopsBeingPolled()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var release = new TaskCompletionSource();
+        var count = 0;
+        var handler = new ScriptedHandler(async (_, cancellation) =>
+        {
+            // The second check hangs until the profile is no longer polled.
+            if (Interlocked.Increment(ref count) == 2)
+            {
+                await release.Task.WaitAsync(cancellation);
+            }
+
+            return Usage(12);
+        });
+        var (coordinator, _) = Create(handler);
+        coordinator.Watch(Profile(intervalSeconds: 300));
+        await UntilAsync(s => s.LastSuccessAt is not null && !s.IsRefreshing);
+        coordinator.Refresh(_profileId);
+        await UntilAsync(s => s.IsRefreshing);
+
+        // Asked for while that check runs, so only a later check could answer it; none comes.
+        var answer = coordinator.CheckNowAsync(_profileId, TestContext.Current.CancellationToken);
+        await coordinator.UnwatchAsync(_profileId);
+
+        Assert.Null(await answer.WaitAsync(Patience, TestContext.Current.CancellationToken));
+        release.TrySetResult();
     }
 }

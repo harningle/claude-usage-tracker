@@ -78,7 +78,9 @@ public sealed class AutoStartServiceTests : IDisposable
         var codex = new CodexSessionStarter(
             (_, _) => throw new InvalidOperationException("No Codex run was expected."), () => throw new InvalidOperationException("No Codex home was expected."),
             _time, log);
-        return new(_settings, new ClaudeAiClient(_transport, _time, log), new NoCodexUsage(), codex, automation ?? Automation(), _time, _ => _current, _released.Add);
+        return new(
+            _settings, new ClaudeAiClient(_transport, _time, log), new NoCodexUsage(), codex, automation ?? Automation(), _time, _ => _current,
+            (_, _) => throw new InvalidOperationException("No check of a polling loop was expected."), _released.Add);
     }
 
     /// <summary>These profiles are claude.ai ones: no Codex usage is read.</summary>

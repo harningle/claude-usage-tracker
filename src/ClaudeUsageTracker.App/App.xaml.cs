@@ -275,7 +275,8 @@ public partial class App : Application
         var codexStarter = new CodexSessionStarter(
             fixture?.CodexExec() ?? ((home, cancellation) => CodexExec.RunAsync(CodexExec.Find(ShellEnvironment.PathValues()), home, CodexExec.Timeout, cancellation)),
             () => codexHome, time, _log);
-        _autoStart = new AutoStartService(_settings, claudeAi, sources[UsageSourceKind.Codex], codexStarter, _automation, time, _coordinator.Current, profileId =>
+        _autoStart = new AutoStartService(
+            _settings, claudeAi, sources[UsageSourceKind.Codex], codexStarter, _automation, time, _coordinator.Current, _coordinator.CheckNowAsync, profileId =>
         {
             if (_coordinator.Current(profileId) is null)
             {

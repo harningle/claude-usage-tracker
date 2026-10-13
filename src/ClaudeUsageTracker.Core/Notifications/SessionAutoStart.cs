@@ -41,19 +41,41 @@ public static class SessionAutoStart
     /// <summary>How far a Codex reset time may be from one session length after its observation and still count as unstarted.</summary>
     public static readonly TimeSpan CodexIdleTolerance = TimeSpan.FromMinutes(2);
 
+    /// <summary>How closely the reset time of an unstarted Codex window follows the clock between two observations.</summary>
+    public static readonly TimeSpan CodexMoveTolerance = TimeSpan.FromSeconds(15);
+
+    /// <summary>Observations at least this far apart tell a reset time that moves with the clock from one that stays put.</summary>
+    public static readonly TimeSpan CodexMinimumGap = TimeSpan.FromMinutes(1);
+
     /// <summary>
     /// Whether a Codex session should be started now. Codex reports an unstarted 5-hour window at 0 % with a reset time one
-    /// session length after the request, which moves on with every read; the first request fixes it at one session length
-    /// after that request (seen on 2026-10-06). So a window at 0 % counts as unstarted when its reset time is missing, past,
-    /// or within <see cref="CodexIdleTolerance"/> of one session length after <paramref name="observedAt"/>. Not an upstream
-    /// feature: its Codex provider cannot auto-start.
+    /// session length after the request, which moves on with the clock; the first request fixes it at one session length
+    /// after that request (seen on 2026-10-06). A window started moments ago looks the same in one observation, so a future
+    /// reset time counts as unstarted only when it is within <see cref="CodexIdleTolerance"/> of one session length after
+    /// <paramref name="observedAt"/> and has moved with the clock, within <see cref="CodexMoveTolerance"/>, since an earlier
+    /// observation at 0 % at least <see cref="CodexMinimumGap"/> before. A missing or past reset time at 0 % counts as
+    /// unstarted, as for Claude. Not an upstream feature: its Codex provider cannot auto-start.
     /// </summary>
     /// <param name="usage">A fresh observation; cached or stale values must never decide this.</param>
     /// <param name="observedAt">When <paramref name="usage"/> was fetched.</param>
-    public static bool ShouldStartCodex(UsageData usage, DateTimeOffset observedAt) =>
-        usage.SessionPercentage == 0
-        && (usage.SessionResetTime is not { } reset || reset <= observedAt
-            || (reset - (observedAt + SessionLength)).Duration() <= CodexIdleTolerance);
+    /// <param name="previous">An earlier fresh observation of the same profile, if there is one.</param>
+    public static bool ShouldStartCodex(UsageData usage, DateTimeOffset observedAt, (UsageData Usage, DateTimeOffset At)? previous)
+    {
+        if (usage.SessionPercentage != 0)
+        {
+            return false;
+        }
+
+        if (usage.SessionResetTime is not { } reset || reset <= observedAt)
+        {
+            return true;
+        }
+
+        return (reset - (observedAt + SessionLength)).Duration() <= CodexIdleTolerance
+               && previous is ({ SessionPercentage: 0d, SessionResetTime: { } earlierReset }, var earlierAt)
+               && observedAt - earlierAt >= CodexMinimumGap
+               && ((reset - earlierReset) - (observedAt - earlierAt)).Duration() <= CodexMoveTolerance;
+    }
 
     /// <summary>
     /// Upstream <c>parseCompletionResponseForResetTime</c>: the reset time of the new session window, from the last

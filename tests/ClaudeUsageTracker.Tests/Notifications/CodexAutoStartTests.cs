@@ -8,6 +8,7 @@ using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.Core.Notifications;
 using ClaudeUsageTracker.Core.Providers;
+using ClaudeUsageTracker.Core.Refresh;
 using ClaudeUsageTracker.Core.Usage;
 using ClaudeUsageTracker.Tests.Usage;
 using TestTime = Microsoft.Extensions.Time.Testing.FakeTimeProvider;
@@ -35,6 +36,10 @@ public sealed class CodexAutoStartTests : IDisposable
     private CodexExecResult _run = new(CodexExecOutcome.Completed, 0);
     private ProfileUsageState? _current;
     private Action? _duringUsage;
+
+    // What a polled profile's loop does when asked to check now, and how often it was asked.
+    private Action? _loopCheck;
+    private int _loopChecks;
 
     // Codex as seen while idle: 0 %, resetting one session length after each read.
     private Func<string> _usage;
@@ -92,7 +97,39 @@ public sealed class CodexAutoStartTests : IDisposable
             () => _codexHome, _time, log);
         var claudeAi = new ClaudeAiClient(
             new ScriptedTransport((_, _, _) => throw new InvalidOperationException("No claude.ai request was expected.")), _time, log);
-        return new AutoStartService(_settings, claudeAi, source, starter, Automation(), _time, _ => _current, _ => { });
+        Task<ProfileUsageState?> CheckNow(Guid profileId, CancellationToken cancellation)
+        {
+            _loopChecks++;
+            _loopCheck?.Invoke();
+            return Task.FromResult(_current);
+        }
+
+        return new AutoStartService(_settings, claudeAi, source, starter, Automation(), _time, _ => _current, CheckNow, _ => { })
+        {
+            // The wait before a confirmation read passes on the test's clock.
+            Wait = (delay, _) =>
+            {
+                _time.Advance(delay);
+                return Task.CompletedTask;
+            },
+        };
+    }
+
+    /// <summary>During the third usage request, a start's confirmation read after two checks.</summary>
+    private void DuringConfirmation(Action change) => _duringUsage = () =>
+    {
+        if (_http.Requests.Count == 3)
+        {
+            change();
+        }
+    };
+
+    /// <summary>Two checks, one check interval apart: one observation cannot tell whether the reset time moves.</summary>
+    private async Task TwoChecks(AutoStartService service)
+    {
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        await service.CheckAllAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -101,10 +138,15 @@ public sealed class CodexAutoStartTests : IDisposable
         var service = Service();
 
         await service.CheckAllAsync(CancellationToken.None);
+        Assert.Empty(_runs);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        await service.CheckAllAsync(CancellationToken.None);
 
+        // The second read shows the reset time moving with the clock, and a third a minute later confirms it.
+        Assert.Equal(3, _http.Requests.Count);
         Assert.Equal([_codexHome], _runs);
         Assert.Equal("Codex - Session Auto-Started", Assert.Single(_notifier.Shown).Title);
-        Assert.Equal(Now + SessionAutoStart.SessionLength, Automation().StateOf(_profile.Id).AutoStartHoldUntil);
+        Assert.Equal(_time.GetUtcNow() + SessionAutoStart.SessionLength, Automation().StateOf(_profile.Id).AutoStartHoldUntil);
         Assert.Contains("\"operation\":\"codexAutoStart\"", LogText, StringComparison.Ordinal);
 
         // The started window keeps its reset time; even at 0 % it is not started again, and the wait holds anyway.
@@ -115,6 +157,11 @@ public sealed class CodexAutoStartTests : IDisposable
         Assert.Single(_runs);
     }
 
+    private static UsageData Read(int used, DateTimeOffset reset) => new() { SessionPercentage = used, SessionResetTime = reset };
+
+    /// <summary>An observation of an unstarted window: its reset is one session length after it.</summary>
+    private static (UsageData, DateTimeOffset) Idle(DateTimeOffset at) => (Read(0, at + SessionAutoStart.SessionLength), at);
+
     [Theory]
     [InlineData(0, 0, true)] // the moving reset time of an unstarted window
     [InlineData(0, -2, true)]
@@ -124,17 +171,85 @@ public sealed class CodexAutoStartTests : IDisposable
     [InlineData(3, 0, false)]
     public void ACodexWindowIsUnstartedOnlyAtZeroWithAResetOneSessionAfterTheRead(int used, int minutesFromIdle, bool unstarted)
     {
-        var usage = new UsageData { SessionPercentage = used, SessionResetTime = Now + SessionAutoStart.SessionLength + TimeSpan.FromMinutes(minutesFromIdle) };
+        var offset = TimeSpan.FromMinutes(minutesFromIdle);
+        var earlier = Now - SessionAutoStart.CheckInterval;
+        var previous = (Read(0, earlier + SessionAutoStart.SessionLength + offset), earlier);
 
-        Assert.Equal(unstarted, SessionAutoStart.ShouldStartCodex(usage, Now));
+        Assert.Equal(unstarted, SessionAutoStart.ShouldStartCodex(Read(used, Now + SessionAutoStart.SessionLength + offset), Now, previous));
+    }
+
+    [Fact]
+    public void AFutureResetCountsAsUnstartedOnlyWhenItMovedWithTheClock()
+    {
+        var current = Read(0, Now + SessionAutoStart.SessionLength - TimeSpan.FromMinutes(1));
+        var earlier = Now - SessionAutoStart.CheckInterval;
+
+        Assert.True(SessionAutoStart.ShouldStartCodex(Idle(Now).Item1, Now, Idle(earlier)));
+        // No earlier observation: a window started a minute ago looks the same.
+        Assert.False(SessionAutoStart.ShouldStartCodex(current, Now, null));
+        // Started a minute ago: its reset stayed put between the two observations.
+        Assert.False(SessionAutoStart.ShouldStartCodex(current, Now, (current, earlier)));
+        // Started between them: it moved, but less than the clock did.
+        Assert.False(SessionAutoStart.ShouldStartCodex(current, Now, Idle(earlier)));
+        // Too close together to tell a fixed reset from a moving one.
+        Assert.False(SessionAutoStart.ShouldStartCodex(current, Now, (current, Now.AddSeconds(-10))));
+        // The earlier observation was not at 0 %.
+        Assert.False(SessionAutoStart.ShouldStartCodex(Idle(Now).Item1, Now, (Read(4, earlier + SessionAutoStart.SessionLength), earlier)));
     }
 
     [Fact]
     public void AMissingOrPastResetAtZeroIsUnstartedAndMissingUsageIsNot()
     {
-        Assert.True(SessionAutoStart.ShouldStartCodex(new UsageData { SessionPercentage = 0 }, Now));
-        Assert.True(SessionAutoStart.ShouldStartCodex(new UsageData { SessionPercentage = 0, SessionResetTime = Now.AddMinutes(-1) }, Now));
-        Assert.False(SessionAutoStart.ShouldStartCodex(new UsageData { SessionResetTime = Now + SessionAutoStart.SessionLength }, Now));
+        Assert.True(SessionAutoStart.ShouldStartCodex(new UsageData { SessionPercentage = 0 }, Now, null));
+        Assert.True(SessionAutoStart.ShouldStartCodex(Read(0, Now.AddMinutes(-1)), Now, null));
+        Assert.False(SessionAutoStart.ShouldStartCodex(new UsageData { SessionResetTime = Now + SessionAutoStart.SessionLength }, Now, Idle(Now.AddMinutes(-5))));
+    }
+
+    [Fact]
+    public async Task ASessionStartedAMinuteAgoIsNotStartedAgain()
+    {
+        // Started a minute before the first check and still at 0 %: its reset is nearly five hours away, but stays put.
+        var started = Now.AddMinutes(-1);
+        _usage = () => Usage(0, started + SessionAutoStart.SessionLength);
+        await TwoChecks(Service());
+
+        Assert.Equal(2, _http.Requests.Count);
+        Assert.Empty(_runs);
+        Assert.Empty(_notifier.Shown);
+    }
+
+    [Fact]
+    public async Task ASessionStartedJustBeforeTheDecidingReadIsNotStartedAgain()
+    {
+        // Idle at the first check; the user starts a session ten seconds before the second, which still reads 0 %.
+        var service = Service();
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        var started = _time.GetUtcNow().AddSeconds(-10);
+        _usage = () => Usage(0, started + SessionAutoStart.SessionLength);
+
+        await service.CheckAllAsync(CancellationToken.None);
+
+        // That read could not tell; the confirmation read a minute later shows the reset no longer moving.
+        Assert.Equal(3, _http.Requests.Count);
+        Assert.Empty(_runs);
+        Assert.Empty(_notifier.Shown);
+        Assert.Null(Automation().StateOf(_profile.Id).AutoStartHoldUntil);
+    }
+
+    [Fact]
+    public async Task AConfirmationReadThatBringsNoUsageStartsNothing()
+    {
+        var service = Service();
+        _http.Requests.Clear();
+        var idle = _usage;
+        _usage = () => _http.Requests.Count == 3 ? "not json" : idle();
+
+        await TwoChecks(service);
+
+        Assert.Equal(3, _http.Requests.Count);
+        Assert.Empty(_runs);
+        Assert.Empty(_notifier.Shown);
     }
 
     [Fact]
@@ -142,9 +257,9 @@ public sealed class CodexAutoStartTests : IDisposable
     {
         _usage = () => Usage(0, Now.AddHours(3));
 
-        await Service().CheckAllAsync(CancellationToken.None);
+        await TwoChecks(Service());
 
-        Assert.Single(_http.Requests);
+        Assert.Equal(2, _http.Requests.Count);
         Assert.Empty(_runs);
         Assert.Empty(_notifier.Shown);
     }
@@ -186,12 +301,12 @@ public sealed class CodexAutoStartTests : IDisposable
     [Fact]
     public async Task NothingRunsWhenTheCliSignsInToAnotherAccountWhileTheUsageIsRead()
     {
-        _duringUsage = () => SignIn("chatgpt-2");
+        DuringConfirmation(() => SignIn("chatgpt-2"));
 
-        await Service().CheckAllAsync(CancellationToken.None);
+        await TwoChecks(Service());
 
         // The CLI's login is shared: the message would start the other account's window. Nothing counts as a start or a failure.
-        Assert.Single(_http.Requests);
+        Assert.Equal(3, _http.Requests.Count);
         Assert.Empty(_runs);
         Assert.Empty(_notifier.Shown);
         Assert.Null(Automation().StateOf(_profile.Id).AutoStartHoldUntil);
@@ -204,7 +319,8 @@ public sealed class CodexAutoStartTests : IDisposable
     [InlineData("deleted")]
     public async Task NothingRunsWhenTheProfileChangesWhileItsUsageIsRead(string change)
     {
-        _duringUsage = () =>
+        // The last read before the message is the confirmation read.
+        DuringConfirmation(() =>
         {
             switch (change)
             {
@@ -221,12 +337,49 @@ public sealed class CodexAutoStartTests : IDisposable
                     _settings.Profiles.Remove(_profile);
                     break;
             }
+        });
+
+        await TwoChecks(Service());
+
+        Assert.Equal(3, _http.Requests.Count);
+        Assert.Empty(_runs);
+    }
+
+    [Theory]
+    [InlineData("unlinked")]
+    [InlineData("switched off")]
+    [InlineData("pasted credentials")]
+    [InlineData("deleted")]
+    public async Task NothingIsReadOrRunWhenTheProfileChangesDuringTheConfirmationWait(string change)
+    {
+        var service = Service();
+        service.Wait = (delay, _) =>
+        {
+            _time.Advance(delay);
+            switch (change)
+            {
+                case "unlinked":
+                    _profile.Codex = null;
+                    break;
+                case "switched off":
+                    _profile.AutoStartSessionEnabled = false;
+                    break;
+                case "pasted credentials":
+                    _profile.Codex = new CodexLink { Source = CodexLink.ManualSource };
+                    break;
+                default:
+                    _settings.Profiles.Remove(_profile);
+                    break;
+            }
+
+            return Task.CompletedTask;
         };
 
-        await Service().CheckAllAsync(CancellationToken.None);
+        await TwoChecks(service);
 
-        Assert.Single(_http.Requests);
+        Assert.Equal(2, _http.Requests.Count);
         Assert.Empty(_runs);
+        Assert.Empty(_notifier.Shown);
     }
 
     [Theory]
@@ -239,7 +392,7 @@ public sealed class CodexAutoStartTests : IDisposable
         _run = new CodexExecResult(outcome, exitCode);
         var service = Service();
 
-        await service.CheckAllAsync(CancellationToken.None);
+        await TwoChecks(service);
         var failure = Assert.Single(_notifier.Shown);
         Assert.Equal("Codex - Auto-Start Failed", failure.Title);
         Assert.EndsWith(reason, failure.Body, StringComparison.Ordinal);
@@ -254,24 +407,69 @@ public sealed class CodexAutoStartTests : IDisposable
         Assert.Single(_notifier.Shown);
     }
 
+    /// <summary>A polling loop's fresh result at the given time, of a window that has not started.</summary>
+    private ProfileUsageState PolledAt(DateTimeOffset at) => new()
+    {
+        ProfileId = _profile.Id, Source = UsageSourceKind.Codex, LastAttemptAt = at, LastSuccessAt = at,
+        Usage = new CachedUsage
+        {
+            ProfileId = _profile.Id, ObservedAt = at, Source = "codex",
+            Usage = new UsageData { SessionPercentage = 0, SessionResetTime = at + SessionAutoStart.SessionLength },
+        },
+    };
+
     [Fact]
-    public async Task FreshUsageOfThePollingLoopIsUsedWithoutAnotherRequest()
+    public async Task APolledProfileIsDecidedAndConfirmedByItsPollingLoopAlone()
     {
         // Four minutes old: its reset time is judged against when it was read, not against now.
-        var at = Now.AddMinutes(-4);
-        _current = new ProfileUsageState
-        {
-            ProfileId = _profile.Id, Source = UsageSourceKind.Codex, LastAttemptAt = at, LastSuccessAt = at,
-            Usage = new CachedUsage
-            {
-                ProfileId = _profile.Id, ObservedAt = at, Source = "codex",
-                Usage = new UsageData { SessionPercentage = 0, SessionResetTime = at + SessionAutoStart.SessionLength },
-            },
-        };
+        var service = Service();
+        _current = PolledAt(Now.AddMinutes(-4));
+        await service.CheckAllAsync(CancellationToken.None);
 
-        await Service().CheckAllAsync(CancellationToken.None);
+        // The same result of the loop again tells nothing new.
+        _time.Advance(TimeSpan.FromSeconds(30));
+        await service.CheckAllAsync(CancellationToken.None);
+        Assert.Empty(_runs);
 
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledAt(_time.GetUtcNow().AddMinutes(-4));
+        _loopCheck = () => _current = PolledAt(_time.GetUtcNow());
+        await service.CheckAllAsync(CancellationToken.None);
+
+        // The confirmation read is the loop's own check, asked for once; nothing is requested beside the loop.
+        Assert.Equal(1, _loopChecks);
         Assert.Empty(_http.Requests);
         Assert.Single(_runs);
     }
-}
+
+    [Theory]
+    [InlineData("held")]
+    [InlineData("failed")]
+    [InlineData("no longer polled")]
+    public async Task AConfirmationTheLoopCouldNotMakeStartsNothing(string outcome)
+    {
+        var service = Service();
+        _current = PolledAt(Now);
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledAt(_time.GetUtcNow());
+        _loopCheck = () => _current = outcome switch
+        {
+            // A wait the server asked for: the loop sent nothing, so its latest result is still the deciding one.
+            "held" => _current! with { RetryNotBefore = _time.GetUtcNow().AddMinutes(10) },
+            // The server refused the check and asked for a wait, which the loop now keeps.
+            "failed" => _current! with
+            {
+                LastAttemptAt = _time.GetUtcNow(), LastFailure = FetchFailure.RateLimited, ConsecutiveFailures = 1,
+                RetryNotBefore = _time.GetUtcNow().AddHours(1),
+            },
+            _ => null,
+        };
+
+        await service.CheckAllAsync(CancellationToken.None);
+
+        Assert.Equal(1, _loopChecks);
+        Assert.Empty(_http.Requests);
+        Assert.Empty(_runs);
+        Assert.Empty(_notifier.Shown);
+    }}

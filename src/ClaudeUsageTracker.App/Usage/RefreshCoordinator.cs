@@ -167,6 +167,28 @@ public sealed class RefreshCoordinator : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// A check of one profile now, for the confirmation read of a Codex auto-start, and the profile's state once a check
+    /// that started after this call has finished. It is an automatic check, not debounced: a server-requested wait still
+    /// holds, in which case nothing is sent, and a rejected login is not sent again. Null when the profile is not polled.
+    /// </summary>
+    public async Task<ProfileUsageState?> CheckNowAsync(Guid profileId, CancellationToken cancellation)
+    {
+        Task done;
+        lock (_gate)
+        {
+            if (!_workers.TryGetValue(profileId, out var worker))
+            {
+                return null;
+            }
+
+            done = worker.CheckNowAsync();
+        }
+
+        await done.WaitAsync(cancellation).ConfigureAwait(false);
+        return Current(profileId);
+    }
+
     public ProfileUsageState? Current(Guid profileId)
     {
         lock (_gate)
@@ -207,6 +229,9 @@ public sealed class RefreshCoordinator : IAsyncDisposable
         private TaskCompletionSource _wake = NewSignal();
         private bool _manualPending;
         private bool _duePending;
+
+        // Completed when a check that begins after the CheckNowAsync that made it has finished.
+        private TaskCompletionSource? _checkNow;
         private string? _rejectedStamp;
         private DateTimeOffset? _billingLast;
         private DateTimeOffset _billingNotBefore;
@@ -277,6 +302,18 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             }
         }
 
+        /// <summary>As <see cref="Due"/>; completes once a check that started after this call has finished, or the worker stopped.</summary>
+        public Task CheckNowAsync()
+        {
+            lock (_gate)
+            {
+                _checkNow ??= NewSignal();
+                _duePending = true;
+                _wake.TrySetResult();
+                return _checkNow.Task;
+            }
+        }
+
         public async Task StopAsync()
         {
             _lifetime.Cancel();
@@ -291,6 +328,13 @@ public sealed class RefreshCoordinator : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
+            }
+
+            lock (_gate)
+            {
+                // Asked for after the last check began: no check comes now.
+                _checkNow?.TrySetResult();
+                _checkNow = null;
             }
         }
 
@@ -339,6 +383,7 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                 ProfileWatch watch;
                 long generation;
                 CancellationTokenSource cycle;
+                TaskCompletionSource? checkNow;
                 lock (_gate)
                 {
                     watch = _watch;
@@ -347,6 +392,8 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                     _manualPending = false;
                     _duePending = false;
                     _wake = NewSignal();
+                    checkNow = _checkNow;
+                    _checkNow = null;
                 }
 
                 TimeSpan delay;
@@ -381,6 +428,11 @@ public sealed class RefreshCoordinator : IAsyncDisposable
                             LastAttemptAt = now,
                             NextCheckAt = now + delay,
                         });
+                    }
+                    finally
+                    {
+                        // This check answers a CheckNowAsync made before it began, however it ended.
+                        checkNow?.TrySetResult();
                     }
                 }
 
