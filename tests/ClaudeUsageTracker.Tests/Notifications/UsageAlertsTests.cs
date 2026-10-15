@@ -93,6 +93,24 @@ public class UsageAlertsTests
     }
 
     [Fact]
+    public void AReadAtZeroThatStillShowsTheOpenWindowIsNoReset()
+    {
+        // On 2026-10-15 claude.ai twice answered one read at 0 % mid-window, with the window's reset time unchanged, just
+        // after the first use of a fresh window. Upstream announced a reset; the window and its notified thresholds stay.
+        var before = UsageAlerts.Evaluate(Defaults, null, null, Session(80), Now);
+        var stale = UsageAlerts.Evaluate(Defaults, before.State, before.Effective, Session(0, Reset.AddSeconds(30)), Now.AddMinutes(1));
+        Assert.Empty(stale.Alerts);
+        Assert.Equal([75], stale.State.NotifiedLevels);
+        Assert.Equal(0, stale.Effective);
+        Assert.Empty(UsageAlerts.Evaluate(Defaults, stale.State, stale.Effective, Session(80), Now.AddMinutes(2)).Alerts);
+
+        // A reset time that moved is another window, as Codex reports one that has not started.
+        var moved = UsageAlerts.Evaluate(Defaults, before.State, before.Effective, Session(0, Now.AddHours(5)), Now.AddMinutes(1));
+        Assert.Equal(UsageAlertKind.SessionReset, Assert.Single(moved.Alerts).Kind);
+        Assert.Empty(moved.State.NotifiedLevels);
+    }
+
+    [Fact]
     public void APassedResetTimeCountsAsAReset()
     {
         // Upstream's effective percentage is 0 once the reset time has passed, whatever the stale value says.

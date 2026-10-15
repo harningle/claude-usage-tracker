@@ -128,6 +128,25 @@ You found defect 11 in daily use of the published build (2026-10-06):
     - The fix: without a claude.ai sign-in the switch is greyed, showing what is stored (your choice), and the note says the profile can't auto-start. A profile switched on earlier starts sending once it is signed in. Parity difference 39.
     - Checked by `TheAutoStartSwitchIsGreyedWithoutAClaudeAiSignIn`, which realises the settings window and failed with the binding removed. The Tab check's settings now include a claude.ai sign-in, so the switch is still reached there.
 
+The overnight monitoring of the installed build's auto-start that you asked for (read-only, hourly, 2026-10-14 to 15) found defects 12 and 13. Its results are under [Live checks to do](#live-checks-to-do), item 5. The fixes add 6 tests; 1,392 pass, none skipped, with no build warnings.
+
+12. **A window that the provider ended early was not started again until its old reset time.**
+    - What happened: at 06:13 UTC on 15 October, OpenAI reset the Codex limits early, both the 5-hour window and the weekly one. The window the tracker had started at 02:37:47 would have run until 07:37:46. The wait after a start held until then, so Codex had no window until the tracker started one at 07:42:53.
+    - The fix: during that wait, the tracker watches a polled profile's window on its polling loop's reads, with no request of its own. Once a read at least five minutes after the start has shown the window with the reset time the wait runs to, each check applies the usual rules, so a window that has ended is started again.
+    - What still waits in full:
+      - a start whose window never shows, so a message the provider did not count is not repeated at every check;
+      - a failure;
+      - a profile that is not polled, since watching it would need a request at every check, through a browser for claude.ai.
+    - Parity difference 39.
+    - Checked by `APolledWindowThatEndsEarlyIsStartedAgainBeforeTheWaitIsOver` for claude.ai and Codex, which failed before the fix. `AStartWhoseWindowNeverShowsKeepsItsWait`, `AStartWhoseWindowKeepsMovingKeepsItsWait` and `TheWaitAfterAFailureIsKeptInFullForAPolledProfile` cover the waits that must still hold. A mutation check removed the five-minute margin, then the failure guard; each was caught.
+13. **"Session Reset" was announced mid-window.**
+    - What happened: "personal - Session Reset" came at 12:30:48 and 17:14:50 UTC, while that window ran until 16:50 and 21:50.
+      - Both came at the first use of a window the tracker had started. One read showed some use, then the next showed 0 %.
+      - The 0 % read kept the window's reset time: had it changed or gone missing, the history would have recorded a reset, and it did not.
+      - The alert followed upstream's rule, which announces any step from above 0 % to 0 %.
+    - The fix: a read at 0 % that still shows the open window, with its reset time, is no reset. It sends no alert and keeps the thresholds already notified in that window. A reset time that has passed or moved, or a window no longer reported, is still a reset. Parity difference 38.
+    - Checked by `AReadAtZeroThatStillShowsTheOpenWindowIsNoReset`, which failed before the fix.
+
 ## Codex auto-start (added 2026-10-06)
 
 At your request, a Codex profile can now auto-start its session as well. Upstream's Codex provider cannot do this, so it is a deliberate addition: parity difference 39 has the details.
@@ -283,6 +302,7 @@ These need your accounts or your PC, so they are yours to run:
 4. **A clean PC** (D2), if you have one or a virtual machine: copy the published folder there, start it, set up a profile and confirm that a notification shows.
 5. **The Codex auto-start:** passed on the evening of 2026-10-06 (see above). Over the following days, check that it starts each new Codex window once, and only while Codex is idle.
    - On 2026-10-13 the installed copy, started with Windows, ran it at 15:15:28 UTC with status 0, and Codex's weekly window then reset at 2026-10-20T15:15:16Z. That 5-hour window ended at 20:15:16. Your own Codex use at 20:16:41 came before the next five-minute check, so it started the following window itself.
+   - **Overnight monitoring, 2026-10-14 21:47 to 2026-10-15 20:08 UTC** (installed copy with `176374c`, read-only hourly checks, no sleep). Every start that came due passed: four each for both claude.ai profiles and for Codex. Each claude.ai start came under 2 minutes after its window ended (201, 200, 204). Each Codex start came 5 minutes after its window's scheduled end, with status 0 in 3.8 to 5.9 s, and the reset then stayed put. Codex was read at least every 38 seconds throughout. Two defects came to light, 12 and 13 above.
 
 ## Reproducing
 

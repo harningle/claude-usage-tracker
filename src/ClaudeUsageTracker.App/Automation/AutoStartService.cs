@@ -16,7 +16,8 @@ namespace ClaudeUsageTracker.App.Automation;
 /// can send through, and it decides only on usage fetched within the last check interval by this run, never on cached
 /// values. After an attempt it waits: until the new window resets (or one session length) after a start,
 /// <see cref="SessionAutoStart.FailureHold"/> after a failure. The wait is kept on disk, so a restart does not send
-/// again early. Use it from the UI thread only.
+/// again early. A polled profile's wait after a start ends early if its new window, once seen open, ends early
+/// (<see cref="StartedWindowSeen"/>). Use it from the UI thread only.
 /// </summary>
 /// <param name="codexUsage">Reads the usage of a Codex profile that is not polled.</param>
 /// <param name="checkNow">Asks a profile's polling loop for a check now and gives its state once that check is done (<see cref="RefreshCoordinator.CheckNowAsync"/>).</param>
@@ -30,6 +31,9 @@ public sealed class AutoStartService(
 
     // The latest fresh usage of each Codex profile in this run, which shows whether the reset time moves with the clock.
     private readonly Dictionary<Guid, (UsageData Usage, DateTimeOffset At)> _codexReads = [];
+
+    // Profiles whose window from the latest start this run has seen open (StartedWindowSeen).
+    private readonly HashSet<Guid> _startedWindowSeen = [];
     private bool _running;
 
     /// <summary>How the wait before a Codex confirmation read passes; tests move their clock on instead.</summary>
@@ -38,6 +42,12 @@ public sealed class AutoStartService(
 
     /// <summary>Upstream skips a check that comes within ten seconds of the previous one (a wake right after the timer).</summary>
     internal static readonly TimeSpan Debounce = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// How close a read's reset time must be to the end of the wait after a start to show the window that start opened.
+    /// Codex fixes the reset time during the CLI's run, which may take two minutes and ends just before the wait is set.
+    /// </summary>
+    internal static readonly TimeSpan StartedWindowTolerance = TimeSpan.FromMinutes(2);
 
     /// <summary>Checks every opted-in profile once. Returns when all checks have finished.</summary>
     public async Task CheckAllAsync(CancellationToken cancellation)
@@ -86,7 +96,7 @@ public sealed class AutoStartService(
     {
         var memory = automation.StateOf(profile.Id);
         var now = time.GetUtcNow();
-        if (memory.AutoStartHoldUntil is { } hold && now < hold)
+        if (memory.AutoStartHoldUntil is { } hold && now < hold && !StartedWindowSeen(profile, memory, hold))
         {
             return;
         }
@@ -132,6 +142,7 @@ public sealed class AutoStartService(
         }
 
         var now = time.GetUtcNow();
+        _startedWindowSeen.Remove(profile.Id);
         if (result.Started)
         {
             memory.AutoStartHoldUntil = result.ResetAt is { } reset && reset > now ? reset : now + SessionAutoStart.SessionLength;
@@ -149,6 +160,37 @@ public sealed class AutoStartService(
         }
 
         automation.Save();
+    }
+
+    /// <summary>
+    /// Whether this run has seen open the window the latest start opened, so that its wait may end early: a provider can
+    /// reset its limits before the window's reset time, as OpenAI did for Codex on 2026-10-15, and the wait would leave the
+    /// profile without a window until then. Only a polled profile is watched, on its polling loop's reads, so nothing is
+    /// requested; once its window was seen, each check lets the usual rules decide whether it is still open. The window
+    /// is seen in a read at least one check interval after the start that shows the reset time the wait runs to. A start
+    /// whose window never shows, and a failure, keep their wait in full, so a message the provider did not count is not
+    /// sent again at every check.
+    /// </summary>
+    private bool StartedWindowSeen(ProfileSettings profile, ProfileAutomationState memory, DateTimeOffset hold)
+    {
+        if (memory.AutoStartFailureNotified || Polled(profile, current(profile.Id)) is not { } read)
+        {
+            return false;
+        }
+
+        if (_startedWindowSeen.Contains(profile.Id))
+        {
+            return true;
+        }
+
+        // By then an unstarted Codex window's reset time, which moves with the clock, is too far from the wait's end.
+        if (read.At - (hold - SessionAutoStart.SessionLength) >= SessionAutoStart.CheckInterval
+            && read.Usage.SessionResetTime is { } reset && (reset - hold).Duration() <= StartedWindowTolerance)
+        {
+            _startedWindowSeen.Add(profile.Id);
+        }
+
+        return false;
     }
 
     /// <summary>

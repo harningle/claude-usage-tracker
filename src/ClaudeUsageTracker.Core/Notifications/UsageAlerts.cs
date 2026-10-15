@@ -62,7 +62,7 @@ public sealed record AlertEvaluation(IReadOnlyList<UsageAlert> Alerts, SessionAl
 /// only on a reset it saw itself, so after a restart across a reset a threshold was never notified again); a
 /// session percentage that was not reported causes nothing; and the reset alert needs a previous observation from
 /// the same run, as upstream's in-memory comparison did, so a reset that happened while the app was closed is not
-/// announced as news.
+/// announced as news; a read at 0 % that still shows the open window, with its reset time, is no reset.
 /// </summary>
 public static class UsageAlerts
 {
@@ -91,15 +91,19 @@ public static class UsageAlerts
         }
 
         var openWindow = usage.SessionResetTime is { } reset && reset >= now ? reset : (DateTimeOffset?)null;
-        var newWindow = effective == 0
-                        || (openWindow is { } current && state.WindowResetAt is { } known && (current - known).Duration() >= WindowTolerance);
+        // Whether this read shows the window the state belongs to; null when there is nothing to compare. A read at 0 %
+        // that still shows it is no new window (claude.ai answered such reads mid-window on 2026-10-15).
+        bool? sameWindow = openWindow is { } current && state.WindowResetAt is { } known
+            ? (current - known).Duration() < WindowTolerance
+            : null;
+        var newWindow = sameWindow is { } same ? !same : effective == 0;
         var levels = newWindow ? [] : state.NotifiedLevels.ToList();
         var windowResetAt = openWindow ?? (newWindow ? null : state.WindowResetAt);
 
         var alerts = new List<UsageAlert>();
         if (thresholds.Enabled)
         {
-            if (previousEffective > 0 && effective == 0)
+            if (previousEffective > 0 && effective == 0 && newWindow)
             {
                 alerts.Add(new UsageAlert(UsageAlertKind.SessionReset, 0, effective, usage.SessionResetTime));
             }

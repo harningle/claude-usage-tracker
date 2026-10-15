@@ -407,16 +407,78 @@ public sealed class CodexAutoStartTests : IDisposable
         Assert.Single(_notifier.Shown);
     }
 
-    /// <summary>A polling loop's fresh result at the given time, of a window that has not started.</summary>
-    private ProfileUsageState PolledAt(DateTimeOffset at) => new()
+    /// <summary>A polling loop's fresh result at the given time, at 0 %: of a window that has not started, unless its reset time is given.</summary>
+    private ProfileUsageState PolledAt(DateTimeOffset at, DateTimeOffset? reset = null) => new()
     {
         ProfileId = _profile.Id, Source = UsageSourceKind.Codex, LastAttemptAt = at, LastSuccessAt = at,
         Usage = new CachedUsage
         {
             ProfileId = _profile.Id, ObservedAt = at, Source = "codex",
-            Usage = new UsageData { SessionPercentage = 0, SessionResetTime = at + SessionAutoStart.SessionLength },
+            Usage = new UsageData { SessionPercentage = 0, SessionResetTime = reset ?? at + SessionAutoStart.SessionLength },
         },
     };
+
+    [Fact]
+    public async Task APolledWindowThatEndsEarlyIsStartedAgainBeforeTheWaitIsOver()
+    {
+        // As on 2026-10-15, when OpenAI reset the Codex limits about an hour and a half before the started window's reset.
+        var service = Service();
+        _current = PolledAt(Now);
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledAt(_time.GetUtcNow());
+        _loopCheck = () => _current = PolledAt(_time.GetUtcNow());
+        await service.CheckAllAsync(CancellationToken.None);
+        Assert.Single(_runs);
+        var reset = _time.GetUtcNow() + SessionAutoStart.SessionLength;
+
+        // The started window shows with its fixed reset time, which then moves with the clock again.
+        for (var check = 0; check < 3; check++)
+        {
+            _time.Advance(SessionAutoStart.CheckInterval);
+            _current = PolledAt(_time.GetUtcNow(), reset);
+            await service.CheckAllAsync(CancellationToken.None);
+        }
+
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledAt(_time.GetUtcNow());
+        await service.CheckAllAsync(CancellationToken.None);
+        Assert.Single(_runs);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledAt(_time.GetUtcNow());
+        await service.CheckAllAsync(CancellationToken.None);
+
+        // Two moving reads and the confirmation, as for any start; nothing is requested beside the loop.
+        Assert.Equal(2, _runs.Count);
+        Assert.Equal(2, _loopChecks);
+        Assert.Empty(_http.Requests);
+    }
+
+    [Fact]
+    public async Task AStartWhoseWindowKeepsMovingKeepsItsWait()
+    {
+        // The run succeeded, but Codex keeps reporting an unstarted window: its reset never stays at the wait's end. A read
+        // just after the start, such as at a check after a wake, cannot tell: its moving reset is still near the wait's end.
+        var service = Service();
+        _current = PolledAt(Now);
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledAt(_time.GetUtcNow());
+        _loopCheck = () => _current = PolledAt(_time.GetUtcNow());
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(TimeSpan.FromSeconds(20));
+        _current = PolledAt(_time.GetUtcNow());
+        await service.CheckAllAsync(CancellationToken.None);
+
+        for (var check = 0; check < 6; check++)
+        {
+            _time.Advance(SessionAutoStart.CheckInterval);
+            _current = PolledAt(_time.GetUtcNow());
+            await service.CheckAllAsync(CancellationToken.None);
+        }
+
+        Assert.Single(_runs);
+    }
 
     [Fact]
     public async Task APolledProfileIsDecidedAndConfirmedByItsPollingLoopAlone()

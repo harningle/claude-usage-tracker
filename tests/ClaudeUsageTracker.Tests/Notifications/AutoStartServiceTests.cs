@@ -272,6 +272,78 @@ public sealed class AutoStartServiceTests : IDisposable
         Assert.Empty(_released);
     }
 
+    /// <summary>A polling loop's fresh result, read half a minute ago.</summary>
+    private ProfileUsageState PolledNow(UsageData usage)
+    {
+        var at = _time.GetUtcNow().AddSeconds(-30);
+        return new ProfileUsageState
+        {
+            ProfileId = _profile.Id, Source = UsageSourceKind.ClaudeAi, LastAttemptAt = at, LastSuccessAt = at,
+            Usage = new CachedUsage { ProfileId = _profile.Id, ObservedAt = at, Source = "claudeAi", Usage = usage },
+        };
+    }
+
+    [Fact]
+    public async Task APolledWindowThatEndsEarlyIsStartedAgainBeforeTheWaitIsOver()
+    {
+        var service = Service();
+        _current = PolledNow(new UsageData { SessionPercentage = 0 });
+        await service.CheckAllAsync(CancellationToken.None);
+
+        // The loop shows the new window open, then, as when a provider resets its limits early, unstarted again.
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledNow(new UsageData { SessionPercentage = 0, SessionResetTime = NewWindowReset });
+        await service.CheckAllAsync(CancellationToken.None);
+        Assert.Equal(1, Starts);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledNow(new UsageData { SessionPercentage = 0 });
+        await service.CheckAllAsync(CancellationToken.None);
+
+        Assert.Equal(2, Starts);
+        Assert.Equal(0, UsageRequests);
+        Assert.Equal(2, _notifier.Shown.Count);
+    }
+
+    [Fact]
+    public async Task AStartWhoseWindowNeverShowsKeepsItsWait()
+    {
+        // The start succeeded, but the loop never shows its window: starting again would repeat a message the provider did
+        // not count, at every check. A check soon after the start, on a read from before it, sends nothing either.
+        var service = Service();
+        _current = PolledNow(new UsageData { SessionPercentage = 0 });
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(TimeSpan.FromSeconds(20));
+        await service.CheckAllAsync(CancellationToken.None);
+
+        for (var check = 0; check < 6; check++)
+        {
+            _time.Advance(SessionAutoStart.CheckInterval);
+            _current = PolledNow(new UsageData { SessionPercentage = 0 });
+            await service.CheckAllAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(1, Starts);
+    }
+
+    [Fact]
+    public async Task TheWaitAfterAFailureIsKeptInFullForAPolledProfile()
+    {
+        _completionStatus = 500;
+        var service = Service();
+        _current = PolledNow(new UsageData { SessionPercentage = 0 });
+        await service.CheckAllAsync(CancellationToken.None);
+
+        // Even a read whose reset time matches the wait's end does not count as a started window.
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledNow(new UsageData { SessionPercentage = 0, SessionResetTime = Now + SessionAutoStart.FailureHold });
+        await service.CheckAllAsync(CancellationToken.None);
+        _time.Advance(SessionAutoStart.CheckInterval);
+        _current = PolledNow(new UsageData { SessionPercentage = 0 });
+        await service.CheckAllAsync(CancellationToken.None);
+
+        Assert.Equal(1, Starts);
+    }
+
     [Theory]
     [InlineData("failed")]
     [InlineData("internal error")]
