@@ -304,6 +304,11 @@ Not covered here:
 - **Claude Code 2.1.289** is installed now. The hook gate and status line were measured on 2.1.288.
 - **Whether the Console replaces its session cookie** has not been seen live; defects 7 and 8 rest on automated tests.
 - **A pasted Codex login that was renewed outside the tracker** (by the Codex CLI on another PC, or an old copy of `auth.json`) cannot be recognised. Its first renewal sends a used token. Defect 4 covers only copies the tracker itself holds.
+- **Cancel Switch does not stop an attempt already under way** (left as it is by your decision of 2026-10-15, as too rare to fix).
+  - **When:** only in the seconds after the last Claude Code closes. While Claude Code runs, every attempt stops at once without changing anything, so a cancel then always holds. An attempt normally takes milliseconds. It lasts seconds only while it waits for the credential lock (as during a renewal in a usage check), or renews the target profile's saved login.
+  - **What happens:** a Cancel Switch pressed during that time removes the waiting switch from the popover, but the attempt still writes the target's login into Claude Code's folder. No notification announces it. Debug Tools shows `CANCEL`, then `RUN` for that profile ([Switch events in Debug Tools](#switch-events-in-debug-tools-added-2026-10-15)).
+  - **A newer pick instead of a cancel** corrects itself: the old attempt still writes, and the next check, five seconds later, switches to the newer pick.
+  - **The fix, if ever wanted:** the check that automatic switches already make under the lock, just before writing ("is this switch still wanted?"), would be made for picked and manual switches too. It would ask, from the switch's thread, whether the switch is still the one waiting.
 - **A renewal that no profile could save before the tracker quits is lost,** for pasted Codex logins as for Claude Code ones (plan section 2): the next start has only the used token. The tracker tries to save it again at every check until then. Once any profile holding the login has saved it, the others are given it from there (defect 4).
 
 ## Live checks to do
