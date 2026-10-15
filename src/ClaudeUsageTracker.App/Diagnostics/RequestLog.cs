@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ClaudeUsageTracker.App.Diagnostics;
 
@@ -9,6 +10,10 @@ namespace ClaudeUsageTracker.App.Diagnostics;
 /// transport and error category. Never bodies, headers, cookies, tokens or account data
 /// (plan.md section 2, "Diagnostics and build location").
 /// </summary>
+/// <param name="ProfileId">
+/// For an event about one profile (a switch of Claude Code's account), that profile's local ID, which is no account data.
+/// Not written for requests.
+/// </param>
 public sealed record RequestLogEntry(
     DateTimeOffset At,
     string Operation,
@@ -17,7 +22,8 @@ public sealed record RequestLogEntry(
     int? Status,
     long DurationMs,
     string Transport,
-    string? ErrorCategory);
+    string? ErrorCategory,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ProfileId = null);
 
 /// <summary>
 /// Appends <see cref="RequestLogEntry"/> lines to a bounded JSON-lines file and reads them back for the

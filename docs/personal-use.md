@@ -63,7 +63,7 @@ The tracker's data is in `%LOCALAPPDATA%\ClaudeUsageTracker`:
 | `bin\ClaudeUsageTracker.Helper.exe`, `install.json` | The installed helper, and the record of what the tracker installed |
 | `automation.json` | What notifications and auto-start remember; no secrets |
 | `cli-switch.json` | Only while a switch of Claude Code's account is unfinished |
-| `diagnostics\requests.jsonl`, `diagnostics\crash.log` | The request log (operation, route, status and timing only) and the type and place of a crash, never its message |
+| `diagnostics\requests.jsonl`, `diagnostics\crash.log` | The request log (operation, route, status and timing only, plus the target profile's local ID for a switch of Claude Code's account) and the type and place of a crash, never its message |
 | `notification-icon.png` | The icon the app draws for its notifications |
 
 Outside it:

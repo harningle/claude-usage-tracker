@@ -1,4 +1,7 @@
+using System.Diagnostics;
+using System.Text.Json;
 using System.Windows.Threading;
+using ClaudeUsageTracker.App.Diagnostics;
 using ClaudeUsageTracker.App.Localisation;
 using ClaudeUsageTracker.App.Notifications;
 using ClaudeUsageTracker.App.Profiles;
@@ -39,7 +42,8 @@ public sealed record CliSwitchView(bool InUse, bool CanSwitch, bool Pending, str
 /// <see cref="CliLinkService.SwitchAsync"/> (plan.md section 2). Viewing a profile never switches Claude Code. A switch
 /// that has to wait because Claude Code is or may be running is kept, one at a time, shown in the popover and the
 /// settings and tried again every few seconds; it can be cancelled. The queue is in memory only, so a restart drops it.
-/// An unfinished switch from an earlier run is settled first. Use it from the UI thread only.
+/// Each change of the waiting switch, and the outcome of each attempt that ends a request, is written to the network log
+/// (see the private Log method). An unfinished switch from an earlier run is settled first. Use it from the UI thread only.
 /// </summary>
 public sealed class CliSwitcher
 {
@@ -52,6 +56,7 @@ public sealed class CliSwitcher
     private readonly Func<CliConfigDirectory> _sharedFolder;
     private readonly Action _applied;
     private readonly TimeProvider _time;
+    private readonly RequestLog _log;
     private readonly DispatcherTimer _timer;
     private readonly Dictionary<Guid, string> _messages = [];
     private long _requests;
@@ -62,7 +67,7 @@ public sealed class CliSwitcher
     /// <param name="applied">Polls and redraws after a switch changed a profile's link.</param>
     public CliSwitcher(
         AppSettings settings, CliLinkService links, ProfileService profiles, AutomationService automation,
-        Func<CliConfigDirectory> sharedFolder, Action applied, TimeProvider time, Dispatcher dispatcher)
+        Func<CliConfigDirectory> sharedFolder, Action applied, TimeProvider time, Dispatcher dispatcher, RequestLog log)
     {
         _settings = settings;
         _links = links;
@@ -71,6 +76,7 @@ public sealed class CliSwitcher
         _sharedFolder = sharedFolder;
         _applied = applied;
         _time = time;
+        _log = log;
         _timer = new DispatcherTimer(RetryInterval, DispatcherPriority.Background, async (_, _) => await TickAsync(), dispatcher);
     }
 
@@ -93,22 +99,31 @@ public sealed class CliSwitcher
         var automatic = automaticFrom is not null;
         // The newest request is the one that counts: a switch still waiting for another profile is dropped.
         var request = ++_requests;
+        if (Pending is { } replaced)
+        {
+            Log("DROP", replaced, "superseded");
+        }
+
         Pending = null;
         if (_busy)
         {
             // Another switch or a settlement is running: this one waits its turn rather than being lost, and its outcome
             // is reported when it runs.
             Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow(), fromActivation);
+            Log("QUEUE", Pending, "busy");
             Changed?.Invoke();
             KeepTrying();
             return new CliSwitchResult(CliSwitchOutcome.Deferred);
         }
 
+        var started = Stopwatch.GetTimestamp();
         var result = await RunAsync(target.Id, confirmedOccupant, automaticFrom);
+        var duration = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         if (result.Refusal == CliSwitchRefusal.NoLongerApplies)
         {
             // Dropped as a queued one would be: nothing was changed, so there is nothing to report. A switch that was
             // waiting was dropped by this request, so the views are drawn again.
+            Log("RUN", target.Id, automatic, fromActivation, Category(result), duration);
             Changed?.Invoke();
             KeepTrying();
             return result;
@@ -119,11 +134,17 @@ public sealed class CliSwitcher
             if (request != _requests)
             {
                 // A newer request made meanwhile is the one that waits; this one is dropped, as it would have been queued.
+                Log("DROP", target.Id, automatic, fromActivation, "superseded", duration);
                 KeepTrying();
                 return result;
             }
 
             Pending = new PendingCliSwitch(target.Id, automaticFrom, confirmedOccupant, _time.GetUtcNow(), fromActivation) { WaitReported = true };
+            Log("QUEUE", Pending, "claudeCodeRunning", duration);
+        }
+        else
+        {
+            Log("RUN", target.Id, automatic, fromActivation, Category(result), duration);
         }
 
         Report(target.Id, result, automatic, queued: false, fromActivation);
@@ -137,12 +158,20 @@ public sealed class CliSwitcher
     /// </summary>
     public async Task SignedInAgainAsync() => await SettleAsync(signedInAgain: true);
 
-    public void Cancel()
+    /// <summary>The user's Cancel Switch, in the popover or on the CLI Account page.</summary>
+    public void Cancel() => Drop("CANCEL", null);
+
+    /// <summary>The app is closing: a waiting switch ends with it, since the queue is in memory only, and is logged as dropped.</summary>
+    public void DropOnExit() => Drop("DROP", "appClosed");
+
+    /// <summary>Drops the waiting switch, if there is one, and logs why: the user's cancel, or a reason.</summary>
+    private void Drop(string method, string? reason)
     {
         if (Pending is { } pending)
         {
             Pending = null;
             _messages.Remove(pending.TargetProfileId);
+            Log(method, pending, reason);
             Changed?.Invoke();
         }
     }
@@ -247,6 +276,7 @@ public sealed class CliSwitcher
         if (_settings.Profiles.FirstOrDefault(p => p.Id == pending.TargetProfileId) is not { CliLink: not null } target)
         {
             Pending = null;
+            Log("DROP", pending, "profileUnlinked");
             Changed?.Invoke();
             KeepTrying();
             return;
@@ -260,7 +290,7 @@ public sealed class CliSwitcher
                 if (applies == false)
                 {
                     // What the automatic switch was queued for no longer holds, so it is dropped rather than applied late.
-                    Cancel();
+                    Drop("DROP", "noLongerApplies");
                 }
 
                 KeepTrying();
@@ -268,7 +298,9 @@ public sealed class CliSwitcher
             }
         }
 
+        var started = Stopwatch.GetTimestamp();
         var result = await RunAsync(target.Id, pending.ConfirmedOccupant, pending.AutomaticFrom);
+        var duration = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         // A newer request made meanwhile replaced this one and stays queued.
         if (result.Outcome == CliSwitchOutcome.Deferred && ReferenceEquals(Pending, pending) && !pending.WaitReported)
         {
@@ -279,13 +311,20 @@ public sealed class CliSwitcher
         {
             if (result.Refusal == CliSwitchRefusal.NoLongerApplies)
             {
-                Cancel();
+                Drop("DROP", "noLongerApplies");
             }
             else
             {
                 Pending = null;
+                Log("RUN", pending, Category(result), duration);
                 Report(target.Id, result, pending.Automatic, queued: true, pending.FromActivation);
             }
+        }
+        else if (result.Outcome != CliSwitchOutcome.Deferred)
+        {
+            // Cancelled or replaced while it ran (as while it waited for the credential lock): it may still have switched
+            // Claude Code, so its outcome is logged after the cancel or the drop.
+            Log("RUN", pending, Category(result), duration);
         }
 
         KeepTrying();
@@ -413,6 +452,27 @@ public sealed class CliSwitcher
                 Strings.Get("windows.cli.switch.notification.title"), _messages[targetId], target.Id, target.NotificationSettings.SoundName));
         }
     }
+
+    /// <summary>
+    /// Writes a switch event to the network log shown in Debug Tools, so that whether a switch waits, and how it stopped
+    /// waiting, can be told afterwards (the user's request of 2026-10-15). It holds the log's allowlisted fields and the
+    /// target profile's local ID: the operation <c>cliSwitch</c>; the method QUEUE, CANCEL (the user's), DROP or RUN (an
+    /// attempt that ended the request); who asked as the route (picked, automatic, or manual on the CLI Account page); and
+    /// why it waits, why it was dropped, or the attempt's outcome as the category. Retries that find Claude Code still
+    /// running change nothing and are not logged.
+    /// </summary>
+    private void Log(string method, Guid targetId, bool automatic, bool fromActivation, string? category, long durationMs = 0) =>
+        _log.Append(new RequestLogEntry(
+            _time.GetUtcNow(), "cliSwitch", method, automatic ? "automatic" : fromActivation ? "picked" : "manual", null, durationMs,
+            "Claude Code folder", category, targetId));
+
+    private void Log(string method, PendingCliSwitch pending, string? category, long durationMs = 0) =>
+        Log(method, pending.TargetProfileId, pending.Automatic, pending.FromActivation, category, durationMs);
+
+    /// <summary>An attempt's outcome for the log: null for a switch made, otherwise its refusal or outcome, e.g. <c>alreadyInUse</c>.</summary>
+    private static string? Category(CliSwitchResult result) => result.Outcome == CliSwitchOutcome.Switched
+        ? null
+        : JsonNamingPolicy.CamelCase.ConvertName(result.Refusal?.ToString() ?? result.Outcome.ToString());
 
     /// <summary>Copies of every Anthropic profile's Claude Code link, so the switch never reads objects the UI edits.</summary>
     private List<LinkedProfile> LinkedProfiles() =>

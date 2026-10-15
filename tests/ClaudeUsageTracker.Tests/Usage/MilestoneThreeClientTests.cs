@@ -296,6 +296,19 @@ public sealed class RequestLogTests : IDisposable
     }
 
     [Fact]
+    public void AProfileIdIsWrittenOnlyForAnEntryAboutAProfile()
+    {
+        var log = new RequestLog(_temp.Path);
+        var profile = Guid.NewGuid();
+        log.Append(Entry(1));
+        log.Append(Entry(2) with { Operation = "cliSwitch", ProfileId = profile });
+
+        // Request lines stay as they were, and lines written before the field existed read without it.
+        Assert.DoesNotContain("profileId", File.ReadAllLines(log.FilePath)[0], StringComparison.Ordinal);
+        Assert.Equal<Guid?>([profile, null], log.ReadRecent(10).Select(e => e.ProfileId));
+    }
+
+    [Fact]
     public void ClearRemovesEveryEntryAndNotifies()
     {
         var log = new RequestLog(_temp.Path, maxBytes: 200);

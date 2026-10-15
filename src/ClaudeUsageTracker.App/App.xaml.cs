@@ -283,7 +283,7 @@ public partial class App : Application
                 _browser.Release(profileId);
             }
         });
-        _switcher = new CliSwitcher(_settings, _links, _profiles, _automation, SharedFolder, OnSettingsApplied, time, Dispatcher);
+        _switcher = new CliSwitcher(_settings, _links, _profiles, _automation, SharedFolder, OnSettingsApplied, time, Dispatcher, _log);
         _switcher.Changed += UpdateViews;
         _launchAtLogin = fixture is null
             ? LaunchAtLogin.ForCurrentUser(Environment.ProcessPath!)
@@ -392,6 +392,8 @@ public partial class App : Application
     {
         _clock?.Stop();
         _autoStartTimer?.Stop();
+        // Null when the app stops before it is set up.
+        _switcher?.DropOnExit();
         _hotkeys?.Dispose();
         _watcher?.Dispose();
         _hudController?.Dispose();

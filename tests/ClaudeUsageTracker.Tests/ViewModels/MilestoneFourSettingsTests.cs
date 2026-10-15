@@ -60,6 +60,23 @@ public sealed class MilestoneFourSettingsTests : IDisposable
         return done.Task;
     }
 
+    [Fact]
+    public Task DebugToolsNamesTheProfileOfASwitchEntry() => OnSta(model =>
+    {
+        // A deleted profile shows the start of its ID.
+        var log = new RequestLog(Path.Combine(_temp.Path, "diagnostics"));
+        var deleted = Guid.Parse("0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0");
+        log.Append(new RequestLogEntry(Now, "cliSwitch", "QUEUE", "picked", null, 0, "Claude Code folder", "claudeCodeRunning", Profile.Id));
+        log.Append(new RequestLogEntry(Now, "cliSwitch", "DROP", "picked", null, 0, "Claude Code folder", "appClosed", deleted));
+        log.Append(new RequestLogEntry(Now, "claudeAiUsage", "GET", "/api/organizations/{org}/usage", 200, 5, "WebView2", null));
+
+        model.ReloadLog();
+
+        Assert.Equal(
+            ["GET /api/organizations/{org}/usage (WebView2)", "DROP picked (Claude Code folder) → 0f1e2d3c", "QUEUE picked (Claude Code folder) → Work"],
+            model.LogRows.Select(r => r.Request));
+    });
+
     private SettingsViewModel Create()
     {
         var links = new LinkHarness(_temp.Path, Path.Combine(_temp.Path, "home"), _time);

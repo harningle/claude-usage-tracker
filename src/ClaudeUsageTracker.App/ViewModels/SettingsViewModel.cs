@@ -58,7 +58,10 @@ public sealed class ProfileRow(Guid id) : ObservableObject
     public bool CanDelete { get => _canDelete; internal set => Set(ref _canDelete, value); }
 }
 
-/// <summary>A request of the network log, as text. It holds only what <see cref="RequestLogEntry"/> holds.</summary>
+/// <summary>
+/// A request of the network log, as text. It holds only what <see cref="RequestLogEntry"/> holds, with a logged profile's
+/// current name for its ID.
+/// </summary>
 public sealed record LogRow(string Time, string Operation, string Request, string Status, string Duration, string? Error) : ListItem;
 
 /// <summary>A custom notification threshold, with upstream's colour band.</summary>
@@ -816,7 +819,7 @@ public sealed class SettingsViewModel : ObservableObject
             .Select(e => new LogRow(
                 TimeZoneInfo.ConvertTime(e.At, TimeZoneInfo.Local).ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                 e.Operation,
-                $"{e.Method} {e.Route} ({e.Transport})",
+                $"{e.Method} {e.Route} ({e.Transport})" + (e.ProfileId is { } id ? $" → {LogProfileName(id)}" : ""),
                 e.Status?.ToString(CultureInfo.InvariantCulture) ?? "—",
                 $"{e.DurationMs.ToString(CultureInfo.InvariantCulture)} ms",
                 e.ErrorCategory))
@@ -824,6 +827,9 @@ public sealed class SettingsViewModel : ObservableObject
         RaisePropertyChanged(nameof(LogRows));
         RaisePropertyChanged(nameof(LogCount));
     }
+
+    /// <summary>A logged profile's current name, or the start of its ID once it is deleted.</summary>
+    private string LogProfileName(Guid id) => _settings.Profiles.FirstOrDefault(p => p.Id == id)?.Name ?? id.ToString()[..8];
 
     public void ClearLog()
     {

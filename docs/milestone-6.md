@@ -211,6 +211,30 @@ At your request after daily use, picking a profile now switches Claude Code to i
 - **Found by the fixture check, and fixed:** picking the profile Claude Code was already on, while Claude Code ran, still queued a switch. The popover then said "Claude Code switches to Fixture B when it closes" while Claude Code was on B. The switch would have ended without writing anything once Claude Code closed, because the process check came before the check of the folder's account. The queue now reads the folder first and leaves nothing waiting when it already holds the account. The two tests above failed before the fix.
 - **Not checked:** the next-profile shortcut, beyond its one changed call. Nothing of this has run live; your installed copy predates it until it is republished.
 
+## Switch events in Debug Tools (added 2026-10-15)
+
+You asked for this after you could not tell whether a switch to `work`, which you had cancelled the evening before, was still waiting.
+
+- **Why the evidence was missing:** the queue is in memory only, a cancel posts no notification, and a waiting switch is made only once no Claude Code runs. A Claude Code session had run without a break since then, so Claude Code still being on `personal` proved nothing either way.
+- **What is logged now:** each change of the waiting switch, and each attempt's outcome, goes to the network log as operation `cliSwitch`.
+  - **Method:** `QUEUE`, `CANCEL` (your Cancel Switch), `DROP`, or `RUN` (an attempt that ended the request).
+  - **Route:** who asked: `picked`, `automatic`, or `manual` (Use in Claude Code).
+  - **Category:**
+    - why it waits: `claudeCodeRunning`, or `busy` behind another switch;
+    - why it was dropped: `superseded` by a newer request, `profileUnlinked`, `noLongerApplies` for an automatic switch, or `appClosed`;
+    - or the attempt's outcome: empty for a switch made, otherwise e.g. `alreadyInUse` or the refusal.
+  - **Target profile:** its local ID, in a new field written only for these entries (your choice; plan section 2 and parity difference 33). Debug Tools shows the profile's current name, or the first 8 characters of the ID once the profile is deleted. The export carries the ID.
+- **Reading it:** each `QUEUE` ends with a later `CANCEL`, `DROP` or `RUN` for that switch. One without an end is still waiting, and the popover shows it.
+  - **An attempt already under way runs on.** If a switch is cancelled or replaced while its attempt runs (as while the attempt waits for the credential lock during a renewal), the attempt is not stopped and may still switch Claude Code. Its `RUN` then comes after the `CANCEL` or `DROP`, and after a new switch's `QUEUE`, so the account change is never hidden.
+  - **A crash leaves no end.** An app that stopped without closing (a crash, or ended from Task Manager) has lost its waiting switch, but wrote no `DROP`.
+- **Not logged:**
+  - retries while Claude Code still runs, which change nothing;
+  - the settlement at start-up of a switch an earlier run left unfinished.
+- **Tests:** 5 new (one with two cases), with log checks added to 4 existing switcher tests; 1,398 pass, none skipped, with no build warnings.
+  - The new ones are `EveryChangeOfTheWaitingSwitchIsLogged`, `AnAttemptThatSwitchesAfterItsSwitchWasCancelledOrReplacedIsStillLogged`, `AWaitingSwitchToADeletedProfileIsLoggedAsDropped`, `AProfileIdIsWrittenOnlyForAnEntryAboutAProfile` and `DebugToolsNamesTheProfileOfASwitchEntry`.
+  - A mutation check removed each of the seven log calls in turn; each removal was caught.
+  - Your review found that the first version left out the `RUN` of an attempt whose switch was cancelled or replaced while it ran, although that attempt still switched Claude Code. `AnAttemptThatSwitchesAfterItsSwitchWasCancelledOrReplacedIsStillLogged` failed in both cases before the fix: the account changed, and the log showed only the `CANCEL` or `DROP`.
+
 ## Delivery checks in fixture mode
 
 Run by Claude on 2026-10-05 with the published build and a synthetic fixture folder. The steps were driven through UI Automation, by the accessible names above.

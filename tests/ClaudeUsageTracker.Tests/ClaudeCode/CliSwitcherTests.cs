@@ -75,9 +75,95 @@ public sealed class CliSwitcherTests : IDisposable
             _settings, _notifier, new AutomationStateStore(Path.Combine(_temp.Path, "automation.json")), _time, _ => null, (_, _) => { });
         var switcher = new CliSwitcher(
             _settings, links.Service, new ProfileService(store, _settings, links.Service, links.Secrets, links.Lock, cache, history, _time), automation,
-            () => CliStore.Inventory(UserProfile, null, [])[0], () => { }, _time, Dispatcher.CurrentDispatcher);
+            () => CliStore.Inventory(UserProfile, null, [])[0], () => { }, _time, Dispatcher.CurrentDispatcher, links.Log);
         return (switcher, profiles[0], profiles[1], links);
     }
+
+    /// <summary>The switcher's entries of the network log, oldest first, as "method, who asked, reason or outcome".</summary>
+    private static List<string> Logged(LinkHarness links) =>
+    [
+        .. links.Log.ReadRecent(100).Reverse().Where(e => e.Operation == "cliSwitch").Select(e => $"{e.Method} {e.Route} {e.ErrorCategory ?? "-"}"),
+    ];
+
+    [Fact]
+    public Task EveryChangeOfTheWaitingSwitchIsLogged() => OnSta(async () =>
+    {
+        // Whether a switch waits, and how it stopped waiting, shows in Debug Tools afterwards (the user's request of 2026-10-15).
+        // The folder holds the second profile's account. Retries while Claude Code runs, and a cancel with nothing
+        // waiting, change nothing and log nothing.
+        var (switcher, first, _, links) = await Create();
+        links.ClaudeRunning();
+        await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+        await switcher.TickAsync();
+        switcher.Cancel();
+        switcher.Cancel();
+        await switcher.RequestAsync(first, automaticFrom: null, null);
+        await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+        switcher.DropOnExit();
+        await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+        links.Processes.Clear();
+        await switcher.TickAsync();
+
+        Assert.Equal(
+            [
+                "QUEUE picked claudeCodeRunning", "CANCEL picked -",
+                "QUEUE manual claudeCodeRunning", "DROP manual superseded", "QUEUE picked claudeCodeRunning", "DROP picked appClosed",
+                "QUEUE picked claudeCodeRunning", "RUN picked -",
+            ],
+            Logged(links));
+        Assert.All(links.Log.ReadRecent(100).Where(e => e.Operation == "cliSwitch"), e => Assert.Equal(first.Id, e.ProfileId));
+    });
+
+    [Theory]
+    [InlineData("cancelled")]
+    [InlineData("replaced")]
+    public Task AnAttemptThatSwitchesAfterItsSwitchWasCancelledOrReplacedIsStillLogged(string change) => OnSta(async () =>
+    {
+        // The waiting switch to the first profile is tried once Claude Code has closed, but its attempt waits for the
+        // credential lock (held, as by a renewal). Meanwhile the user cancels it or picks another profile: the attempt
+        // runs on and switches Claude Code, which the log must not hide behind the cancel or the drop.
+        var (switcher, first, second, links) = await Create();
+        await LinkProfile(links, "acc-c", "Third");
+        links.ClaudeRunning();
+        await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+        links.Processes.Clear();
+        var held = links.Lock.Acquire();
+        var attempt = switcher.TickAsync();
+
+        if (change == "cancelled")
+        {
+            switcher.Cancel();
+        }
+        else
+        {
+            await switcher.RequestAsync(second, automaticFrom: null, null);
+        }
+
+        held.Dispose();
+        await attempt;
+
+        Assert.Contains("acc-a", File.ReadAllText(AccountFile), StringComparison.Ordinal);
+        Assert.Equal(
+            change == "cancelled"
+                ? ["QUEUE picked claudeCodeRunning", "CANCEL picked -", "RUN picked -"]
+                : ["QUEUE picked claudeCodeRunning", "DROP picked superseded", "QUEUE manual busy", "RUN picked -"],
+            Logged(links));
+        Assert.Equal(first.Id, links.Log.ReadRecent(1).Single().ProfileId);
+    });
+
+    [Fact]
+    public Task AWaitingSwitchToADeletedProfileIsLoggedAsDropped() => OnSta(async () =>
+    {
+        var (switcher, first, _, links) = await Create();
+        links.ClaudeRunning();
+        await switcher.RequestAsync(first, automaticFrom: null, null, fromActivation: true);
+        _settings.Profiles.Remove(first);
+
+        await switcher.TickAsync();
+
+        Assert.Null(switcher.Pending);
+        Assert.Equal(["QUEUE picked claudeCodeRunning", "DROP picked profileUnlinked"], Logged(links));
+    });
 
     [Fact]
     public Task TheNewestRequestReplacesOneThatWaits() => OnSta(async () =>
@@ -127,6 +213,7 @@ public sealed class CliSwitcherTests : IDisposable
 
         Assert.Null(switcher.Pending);
         Assert.Equal([Strings.Format("windows.cli.switch.deferred", "First")], _notifier.Shown.Select(a => a.Body));
+        Assert.Equal(["QUEUE picked claudeCodeRunning", "DROP picked superseded", "RUN picked alreadyInUse"], Logged(links));
     });
 
     [Fact]
@@ -193,6 +280,7 @@ public sealed class CliSwitcherTests : IDisposable
 
         Assert.Null(switcher.Pending);
         Assert.DoesNotContain("acc-a", File.ReadAllText(AccountFile), StringComparison.Ordinal);
+        Assert.Equal(["QUEUE automatic claudeCodeRunning", "DROP automatic noLongerApplies"], Logged(links));
     });
 
     [Fact]
@@ -249,6 +337,7 @@ public sealed class CliSwitcherTests : IDisposable
 
         Assert.Equal(1, links.TokenRequests);
         Assert.Null(switcher.Pending);
+        Assert.Equal(queued ? ["QUEUE automatic claudeCodeRunning", "DROP automatic noLongerApplies"] : ["RUN automatic noLongerApplies"], Logged(links));
         Assert.Null(switcher.ViewFor(first, null).Message);
         Assert.Contains("acc-b", File.ReadAllText(AccountFile), StringComparison.Ordinal);
         Assert.Contains("at-acc-b", File.ReadAllText(CredentialsFile), StringComparison.Ordinal);
@@ -321,6 +410,7 @@ public sealed class CliSwitcherTests : IDisposable
         Assert.Equal(
             [Strings.Format("windows.cli.switch.deferred", "First"), Strings.Format("windows.cli.switch.done", "First")],
             _notifier.Shown.Select(a => a.Body));
+        Assert.Equal(["QUEUE picked busy", "DROP manual superseded", "RUN picked -"], Logged(links));
     });
 
     [Theory]
