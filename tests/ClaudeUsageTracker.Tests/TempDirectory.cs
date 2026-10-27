@@ -12,12 +12,29 @@ internal sealed class TempDirectory : IDisposable
 
     public void Dispose()
     {
-        try
+        // A process started from the folder keeps its files locked (IOException) or its image mapped
+        // (UnauthorizedAccessException) for a moment after it is reported exited, so the delete is retried briefly;
+        // a folder that cannot be deleted even then is left behind rather than failing the test.
+        for (var attempt = 1; ; attempt++)
         {
-            Directory.Delete(Path, recursive: true);
-        }
-        catch (IOException)
-        {
+            try
+            {
+                Directory.Delete(Path, recursive: true);
+                return;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 10)
+                {
+                    return;
+                }
+
+                Thread.Sleep(200);
+            }
         }
     }
 }
