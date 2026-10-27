@@ -21,7 +21,7 @@ The first public build. Everything below was built between 2026-09-30 and 2026-1
 - **Terminal launchers.** A `claude-<profile>` command per profile that opens Claude Code with that profile's own login folder, under PowerShell, Command Prompt and Git Bash (Milestone 5).
 - **Activity HUD.** A floating window that shows what each Claude Code session is doing, fed by Claude Code's hooks over a local HTTP listener while the tracker runs (Milestone 5).
 - **Debug Tools.** A log of requests with their operation, route, status and timing and no secrets, including switches of Claude Code's account (Milestones 3 and 6).
-- **Accessibility.** Accessible names and keyboard access for every control, checked by an automated audit (Milestone 6).
+- **Accessibility.** Accessible names and keyboard access for every control, checked by an automated audit (Milestone 6); no screen reader has been tried.
 - **Fixture mode** (`--fixture <folder>`), which runs the app on synthetic files and canned responses without touching a real account; the screenshots come from it (Milestone 2).
 - **Self-contained Windows x64 build** with .NET 10 and the Windows App SDK included, and the personal-use guide (Milestone 6).
 - **Public repository:** README, this changelog, Windows CI, and a tag-driven release workflow that makes an unsigned per-user installer and a portable ZIP.

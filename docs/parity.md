@@ -312,13 +312,13 @@ What is not verified, so that no claim goes beyond the evidence:
   - the Console
   - refresh failure in the two-account check
   - an auto-switch at a real 100 % and a threshold alert on real usage
-  - remote desktop
+  - remote desktop (the author does not use it, so this stays untested)
   - a switch beside a launcher-only session
   - a helper upgrade with real Claude Code (exercised only in fixture mode with a stand-in `claude.exe`)
   - the fixes of 2026-10-15 (Milestone 6 defects 12 and 13) and the switch log, which no installed copy has run yet
 - **Cannot be produced live:** the "Waiting for Claude Code to refresh its login" state, because an open Claude Code renews its own login first. It rests on automated tests.
 - **Clean PC.** The published build was run on the development PC with no SDK in its environment, and loaded nothing from an installed .NET or Windows App SDK package. A PC without the Singleton package, or without any developer tools, has not been tried (D2).
-- **Screen readers.** Accessible names and Tab access are tested automatically. No Narrator session has been run.
+- **Screen readers.** Accessible names and Tab access are tested automatically. No Narrator session has been run, and none is planned before the first release (decided 2026-10-27): screen-reader use is untested.
 - **Claude Code versions.** The hook gate and the status line were measured on 2.1.288 (2026-10-03) and 2.1.312 (2026-10-27). The CLI updates itself, and later versions are not measured until the harness is run again.
 
 ## Upstream test inventory

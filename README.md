@@ -91,7 +91,7 @@ Started normally, the app reads your real Claude Code login and polls with it.
 Milestones 0 to 6 of [plan.md](plan.md) are done: the port has been in daily personal use since early October 2026, with about 1,400 automated tests, including ones that run the real helper and launcher processes under PowerShell, Command Prompt and Git Bash. Milestone 7, public distribution, is under way: CI and the release workflow exist; code signing, an update mechanism, clean-machine checks and a beta do not.
 
 - [plan.md](plan.md): the design, the Windows adaptations and their reasons, the milestones and the verification rules.
-- [docs/parity.md](docs/parity.md): every upstream feature's status, the numbered differences, and the verification limits, among them that Max and Enterprise accounts, the Console live, remote desktop and a clean PC are unverified.
+- [docs/parity.md](docs/parity.md): every upstream feature's status, the numbered differences, and the verification limits, among them that Max and Enterprise accounts, the Console live, remote desktop, screen readers and a clean PC are unverified.
 - [docs/milestone-1.md](docs/milestone-1.md) to [docs/milestone-6.md](docs/milestone-6.md): what each milestone did, found and fixed.
 - [docs/personal-use.md](docs/personal-use.md): the folder build, data locations, upgrades and removal.
 - [CHANGELOG.md](CHANGELOG.md): changes by version.
