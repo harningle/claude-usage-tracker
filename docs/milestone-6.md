@@ -235,6 +235,36 @@ You asked for this after you could not tell whether a switch to `work`, which yo
   - A mutation check removed each of the seven log calls in turn; each removal was caught.
   - Your review found that the first version left out the `RUN` of an attempt whose switch was cancelled or replaced while it ran, although that attempt still switched Claude Code. `AnAttemptThatSwitchesAfterItsSwitchWasCancelledOrReplacedIsStillLogged` failed in both cases before the fix: the account changed, and the log showed only the `CANCEL` or `DROP`.
 
+## Hook gate and status line on Claude Code 2.1.312 (added 2026-10-27)
+
+The plan asks for the hook gate to be measured again when the CLI changes. Claude Code had updated itself from 2.1.288, the version Milestone 5 measured, to 2.1.312. The same [HookBench](../spikes/HookBench) runs were repeated on 2026-10-27: the real CLI against the local fake Messages API, with an isolated config folder and a dummy key, so no account was used and no usage consumed. The changelog entries of the 22 releases in between mention no change to the hook or status line settings the tracker writes; 2.1.295 added an opt-in `onFailure: "block"` for hooks, which the tracker does not set, so a failing hook still lets the action through.
+
+**G5, the hook gate** (3 runs of 25 tool calls per condition, all successful). The run without hooks took 24.1 ms p50 and 38.8 ms p95 per tool call, more than on 2.1.288 (9.8 and 20.3 ms); the hooks' own share stayed where it was, far inside the 100 ms budget:
+
+| Condition | p50 | p95 |
+| --- | ---: | ---: |
+| Benchmark listener up | +3.4 ms | +6.6 ms |
+| Listener stopped | +3.7 ms | +4.9 ms |
+| Listener restarting | +3.3 ms | +2.1 ms |
+
+With the listener up each run delivered UserPromptSubmit 1, PreToolUse 26, PostToolUse 25, PostToolUseFailure 1, Stop 1 and SessionEnd 1, and a PreToolUse event reached the listener 3.0 ms p50 after the response. SessionStart is still skipped for HTTP hooks.
+
+**G6 and G7, an interactive session.** Notification arrived for a permission prompt and, after a minute idle, as `idle_prompt`; SessionEnd arrived at `/exit`; a settings edit had taken effect by the next prompt, 3.5 s later, and a settings file without hooks delivered none.
+
+**D3, the status line.** Claude Code still runs the command as `bash.exe < bash.exe < claude.exe`. Of nine probe runs, five were ended by a newer update before they finished, and none overlapped the next. The production helper's line was drawn (`work │ Haiku 4.5 │ Ctx: 0% │ Usage: ~`: the harness folder had no cache, so no usage). Its timing (`time-statusline`, 50 warm runs per case):
+
+| Runner | p50 | p95 |
+| --- | ---: | ---: |
+| Direct | 13.8 ms | 14.8 ms |
+| Git Bash (Claude Code's) | 40.2 ms | 43.0 ms |
+| `cmd /d /s /c` | 24.2 ms | 25.4 ms |
+| PowerShell 5.1 | 173.3 ms | 180.0 ms |
+| First run of a fresh copy, direct | 42.4 ms | 43.7 ms |
+
+Every runner but PowerShell is inside the targets (warm p95 under 100 ms, first run under 300 ms), as in Milestone 5.
+
+Run the harness through its apphost, `HookBench.exe`. Started as `dotnet HookBench.dll`, it writes its own path, `C:/Program Files/dotnet/dotnet.exe`, unquoted into the probe's status line command; Git Bash splits it at the space, Claude Code logs status 127, and the probe never runs, which looks like a CLI that no longer runs status lines.
+
 ## Delivery checks in fixture mode
 
 Run by Claude on 2026-10-05 with the published build and a synthetic fixture folder. The steps were driven through UI Automation, by the accessible names above.
@@ -301,7 +331,7 @@ Not covered here:
 - **A clean PC** (D2) and **a screen reader session** remain untried.
 - **The start-up fix was seen live on 2026-10-27.** The installed copy (`176374c`) started at 15:39:44 UTC, and its first claude.ai check answered 200 for both profiles within a second. The one 403 was one profile's `claudeAiCreditGrant`, which that profile gets on every check since its sign-in and which only hides its extra-usage balance.
 - **Explorer's tray records** of moved or removed copies stay in the registry, and may stay listed under Settings → Personalisation → Taskbar → Other system tray icons.
-- **Claude Code 2.1.312** is installed now (2026-10-27; 2.1.289 on 2026-10-05). The hook gate and status line were measured on 2.1.288 and not since.
+- **Claude Code 2.1.312** is installed now (2026-10-27; 2.1.289 on 2026-10-05). The hook gate, hook delivery and the status line were measured again on it on 2026-10-27 ([above](#hook-gate-and-status-line-on-claude-code-21312-added-2026-10-27)); later versions are not measured until the harness is run again.
 - **Whether the Console replaces its session cookie** has not been seen live; defects 7 and 8 rest on automated tests.
 - **A pasted Codex login that was renewed outside the tracker** (by the Codex CLI on another PC, or an old copy of `auth.json`) cannot be recognised. Its first renewal sends a used token. Defect 4 covers only copies the tracker itself holds.
 - **Cancel Switch does not stop an attempt already under way** (left as it is by your decision of 2026-10-15, as too rare to fix).

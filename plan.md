@@ -145,7 +145,7 @@ Use a matching cache while its age is at most twice the configured polling inter
 
 Measure the NativeAOT helper both directly and through each actual shell runner. Target warm end-to-end p95 below 100 ms and first-run latency below 300 ms on the development machine; report shell overhead separately. Test rapid replacement/cancellation. The documentation confirms cancellation of an in-flight invocation, but does not establish a stable 300 ms debounce guarantee; treat that timing as version-dependent and measure the installed CLI. Do not make correctness depend on it.
 
-Milestone 5 result (CLI 2.1.288): Claude Code runs the command through Git for Windows' `bash.exe`, and a newer update ends a run still in progress. The production helper takes 33.5 ms p95 through Git Bash and 37.4 ms on a fresh copy's first run; PowerShell 5.1 alone misses the target (138.6 ms p95). See [the Milestone 5 log](docs/milestone-5.md#d3-the-status-line).
+Milestone 5 result (CLI 2.1.288): Claude Code runs the command through Git for Windows' `bash.exe`, and a newer update ends a run still in progress. The production helper takes 33.5 ms p95 through Git Bash and 37.4 ms on a fresh copy's first run; PowerShell 5.1 alone misses the target (138.6 ms p95). See [the Milestone 5 log](docs/milestone-5.md#d3-the-status-line). Re-measured on 2.1.312 on 2026-10-27: 43.0 ms p95 through Git Bash and 43.7 ms on a fresh copy's first run ([the Milestone 6 log](docs/milestone-6.md#hook-gate-and-status-line-on-claude-code-21312-added-2026-10-27)).
 
 ### Passive hooks and activity HUD: measure before selecting transport
 
@@ -174,6 +174,7 @@ Milestone 1 result: HTTP passes the gate on CLI 2.1.286. With a local fake Messa
 - Rejected: async command hooks with a named pipe for all eight. These lost SessionEnd in every run and cost a process per event plus 95-150 ms at every CLI exit. Their data-isolation advantage matters only on multi-user PCs, which are out of scope.
 - Re-measure the gate whenever the minimum supported CLI version changes. See [the Milestone 1 log](docs/milestone-1.md#6-hook-transport-latency-and-reload).
 - Re-measured on 2.1.288 (Milestone 5, fake endpoint): the stopped listener cost +3.7 ms p95 and the tracker's own listener +2.7 ms. SessionStart is still skipped. In interactive sessions every other event is delivered, Notification included (`permission_prompt` and `idle_prompt`), and user-settings edits reload in about a second. See [the Milestone 5 log](docs/milestone-5.md#measurements-with-the-real-cli).
+- Re-measured on 2.1.312 (2026-10-27, fake endpoint): the stopped listener cost +4.9 ms p95, the listener up +6.6 ms and a restarting one +2.1 ms, over a slower baseline (38.8 ms p95 without hooks). SessionStart is still skipped; Notification and SessionEnd arrive, and a settings edit takes effect by the next prompt. See [the Milestone 6 log](docs/milestone-6.md#hook-gate-and-status-line-on-claude-code-21312-added-2026-10-27).
 
 ### Diagnostics and build location
 
@@ -263,7 +264,7 @@ Status (2026-10-03): implemented. The evidence so far:
   - Apply saved the backup of a replaced line only after replacing it.
 - A mutation check of eleven guards.
 - Manual checks in fixture mode: status line Apply, hooks and HUD, a launcher.
-- Real-CLI runs against a fake Messages API on 2.1.288 (no usage).
+- Real-CLI runs against a fake Messages API on 2.1.288 and 2.1.312 (no usage).
 
 **Acceptance met** on that evidence. G5, G6, G7 and D3 are closed. Hooks are installed in every known folder while the tracker runs and removed on a clean exit; the status line stays.
 
