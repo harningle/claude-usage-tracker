@@ -15,3 +15,6 @@ TestResults/
 
 # Claude Code
 .claude
+
+# The Remember plugin keeps session history here (it also carries its own .gitignore)
+.remember/
