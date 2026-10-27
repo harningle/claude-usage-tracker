@@ -246,7 +246,7 @@ Not exercised: the switch beside a launcher-only session. Claude Code's folder w
 1. **The switch beside a launcher session** (optional). It needs Claude Code on another account than the profile you switch to. With only a launcher session open, "Use in Claude Code" for the default folder should switch at once instead of waiting.
 2. **A helper upgrade with a launcher alive** happens only when a later build brings a new helper version. Its automated test runs real processes; the first live upgrade should be noted then.
 
-The test profile "Laucher Test" still follows `%USERPROFILE%\.claude-laucher-test`, a second login to Jazzy Jaguar's account. Delete it (Manage Profiles), and the folder if you like, before Milestone 4's overnight run, so that only Claude Code's own folder is renewed in it.
+The test profile "Laucher Test" followed `%USERPROFILE%\.claude-laucher-test`, a second login to Jazzy Jaguar's account, and was to be deleted (Manage Profiles) before Milestone 4's overnight run, so that only Claude Code's own folder is renewed in it. Checked on 2026-10-27: the profile, its folder and its launcher are gone.
 
 ## Reproducing
 

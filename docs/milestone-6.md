@@ -18,7 +18,7 @@ Recorded 2026-10-05 on the development machine (Windows 11 26200, WebView2 Runti
 | AGENTS.md build commands | Updated with the validated publish command and the separate build root used while the tracker runs | AGENTS.md |
 | D2, D4, D5, D6 | D4, D5 and D6 closed; D2 closed on this PC only | Below |
 
-**Acceptance is not yet met.** The plan asks for daily personal use across the included features, which only your use of the published build can show. The open live checks stay as listed in [parity.md](parity.md#verification-limits). Nothing here claims a public release or full parity.
+**Acceptance met on 2026-10-27.** The plan asks for daily personal use across the included features. The published build has been in daily use since 2026-10-06, as the installed copy at `176374c` since 2026-10-13: two claude.ai profiles and a Codex profile polled all day, notifications, launch at login, the switch of Claude Code's account, and the claude.ai and Codex auto-starts, which the overnight monitoring of 2026-10-14/15 (below) records. That copy predates the two fixes of 2026-10-15 (defects 12 and 13) and the switch log, which have not run live; the first release carries them. The open live checks stay as listed in [parity.md](parity.md#verification-limits). Nothing here claims a public release or full parity.
 
 ## Decisions
 
@@ -299,9 +299,9 @@ Not covered here:
 ## Open questions and known limits
 
 - **A clean PC** (D2) and **a screen reader session** remain untried.
-- **The start-up fix** needs a live start to be seen.
+- **The start-up fix was seen live on 2026-10-27.** The installed copy (`176374c`) started at 15:39:44 UTC, and its first claude.ai check answered 200 for both profiles within a second. The one 403 was one profile's `claudeAiCreditGrant`, which that profile gets on every check since its sign-in and which only hides its extra-usage balance.
 - **Explorer's tray records** of moved or removed copies stay in the registry, and may stay listed under Settings → Personalisation → Taskbar → Other system tray icons.
-- **Claude Code 2.1.289** is installed now. The hook gate and status line were measured on 2.1.288.
+- **Claude Code 2.1.312** is installed now (2026-10-27; 2.1.289 on 2026-10-05). The hook gate and status line were measured on 2.1.288 and not since.
 - **Whether the Console replaces its session cookie** has not been seen live; defects 7 and 8 rest on automated tests.
 - **A pasted Codex login that was renewed outside the tracker** (by the Codex CLI on another PC, or an old copy of `auth.json`) cannot be recognised. Its first renewal sends a used token. Defect 4 covers only copies the tracker itself holds.
 - **Cancel Switch does not stop an attempt already under way** (left as it is by your decision of 2026-10-15, as too rare to fix).
@@ -313,14 +313,10 @@ Not covered here:
 
 ## Live checks to do
 
-These need your accounts or your PC, so they are yours to run:
+These need your accounts or your PC, so they are yours to run. Items 1, 2 and 5 passed by 2026-10-27; 3 and 4 remain:
 
-1. **The published build in daily use.**
-   - Publish it, copy it to a permanent folder and start it there ([personal-use.md](personal-use.md)). It shares your data folder and logins with the Debug build, so quit that first.
-   - Check that notifications appear and that a click opens the popover.
-   - Check that the first claude.ai check after a start succeeds; Debug Tools shows it.
-   - Leave it in daily use.
-2. **Its tray icon and launch at login.** As a new path it has a new tray icon, in the overflow. Its notification registration is new, and launch at login must be switched on again from it.
+1. **The published build in daily use: passed.** Published, copied to `%LOCALAPPDATA%\Programs\ClaudeUsageTracker` and in daily use since 2026-10-06, republished there with `176374c` on 2026-10-13 ([personal-use.md](personal-use.md)). Notifications appear from it (the monitoring of 2026-10-14/15 saw reset and rejected-login notifications; a click on one of its notifications is not recorded). The first claude.ai check after a start succeeds: on 2026-10-27 the copy started at 15:39:44 UTC and its first check answered 200 for both profiles within a second (Debug Tools).
+2. **Its tray icon and launch at login: passed.** The installed copy has its own tray icon and starts with Windows: on 2026-10-13 it was started at sign-in and ran the Codex auto-start from there (item 5).
 3. **The open checks of earlier milestones,** in [parity.md](parity.md#verification-limits):
    - the Console
    - refresh failure in the two-account check
@@ -329,7 +325,7 @@ These need your accounts or your PC, so they are yours to run:
    - a switch beside a launcher-only session
    - a helper upgrade with real Claude Code
 4. **A clean PC** (D2), if you have one or a virtual machine: copy the published folder there, start it, set up a profile and confirm that a notification shows.
-5. **The Codex auto-start:** passed on the evening of 2026-10-06 (see above). Over the following days, check that it starts each new Codex window once, and only while Codex is idle.
+5. **The Codex auto-start: passed,** on the evening of 2026-10-06 (see above) and over the following days, which showed one start per new window and none while Codex was in use:
    - On 2026-10-13 the installed copy, started with Windows, ran it at 15:15:28 UTC with status 0, and Codex's weekly window then reset at 2026-10-20T15:15:16Z. That 5-hour window ended at 20:15:16. Your own Codex use at 20:16:41 came before the next five-minute check, so it started the following window itself.
    - **Overnight monitoring, 2026-10-14 21:47 to 2026-10-15 20:08 UTC** (installed copy with `176374c`, read-only hourly checks, no sleep). Every start that came due passed: four each for both claude.ai profiles and for Codex. Each claude.ai start came under 2 minutes after its window ended (201, 200, 204). Each Codex start came 5 minutes after its window's scheduled end, with status 0 in 3.8 to 5.9 s, and the reset then stayed put. Codex was read at least every 38 seconds throughout. Two defects came to light, 12 and 13 above.
 
