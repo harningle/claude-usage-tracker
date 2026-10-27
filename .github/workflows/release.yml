@@ -1,0 +1,91 @@
+# Builds a release from a version tag, v1.2.3 or v1.2.3-beta.1: the same helper, build and tests as CI, then the
+# self-contained app with the tag's version, the per-user installer (installer/ClaudeUsageTracker.iss, Inno
+# Setup), the portable ZIP, their SHA-256 sums, and the GitHub release whose notes are the tag's section of
+# CHANGELOG.md. The binaries are not code-signed (plan.md Milestone 7).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  ARTIFACTS: ${{ github.workspace }}\artifacts
+
+jobs:
+  release:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Read the version from the tag
+        id: version
+        run: |
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') { throw "Tag '$tag' is not v<major>.<minor>.<patch>[-<prerelease>]" }
+          $version = $Matches[1]
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($version.Contains('-').ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "Version $version"
+
+      # Fails before the long build when the changelog has no section for this version.
+      - name: Take the release notes from CHANGELOG.md
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $lines = @(Get-Content CHANGELOG.md)
+          $heading = $lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]" | Select-Object -First 1
+          if (-not $heading) { throw "CHANGELOG.md has no '## [$version]' section" }
+          $body = $lines[$heading.LineNumber..($lines.Count - 1)]
+          $next = $body | Select-String -Pattern '^## ' | Select-Object -First 1
+          if ($next) { $body = $body[0..($next.LineNumber - 2)] }
+          if (-not ($body -match '\S')) { throw "The '## [$version]' section of CHANGELOG.md is empty" }
+          New-Item -ItemType Directory -Force "$env:ARTIFACTS\release" | Out-Null
+          $body | Set-Content "$env:ARTIFACTS\release\notes.md" -Encoding utf8
+          Get-Content "$env:ARTIFACTS\release\notes.md"
+
+      - name: Publish the helper
+        run: dotnet publish src/ClaudeUsageTracker.Helper/ClaudeUsageTracker.Helper.csproj -c Release -r win-x64 "-p:ArtifactsPath=$env:ARTIFACTS"
+
+      - name: Build
+        run: dotnet build ClaudeUsageTracker.slnx "-p:ArtifactsPath=$env:ARTIFACTS"
+
+      - name: Test
+        run: dotnet test --solution ClaudeUsageTracker.slnx --no-build "-p:ArtifactsPath=$env:ARTIFACTS"
+
+      # Release, self-contained, with the helper published again into helper\ (the app's own publish targets).
+      - name: Publish the app
+        run: dotnet publish src/ClaudeUsageTracker.App/ClaudeUsageTracker.App.csproj "-p:ArtifactsPath=$env:ARTIFACTS" "-p:Version=${{ steps.version.outputs.version }}"
+
+      - name: Build the installer
+        run: |
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe" | Sort-Object FullName | Select-Object -Last 1
+          if (-not $iscc) { throw 'Inno Setup is not on this runner' }
+          & $iscc.FullName "/DAppVersion=${{ steps.version.outputs.version }}" "/DPublishDir=$env:ARTIFACTS\publish\ClaudeUsageTracker.App\release_win-x64" "/O$env:ARTIFACTS\release" installer\ClaudeUsageTracker.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+      - name: Make the portable ZIP and the checksums
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $release = "$env:ARTIFACTS\release"
+          Compress-Archive -Path "$env:ARTIFACTS\publish\ClaudeUsageTracker.App\release_win-x64\*", LICENSE -DestinationPath "$release\ClaudeUsageTracker-$version-win-x64.zip" -CompressionLevel Optimal
+          $files = Get-ChildItem "$release\*" -Include *.exe, *.zip -File
+          $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name } | Set-Content "$release\SHA256SUMS.txt" -Encoding ascii
+          Get-Content "$release\SHA256SUMS.txt"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $release = "$env:ARTIFACTS\release"
+          $flags = @('--verify-tag')
+          if ('${{ steps.version.outputs.prerelease }}' -eq 'true') { $flags += '--prerelease' }
+          gh release create '${{ github.ref_name }}' --title "Claude Usage Tracker for Windows $version" --notes-file "$release\notes.md" @flags "$release\ClaudeUsageTracker-$version-win-x64-setup.exe" "$release\ClaudeUsageTracker-$version-win-x64.zip" "$release\SHA256SUMS.txt"

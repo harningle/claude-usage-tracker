@@ -314,6 +314,8 @@ Status (2026-10-15): implemented, with 1,398 automated tests, including fixes fr
 
 **Acceptance:** installer and portable paths are reproducible, release artifacts are verified, clean-machine install/update/uninstall passes, limitations are public, and beta findings are resolved or documented. This milestone is intentionally a later release-design gate, not an unspecified dependency blocking Milestones 0-6.
 
+Status (2026-10-27): begun, ahead of the release-design review. The repository has a README and a changelog, its tracked files were scanned for secrets and personal details, and `.github/workflows/ci.yml` publishes the NativeAOT helper, builds and tests on `windows-2025` for every push and pull request. `.github/workflows/release.yml` runs on a `v*` tag: the same build and tests, then the self-contained app with the tag's version, an unsigned per-user Inno Setup installer from `installer/ClaudeUsageTracker.iss`, the portable ZIP, SHA-256 sums and a GitHub release whose notes are the tag's section of `CHANGELOG.md`. The installer keeps the path-derived tray identity, as the bullet above asks of unsigned builds, and its uninstaller leaves the data folder and the app-owned registrations alone. Still open: Authenticode signing, an update mechanism, uninstall cleanup with a data choice, clean-machine install/update/uninstall checks and the beta.
+
 ## 4. Verification matrix and completion rules
 
 - **Regression:** map all 16 upstream suites; preserve applicable behaviours while replacing macOS-only tests and marking HTTP parser/server tests inapplicable if pipes win. Test missing/legacy limits, exact colour/pace thresholds, DST/reset boundaries, history retention and provider capabilities.

@@ -1,0 +1,39 @@
+# Publishes the NativeAOT helper, then builds and tests the solution on every push and pull request.
+# release.yml runs the same steps before it publishes a release; keep the two in step.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  # Directory.Build.props sends build output under %LOCALAPPDATA% by default; a folder in the workspace is
+  # simpler to find here. The helper must be published into the same root, or the app's build has no helper.
+  ARTIFACTS: ${{ github.workspace }}\artifacts
+
+jobs:
+  build-and-test:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # NativeAOT links with the Visual Studio C++ build tools, which the runner image carries.
+      - name: Publish the helper
+        run: dotnet publish src/ClaudeUsageTracker.Helper/ClaudeUsageTracker.Helper.csproj -c Release -r win-x64 "-p:ArtifactsPath=$env:ARTIFACTS"
+
+      - name: Build
+        run: dotnet build ClaudeUsageTracker.slnx "-p:ArtifactsPath=$env:ARTIFACTS"
+
+      - name: Test
+        run: dotnet test --solution ClaudeUsageTracker.slnx --no-build "-p:ArtifactsPath=$env:ARTIFACTS"
