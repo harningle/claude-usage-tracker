@@ -6,7 +6,11 @@ The port follows upstream [Claude Usage Tracker](https://github.com/hamed-elfayo
 
 ## [Unreleased]
 
-The first public build. Everything below was built between 2026-09-30 and 2026-10-15 in the milestones of [plan.md](plan.md), whose logs are in [docs/](docs/).
+Nothing yet.
+
+## [1.0.0-beta.1] - 2026-10-28
+
+The first public build, a beta: it has run on one PC only. Everything below was built between 2026-09-30 and 2026-10-28 in the milestones of [plan.md](plan.md), whose logs are in [docs/](docs/).
 
 ### Added
 
