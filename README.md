@@ -53,7 +53,7 @@ Get-FileHash .\ClaudeUsageTracker-<version>-win-x64-setup.exe -Algorithm SHA256
 
 On the first start the setup wizard links your first account. Windows puts the new tray icon in the overflow (^); drag it onto the taskbar to keep it in view.
 
-Uninstalling removes the program files only. Your settings, history and encrypted logins stay in `%LOCALAPPDATA%\ClaudeUsageTracker`, and launchers, the status line and launch at login stay until you switch them off in the app. Follow [Removing it](docs/personal-use.md#removing-it) to undo those first, then delete the data folder if you want it gone.
+Uninstalling removes the program files and asks whether to delete your settings, history and encrypted logins in `%LOCALAPPDATA%\ClaudeUsageTracker` as well; the default keeps them, and a silent uninstall keeps them unless it is run with `/DELETEDATA=1`. Launchers, the status line and launch at login stay until you switch them off in the app, so follow [Removing it](docs/personal-use.md#removing-it) first.
 
 ## What it touches on your PC
 
@@ -88,7 +88,7 @@ Started normally, the app reads your real Claude Code login and polls with it.
 
 ## Status and documentation
 
-Milestones 0 to 6 of [plan.md](plan.md) are done: the port has been in daily personal use since early October 2026, with about 1,400 automated tests, including ones that run the real helper and launcher processes under PowerShell, Command Prompt and Git Bash. Milestone 7, public distribution, is under way: CI and the release workflow exist; code signing, an update mechanism, clean-machine checks and a beta do not.
+Milestones 0 to 6 of [plan.md](plan.md) are done: the port has been in daily personal use since early October 2026, with about 1,400 automated tests, including ones that run the real helper and launcher processes under PowerShell, Command Prompt and Git Bash. Milestone 7, public distribution, is under way: CI, the release workflow and the installer exist, and the first releases are betas. The binaries stay unsigned by decision, an update check is planned for a later version, and installs on other PCs await the first testers.
 
 - [plan.md](plan.md): the design, the Windows adaptations and their reasons, the milestones and the verification rules.
 - [docs/parity.md](docs/parity.md): every upstream feature's status, the numbered differences, and the verification limits, among them that Max and Enterprise accounts, the Console live, remote desktop, screen readers and a clean PC are unverified.

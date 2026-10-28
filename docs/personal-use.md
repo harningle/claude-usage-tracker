@@ -89,6 +89,8 @@ Claude Code's and Codex's own login files are theirs. The tracker never writes C
 
 ## Removing it
 
+If you installed with the installer, do steps 1 and 2, then uninstall under Settings → Apps → Installed apps: the uninstaller removes the program files (step 3) and asks whether to delete the data folder as well (step 4), keeping it unless you say Yes. Steps 5 and 6 still apply.
+
 1. In the tracker, undo what it put outside its folder:
    - The Settings page, under App: switch off Launch at login.
    - General: Remove the profile's Terminal Launcher (repeat for each profile that has one).

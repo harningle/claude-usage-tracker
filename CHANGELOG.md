@@ -24,7 +24,7 @@ The first public build. Everything below was built between 2026-09-30 and 2026-1
 - **Accessibility.** Accessible names and keyboard access for every control, checked by an automated audit (Milestone 6); no screen reader has been tried.
 - **Fixture mode** (`--fixture <folder>`), which runs the app on synthetic files and canned responses without touching a real account; the screenshots come from it (Milestone 2).
 - **Self-contained Windows x64 build** with .NET 10 and the Windows App SDK included, and the personal-use guide (Milestone 6).
-- **Public repository:** README, this changelog, Windows CI, and a tag-driven release workflow that makes an unsigned per-user installer and a portable ZIP.
+- **Public repository:** README, this changelog, Windows CI, and a tag-driven release workflow that makes an unsigned per-user installer and a portable ZIP. The uninstaller asks whether to delete the data folder too (settings, history and saved logins), keeps it by default, and deletes it unasked only when run with `/DELETEDATA=1`.
 
 ### Changed
 
