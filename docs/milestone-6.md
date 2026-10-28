@@ -345,7 +345,7 @@ Not covered here:
 
 These need your accounts or your PC, so they are yours to run. Items 1, 2 and 5 passed by 2026-10-27; 3 and 4 remain:
 
-1. **The published build in daily use: passed.** Published, copied to `%LOCALAPPDATA%\Programs\ClaudeUsageTracker` and in daily use since 2026-10-06, republished there with `176374c` on 2026-10-13 ([personal-use.md](personal-use.md)). Notifications appear from it (the monitoring of 2026-10-14/15 saw reset and rejected-login notifications; a click on one of its notifications is not recorded). The first claude.ai check after a start succeeds: on 2026-10-27 the copy started at 15:39:44 UTC and its first check answered 200 for both profiles within a second (Debug Tools).
+1. **The published build in daily use: passed.** Published, copied to `%LOCALAPPDATA%\Programs\ClaudeUsageTracker` and in daily use since 2026-10-06, republished there with `176374c` on 2026-10-13 ([personal-use.md](personal-use.md)). Notifications appear from it (the monitoring of 2026-10-14/15 saw reset and rejected-login notifications; a click on one of its notifications is not recorded). The first claude.ai check after a start succeeds: on 2026-10-27 the copy started at 15:39:44 UTC and its first check answered 200 for both profiles within a second (Debug Tools). On 2026-10-27 the per-user installer built from `82db616` (labelled 1.0.0-rc.1) replaced this copy in place: it closed the tracker, replaced the files, registered the uninstaller and restarted the app, and the helper was then updated from Settings → Claude CLI. Both passed.
 2. **Its tray icon and launch at login: passed.** The installed copy has its own tray icon and starts with Windows: on 2026-10-13 it was started at sign-in and ran the Codex auto-start from there (item 5).
 3. **The open checks of earlier milestones,** in [parity.md](parity.md#verification-limits):
    - the Console
@@ -353,7 +353,7 @@ These need your accounts or your PC, so they are yours to run. Items 1, 2 and 5 
    - an auto-switch at a real 100 % and a threshold alert on real usage
    - remote desktop
    - a switch beside a launcher-only session
-   - a helper upgrade with real Claude Code
+   - a helper upgrade while Claude Code is using the helper (the upgrade itself ran on the installed copy on 2026-10-27, with nothing using the helper)
 4. **A clean PC** (D2), if you have one or a virtual machine: copy the published folder there, start it, set up a profile and confirm that a notification shows.
 5. **The Codex auto-start: passed,** on the evening of 2026-10-06 (see above) and over the following days, which showed one start per new window and none while Codex was in use:
    - On 2026-10-13 the installed copy, started with Windows, ran it at 15:15:28 UTC with status 0, and Codex's weekly window then reset at 2026-10-20T15:15:16Z. That 5-hour window ended at 20:15:16. Your own Codex use at 20:16:41 came before the next five-minute check, so it started the following window itself.
