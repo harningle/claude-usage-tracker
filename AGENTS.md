@@ -27,7 +27,7 @@ Build a faithful Windows port of the upstream app, preserving its useful behavio
 
 ## Build and repository hygiene
 
-The solution is `ClaudeUsageTracker.slnx`: `src/ClaudeUsageTracker.Core` (`net10.0`), `src/ClaudeUsageTracker.App` (WPF, `net10.0-windows10.0.19041.0`), `src/ClaudeUsageTracker.Helper` (`net10.0`, NativeAOT), `tests/ClaudeUsageTracker.Tests` (xUnit v3 on Microsoft.Testing.Platform, `net10.0-windows10.0.19041.0`) `tests/FakeClaude` (a stand-in `claude.exe` that the launcher tests start instead of the real one) and `tests/FakeCodex` (a stand-in `codex.exe` that the Codex auto-start tests start instead of the real one). `global.json` pins SDK 10.0.401 (patch roll-forward) and selects the Microsoft.Testing.Platform runner. Validated from the repository root on 2026-09-30:
+The solution is `ClaudeUsageTracker.slnx`: `src/ClaudeUsageTracker.Core` (`net10.0`), `src/ClaudeUsageTracker.App` (WPF, `net10.0-windows10.0.19041.0`), `src/ClaudeUsageTracker.Helper` (`net10.0`, NativeAOT), `tests/ClaudeUsageTracker.Tests` (xUnit v3 on Microsoft.Testing.Platform, `net10.0-windows10.0.19041.0`) `tests/FakeClaude` (a stand-in `claude.exe` that the launcher tests start instead of the real one) and `tests/FakeCodex` (a stand-in `codex.exe` that the Codex auto-start tests start instead of the real one). `global.json` pins SDK 10.0.403 (patch roll-forward; runtime 10.0.14, raised from 10.0.401 on 2026-11-06 for the runtime security fixes) and selects the Microsoft.Testing.Platform runner. Validated from the repository root on 2026-09-30:
 
 ```powershell
 dotnet restore ClaudeUsageTracker.slnx

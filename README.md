@@ -67,7 +67,7 @@ The tracker reads Claude Code's and Codex's own login files to poll usage. Read 
 
 ## Building from source
 
-You need the .NET SDK 10.0.401 or a later patch ([global.json](global.json)) and, for the NativeAOT helper, Visual Studio 2022 or its Build Tools with the C++ desktop workload. From the repository root:
+You need the .NET SDK 10.0.403 or a later patch ([global.json](global.json)) and, for the NativeAOT helper, Visual Studio 2022 or its Build Tools with the C++ desktop workload. From the repository root:
 
 ```powershell
 dotnet publish src/ClaudeUsageTracker.Helper/ClaudeUsageTracker.Helper.csproj -c Release -r win-x64

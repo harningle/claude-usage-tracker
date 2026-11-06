@@ -13,7 +13,7 @@ Nothing else: the folder carries its own .NET 10 runtime and Windows App SDK, an
 
 ## Building it
 
-On the build PC only, with the .NET SDK 10.0.401 and Visual Studio Build Tools with the C++ workload (for the NativeAOT helper), from the repository root:
+On the build PC only, with the .NET SDK 10.0.403 and Visual Studio Build Tools with the C++ workload (for the NativeAOT helper), from the repository root:
 
 ```powershell
 dotnet publish src/ClaudeUsageTracker.App/ClaudeUsageTracker.App.csproj

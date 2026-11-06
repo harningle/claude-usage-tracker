@@ -10,6 +10,10 @@ The port follows upstream [Claude Usage Tracker](https://github.com/hamed-elfayo
 
 - **Switching Claude Code to a profile with a claude.ai sign-in could be refused, asking for a new sign-in.** Such a profile gets its usage from claude.ai, so its saved copy of the Claude Code login was never updated when Claude Code renewed that login, which retires the old refresh token. A switch made by the tracker saved the newest login first, but a `/login` in Claude Code, which the refusal asked for, did not, so the next switch back to the other profile was refused in turn. The copy now follows Claude Code's renewals at every check, and the tracker still renews nothing for such a profile.
 
+### Security
+
+- **Built on .NET runtime 10.0.14** (SDK 10.0.403) instead of 10.0.12. The app and its helper now include the .NET security fixes of October 2026, among them CVE-2026-111497, an out-of-bounds write in the Brotli decoder that the app's HTTP client uses for compressed responses. After installing, Settings → Claude CLI offers to update the installed helper.
+
 ## [1.0.0-beta.1] - 2026-10-28
 
 The first public build, a beta: it has run on one PC only. Everything below was built between 2026-09-30 and 2026-10-28 in the milestones of [plan.md](plan.md), whose logs are in [docs/](docs/).

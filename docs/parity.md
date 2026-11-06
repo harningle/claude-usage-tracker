@@ -28,7 +28,7 @@ Recorded on 2026-09-30.
 
 - Upstream licence: MIT, "Copyright (c) 2025 Claude Usage Tracker Contributors", preserved in [LICENSE](../LICENSE).
 - Claude Code 2.1.285, native install at `%USERPROFILE%\.local\bin\claude.exe`, from `claude --version`. No credential or configuration files were read. By Milestone 1 (2026-09-30) it had auto-updated to 2.1.286, the version all Milestone 1 measurements use, and by Milestone 5 (2026-10-03) to 2.1.288, which its measurements use. By Milestone 6 (2026-10-05) it was 2.1.289, which was not measured, and by 2026-10-27 2.1.312, on which the hook gate and status line were measured again ([milestone-6.md](milestone-6.md#hook-gate-and-status-line-on-claude-code-21312-added-2026-10-27)).
-- .NET SDK 10.0.401, pinned in [global.json](../global.json) with patch roll-forward. Tests use xUnit v3 4.0.1 on Microsoft.Testing.Platform.
+- .NET SDK 10.0.403 (runtime 10.0.14), pinned in [global.json](../global.json) with patch roll-forward; 10.0.401 until 2026-11-06. Tests use xUnit v3 4.0.1 on Microsoft.Testing.Platform.
 - Public references: [Claude Code statusline](https://code.claude.com/docs/en/statusline), [Claude Code hooks](https://code.claude.com/docs/en/hooks), [.NET artifacts output layout](https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output), [Microsoft.Testing.Platform configuration](https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-config). Further references are in plan.md.
 
 ## Feature status
