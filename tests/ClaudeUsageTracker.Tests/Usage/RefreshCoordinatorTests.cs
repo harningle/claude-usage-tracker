@@ -95,7 +95,7 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         var sources = new Dictionary<UsageSourceKind, IUsageSource>
         {
             [UsageSourceKind.ClaudeCode] = new CliUsageSource(_links.Service, client),
-            [UsageSourceKind.ClaudeAi] = new ClaudeAiUsageSource(new ClaudeAiClient(_transport, _time, log), _transport),
+            [UsageSourceKind.ClaudeAi] = new ClaudeAiUsageSource(new ClaudeAiClient(_transport, _time, log), _transport, _links.Service),
             [UsageSourceKind.Codex] = new CodexUsageSource(
                 _links.Secrets, _links.Lock, _links.Tokens, new CodexClient(http, _time, log), _time, () => Path.Combine(UserProfile, ".codex")),
         };
@@ -501,6 +501,80 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         var state = await UntilAsync(browserId, s => s.LastSuccessAt is not null);
         Assert.Equal(LinkStatus.Ready, state.Link);
         Assert.Equal(2, UsageAsks());
+    }
+
+    /// <summary>
+    /// A profile that polls through claude.ai and is also linked to Claude Code. A switch back to its account sends its
+    /// copy of the Claude Code login, so the copy must follow Claude Code's own renewals, each of which uses up the
+    /// refresh token before it (seen live on 2026-11-05: every switch back was refused as rejected).
+    /// </summary>
+    private ProfileSettings ClaudeAiAndCliProfile(Guid id)
+    {
+        var profile = ClaudeAiProfile(id);
+        profile.CliLink = Profile().CliLink;
+        return profile;
+    }
+
+    private CliSecret? CopyOf(Guid profileId) => _links.Secrets.Load(profileId).Cli;
+
+    /// <summary>Moves simulated time on a second at a time until the condition holds or a minute has passed.</summary>
+    private async Task AdvanceUntilAsync(Func<bool> condition)
+    {
+        for (var i = 0; i < 60 && !condition(); i++)
+        {
+            await AdvanceAsync(TimeSpan.FromSeconds(1));
+        }
+    }
+
+    [Fact]
+    public async Task ClaudeAiProfileFollowsClaudeCodesRenewalsOfItsLogin()
+    {
+        WriteLogin("at-1", Start.AddHours(8));
+        var (coordinator, handler) = Create((_, _) => Usage(12));
+        var browserId = Guid.NewGuid();
+        var profile = ClaudeAiAndCliProfile(browserId);
+        // As linking saves it.
+        await _links.Service.WriteMirrorAsync(
+            browserId, _links.Service.Read(CliStore.ForLink(profile.CliLink!, UserProfile)), TestContext.Current.CancellationToken);
+
+        coordinator.Watch(profile);
+        var state = await UntilAsync(browserId, s => s.LastSuccessAt is not null);
+        Assert.Equal(UsageSourceKind.ClaudeAi, state.Source);
+
+        // Claude Code renews its login.
+        WriteLogin("at-2", Start.AddHours(9));
+        await AdvanceUntilAsync(() => CopyOf(browserId)?.OAuthJson.Contains("rt-at-2", StringComparison.Ordinal) == true);
+
+        var copy = CopyOf(browserId);
+        Assert.Contains("\"rt-at-2\"", copy?.OAuthJson, StringComparison.Ordinal);
+        Assert.Equal(CredentialOwnership.CliLinked, copy?.Ownership);
+        // Usage still comes from claude.ai: nothing was polled with the Claude Code login or renewed.
+        Assert.Equal(0, UsageRequests(handler));
+        Assert.Equal(0, _links.TokenRequests);
+    }
+
+    [Fact]
+    public async Task ClaudeAiProfileNeverRenewsItsClaudeCodeLogin()
+    {
+        // Claude Code's login of the account has expired and no Claude Code runs: a profile polling with it would take it over.
+        WriteLogin("at-1", Start.AddMinutes(-1));
+        var (coordinator, _) = Create((_, _) => Usage(12));
+        var browserId = Guid.NewGuid();
+        int UsageAsks() => _transport.Requests.Count(r => r.Operation == ClaudeAiOperation.Usage);
+
+        coordinator.Watch(ClaudeAiAndCliProfile(browserId));
+        await UntilAsync(browserId, s => s.LastSuccessAt is not null);
+        Assert.Equal(0, _links.TokenRequests);
+        Assert.Contains("\"rt-at-1\"", CopyOf(browserId)?.OAuthJson, StringComparison.Ordinal);
+
+        // Claude Code moves to another account, leaving the copy expired: a profile polling with it would renew it as its own.
+        WriteLogin("at-other", Start.AddHours(8), accountUuid: "acc-other");
+        await AdvanceUntilAsync(() => UsageAsks() >= 2);
+
+        Assert.Equal(2, UsageAsks());
+        Assert.Equal(0, _links.TokenRequests);
+        Assert.Equal(CredentialOwnership.CliLinked, CopyOf(browserId)?.Ownership);
+        Assert.Contains("\"rt-at-1\"", CopyOf(browserId)?.OAuthJson, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -147,6 +147,16 @@ The overnight monitoring of the installed build's auto-start that you asked for 
     - The fix: a read at 0 % that still shows the open window, with its reset time, is no reset. It sends no alert and keeps the thresholds already notified in that window. A reset time that has passed or moved, or a window no longer reported, is still a reset. Parity difference 38.
     - Checked by `AReadAtZeroThatStillShowsTheOpenWindowIsNoReset`, which failed before the fix.
 
+Daily use of the installed build found defect 14 on 2026-11-05. The fix adds 2 tests; 1,400 pass, none skipped, with no build warnings.
+
+14. **A switch back to a profile with a claude.ai sign-in was refused as a rejected login.**
+    - What happened: on 4 and 5 November each pick of the other profile was refused, asking for a new sign-in. Debug Tools showed `cliSwitch` with `loginRejected`, each time after a token renewal had answered `invalid_grant`.
+      - Both profiles get their usage from claude.ai, so their Claude Code link was never checked. Their copies of the Claude Code login were not updated when Claude Code renewed it, and each renewal retires the refresh token before it.
+      - A switch made by the tracker saves the outgoing account's newest login first, which hid the gap. A `/login` in Claude Code, which the refusal asks for, does not. At 23:33:51 UTC on 5 November one replaced the personal profile's newest login. That profile's copy dated from 19:51 UTC on 4 November, and the account had been in use since, so the next pick of it was refused. Each new sign-in set up the next refusal.
+    - The fix: a profile whose usage comes from claude.ai has its Claude Code link checked at each poll, without renewing anything. The check follows Claude Code's renewals while Claude Code holds the account. It neither takes over an expired login nor makes the copy the tracker's own, and a switch back renews the copy if it has expired. A failure to save the copy shows on the CLI Account page. Parity differences 28 and 41.
+    - Checked by `ClaudeAiProfileFollowsClaudeCodesRenewalsOfItsLogin`, which failed before the fix, and `ClaudeAiProfileNeverRenewsItsClaudeCodeLogin`. A mutation check removed the guard against a takeover, then the one against renewing the copy as the tracker's own; each was caught.
+    - Not established: how the first copy went out of date before 4 November. The request log reached back only to 18:05 UTC that day, and the switches the tracker made from 23 to 30 October all went through.
+
 ## Codex auto-start (added 2026-10-06)
 
 At your request, a Codex profile can now auto-start its session as well. Upstream's Codex provider cannot do this, so it is a deliberate addition: parity difference 39 has the details.

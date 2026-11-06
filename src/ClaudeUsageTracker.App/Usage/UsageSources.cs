@@ -35,18 +35,25 @@ public sealed class CliUsageSource(CliLinkService links, UsageClient client) : I
 
 /// <summary>
 /// Usage of a claude.ai organisation through the profile's own browser session. The session lives in
-/// WebView2; nothing here holds a cookie or key.
+/// WebView2; nothing here holds a cookie or key. A profile also linked to Claude Code has its copy of that
+/// login checked at each poll without renewing it, so a switch back to the account has its newest login.
 /// </summary>
-public sealed class ClaudeAiUsageSource(ClaudeAiClient client, IClaudeAiTransport transport) : IUsageSource
+public sealed class ClaudeAiUsageSource(ClaudeAiClient client, IClaudeAiTransport transport, CliLinkService links) : IUsageSource
 {
-    public Task<SourceCredentials> ResolveAsync(ProfileWatch watch, CancellationToken cancellation) =>
-        Task.FromResult(new SourceCredentials
+    public async Task<SourceCredentials> ResolveAsync(ProfileWatch watch, CancellationToken cancellation)
+    {
+        var mirrorError = watch.Cli is { } cli
+            ? (await links.CheckAsync(watch.ProfileId, cli, renew: false, cancellation).ConfigureAwait(false)).MirrorError
+            : null;
+        return new SourceCredentials
         {
             Status = LinkStatus.Ready,
             Secret = watch.ClaudeAi!.OrganizationId,
             // A rejected session is asked again only after a sign-in or another change to the browser session.
             Stamp = "session:" + transport.SessionEpoch(watch.ProfileId),
-        });
+            StorageError = mirrorError,
+        };
+    }
 
     public async Task<SourceFetch> FetchAsync(ProfileWatch watch, SourceCredentials credentials, UsageData? previous, CancellationToken cancellation)
     {

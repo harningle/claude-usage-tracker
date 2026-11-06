@@ -187,7 +187,15 @@ public sealed partial class CliLinkService(
     /// of the linked account updates the copy when it changed, which captures Claude Code's own rotations.
     /// A copy that cannot be read is reported and left untouched.
     /// </summary>
-    public async Task<LinkCheck> CheckAsync(Guid profileId, CliLink link, CancellationToken cancellation)
+    public Task<LinkCheck> CheckAsync(Guid profileId, CliLink link, CancellationToken cancellation) =>
+        CheckAsync(profileId, link, renew: true, cancellation);
+
+    /// <param name="renew">
+    /// False for a profile whose usage comes from elsewhere: its copy still follows Claude Code's renewals, because a
+    /// switch back to the account sends the copy's refresh token, but the tracker neither takes over an expired login
+    /// nor makes the copy its own and renews it. Such a profile does not poll with the login.
+    /// </param>
+    public async Task<LinkCheck> CheckAsync(Guid profileId, CliLink link, bool renew, CancellationToken cancellation)
     {
         var directory = CliStore.ForLink(link, userProfile);
         var snapshot = Read(directory);
@@ -228,7 +236,7 @@ public sealed partial class CliLinkService(
         if (snapshot.Credentials is not { } stored)
         {
             return snapshot.State == CliLoginState.NotSignedIn
-                ? await AccountLeftAsync(profileId, link, snapshot, copy, LinkStatus.NotSignedIn, mirrorError, notice, cancellation).ConfigureAwait(false)
+                ? await AccountLeftAsync(profileId, link, snapshot, copy, LinkStatus.NotSignedIn, mirrorError, notice, renew, cancellation).ConfigureAwait(false)
                 : FromCopy(
                     snapshot.State == CliLoginState.Unreadable ? LinkStatus.Unreadable : LinkStatus.Invalid,
                     snapshot, copy, CredentialOwnership.Unresolved, mirrorError, notice);
@@ -254,7 +262,7 @@ public sealed partial class CliLinkService(
         switch (CliLoginLabels.Compare(link.Identity, snapshot.Account?.Identity, lineage, stored.RefreshToken))
         {
             case CliAccountMatch.DifferentAccount:
-                return await AccountLeftAsync(profileId, link, snapshot, copy, LinkStatus.AccountChanged, mirrorError, notice, cancellation)
+                return await AccountLeftAsync(profileId, link, snapshot, copy, LinkStatus.AccountChanged, mirrorError, notice, renew, cancellation)
                     .ConfigureAwait(false);
             case CliAccountMatch.Unresolved:
                 return FromCopy(LinkStatus.AccountUnverified, snapshot, copy, CredentialOwnership.Unresolved, mirrorError, notice);
@@ -280,7 +288,9 @@ public sealed partial class CliLinkService(
 
         return snapshot.State == CliLoginState.Usable
             ? new LinkCheck(LinkStatus.Ready, snapshot, stored, mirrorError) { Notice = notice }
-            : await TakeOverAsync(profileId, link, snapshot, mirrorError, notice, cancellation).ConfigureAwait(false);
+            : renew
+                ? await TakeOverAsync(profileId, link, snapshot, mirrorError, notice, cancellation).ConfigureAwait(false)
+                : new LinkCheck(LinkStatus.WaitingForCliRefresh, snapshot, null, mirrorError) { Notice = notice };
     }
 
     /// <summary>
@@ -293,7 +303,7 @@ public sealed partial class CliLinkService(
     /// </summary>
     private async Task<LinkCheck> AccountLeftAsync(
         Guid profileId, CliLink link, CliSnapshot snapshot, CliSecret? copy, LinkStatus status, string? mirrorError, LinkNotice? notice,
-        CancellationToken cancellation)
+        bool renew, CancellationToken cancellation)
     {
         if (copy is null)
         {
@@ -342,6 +352,12 @@ public sealed partial class CliLinkService(
             // linked and never renewed here.
             mirrorError ??= await RelinkAsync(profileId, copy, cancellation).ConfigureAwait(false);
             return FromCopy(status, snapshot, copy, CredentialOwnership.CliLinked, mirrorError, notice);
+        }
+
+        if (!renew)
+        {
+            // The copy waits as it is; a switch back to the account renews it if it has expired by then.
+            return FromCopy(status, snapshot, copy, copy.Ownership, mirrorError, notice);
         }
 
         if (copy.Ownership == CredentialOwnership.AppOwned)

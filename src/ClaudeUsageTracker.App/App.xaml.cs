@@ -207,7 +207,7 @@ public partial class App : Application
         var sources = new Dictionary<UsageSourceKind, IUsageSource>
         {
             [UsageSourceKind.ClaudeCode] = new CliUsageSource(_links, _client),
-            [UsageSourceKind.ClaudeAi] = new ClaudeAiUsageSource(claudeAi, transport),
+            [UsageSourceKind.ClaudeAi] = new ClaudeAiUsageSource(claudeAi, transport, _links),
             [UsageSourceKind.Codex] = new CodexUsageSource(secrets, credentialLock, tokens, codex, time, () => codexHome),
         };
         _history = new UsageHistoryService(new UsageHistoryStore(_paths.HistoryDirectory), time);

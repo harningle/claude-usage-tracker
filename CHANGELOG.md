@@ -6,7 +6,9 @@ The port follows upstream [Claude Usage Tracker](https://github.com/hamed-elfayo
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Switching Claude Code to a profile with a claude.ai sign-in could be refused, asking for a new sign-in.** Such a profile gets its usage from claude.ai, so its saved copy of the Claude Code login was never updated when Claude Code renewed that login, which retires the old refresh token. A switch made by the tracker saved the newest login first, but a `/login` in Claude Code, which the refusal asked for, did not, so the next switch back to the other profile was refused in turn. The copy now follows Claude Code's renewals at every check, and the tracker still renews nothing for such a profile.
 
 ## [1.0.0-beta.1] - 2026-10-28
 
