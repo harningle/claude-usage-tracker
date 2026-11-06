@@ -156,6 +156,10 @@ Daily use of the installed build found defect 14 on 2026-11-05. The fix adds 2 t
     - The fix: a profile whose usage comes from claude.ai has its Claude Code link checked at each poll, without renewing anything. The check follows Claude Code's renewals while Claude Code holds the account. It neither takes over an expired login nor makes the copy the tracker's own, and a switch back renews the copy if it has expired. A failure to save the copy shows on the CLI Account page. Parity differences 28 and 41.
     - Checked by `ClaudeAiProfileFollowsClaudeCodesRenewalsOfItsLogin`, which failed before the fix, and `ClaudeAiProfileNeverRenewsItsClaudeCodeLogin`. A mutation check removed the guard against a takeover, then the one against renewing the copy as the tracker's own; each was caught.
     - Not established: how the first copy went out of date before 4 November. The request log reached back only to 18:05 UTC that day, and the switches the tracker made from 23 to 30 October all went through.
+    - Live on 2026-11-06, with the fix installed as a local build labelled 1.0.0-beta.1.1:
+      - A pick of the personal profile at 00:35 UTC was still refused, as expected. Its copy held the refresh token Claude Code had used up on 4 and 5 November, and no fix can renew that.
+      - After one `/login` with the personal account, picks of the work profile, then personal, then work again switched Claude Code each time, between 00:38 and 00:39 UTC.
+      - Still open: a switch back after Claude Code has renewed the login of the profile that is in use, which is the case the defect needed ([parity.md](parity.md#verification-limits)).
 
 ## Codex auto-start (added 2026-10-06)
 

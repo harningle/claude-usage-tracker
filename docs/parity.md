@@ -316,6 +316,7 @@ What is not verified, so that no claim goes beyond the evidence:
   - a switch beside a launcher-only session
   - a helper upgrade while Claude Code is using the helper: the installed copy's helper was upgraded live on 2026-10-27, but no status line or launcher was in use at the time (the fixture-mode test covers a running launcher)
   - the fixes of 2026-10-15 (Milestone 6 defects 12 and 13) and the switch log, installed on 2026-10-27 with the 1.0.0-rc.1 build and not yet seen at work
+  - a switch back to a profile with a claude.ai sign-in after Claude Code has renewed that profile's login (Milestone 6 defect 14): switches after a new sign-in passed on 2026-11-06, but no renewal came between them
 - **Cannot be produced live:** the "Waiting for Claude Code to refresh its login" state, because an open Claude Code renews its own login first. It rests on automated tests.
 - **Clean PC.** The published build was run on the development PC with no SDK in its environment, and loaded nothing from an installed .NET or Windows App SDK package. A PC without the Singleton package, or without any developer tools, has not been tried (D2). The author has no second PC or virtual machine, so this waits for the first install elsewhere.
 - **Screen readers.** Accessible names and Tab access are tested automatically. No Narrator session has been run, and none is planned before the first release (decided 2026-10-27): screen-reader use is untested.
