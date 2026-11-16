@@ -7,9 +7,10 @@ using ClaudeUsageTracker.Tests.ViewModels;
 namespace ClaudeUsageTracker.Tests.Tray;
 
 /// <summary>
-/// Where the tray icons draw the elapsed-time tick. Upstream's multi-profile bars and circles draw a tick for the
-/// session and for the week at any usage. The single-profile progress bar does too, where upstream hides it while the
-/// fill is under a point wide (docs/parity.md difference 18). At 1 % no fill is drawn, as in a window just started.
+/// Where the tray icons draw the elapsed-time tick and the multi-profile rings. Upstream's multi-profile bars and circles
+/// draw a tick for the session and for the week at any usage. The single-profile progress bar does too, where upstream
+/// hides it while the fill is under a point wide (docs/parity.md difference 18). At 1 % no fill is drawn, as in a window
+/// just started.
 /// </summary>
 [Collection(WpfCollection.Name)]
 public class TrayIconRendererTests
@@ -52,28 +53,59 @@ public class TrayIconRendererTests
         Assert.Empty(Pixels(spec with { SecondaryMarkerFraction = null }, Red));
     });
 
+    /// <summary>Upstream's circles: the session on the outer ring and the week on the inner one, each with its tick.</summary>
     [Fact]
-    public Task MultiProfileCirclesDrawTheWeekTickOnTheOuterRing() => OnStaThread(() =>
+    public Task MultiProfileCirclesPutTheSessionOutsideTheWeek() => OnStaThread(() =>
     {
-        // The week's tick at a quarter of the week, at three o'clock on the outer ring; the session has no tick.
-        var spec = new TrayIconSpec(TrayIconStyle.Concentric, 0.4, 40, UsageStatusLevel.Safe, null, null, false, null, false)
+        // The session is orange with a purple tick, the week green with a red one, both ticks at a quarter.
+        var spec = new TrayIconSpec(TrayIconStyle.Concentric, 0.4, 40, UsageStatusLevel.Moderate, 0.25, PaceStatus.Runaway, false, null, false)
         {
             HasSecondary = true,
             SecondaryFraction = 0.3,
             SecondaryLevel = UsageStatusLevel.Safe,
             SecondaryMarkerFraction = 0.25,
-            SecondaryPace = PaceStatus.Runaway,
+            SecondaryPace = PaceStatus.Critical,
         };
+        var orange = TrayIconRenderer.StatusColour(UsageStatusLevel.Moderate, true);
+        var green = TrayIconRenderer.StatusColour(UsageStatusLevel.Safe, true);
+        // The middle of each ring's stroke.
+        const double outer = Size * 0.4;
+        const double inner = Size * 0.22;
 
-        var ticks = Pixels(spec, Purple);
+        var bgra = Render(spec);
 
-        Assert.NotEmpty(ticks);
-        Assert.All(ticks, p => Assert.True(p.X > Size * 3 / 4 && Math.Abs(p.Y - Size / 2) <= 2, $"Tick pixel at {p}."));
-        Assert.Empty(Pixels(spec with { SecondaryMarkerFraction = null }, Purple));
+        Assert.True(IsAt(bgra, outer, 0.1, orange));
+        Assert.True(IsAt(bgra, inner, 0.1, green));
+        Assert.True(IsAt(bgra, outer, 0.25, Purple));
+        Assert.True(IsAt(bgra, inner, 0.25, Red));
+        Assert.False(IsAt(Render(spec with { SecondaryMarkerFraction = null }), inner, 0.25, Red));
     });
 
     /// <summary>The opaque pixels near <paramref name="colour"/> in the icon drawn for a dark taskbar.</summary>
     private static List<(int X, int Y)> Pixels(TrayIconSpec spec, Color colour)
+    {
+        var bgra = Render(spec);
+        var pixels = new List<(int X, int Y)>();
+        for (var y = 0; y < Size; y++)
+        {
+            for (var x = 0; x < Size; x++)
+            {
+                if (Matches(bgra, x, y, colour))
+                {
+                    pixels.Add((x, y));
+                }
+            }
+        }
+
+        return pixels;
+    }
+
+    /// <summary>Whether the pixel <paramref name="radius"/> from the centre, <paramref name="turn"/> of the way round from 12 o'clock, matches.</summary>
+    private static bool IsAt(byte[] bgra, double radius, double turn, Color colour) => Matches(
+        bgra, (int)(Size / 2.0 + radius * Math.Sin(turn * 2 * Math.PI)), (int)(Size / 2.0 - radius * Math.Cos(turn * 2 * Math.PI)), colour);
+
+    /// <summary>The icon drawn for a dark taskbar, as straight BGRA rows.</summary>
+    private static byte[] Render(TrayIconSpec spec)
     {
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
@@ -85,20 +117,14 @@ public class TrayIconRendererTests
         target.Render(visual);
         var bgra = new byte[Size * Size * 4];
         new FormatConvertedBitmap(target, PixelFormats.Bgra32, null, 0).CopyPixels(bgra, Size * 4, 0);
-        var pixels = new List<(int X, int Y)>();
-        for (var y = 0; y < Size; y++)
-        {
-            for (var x = 0; x < Size; x++)
-            {
-                var i = (y * Size + x) * 4;
-                if (bgra[i + 3] > 200 && Near(bgra[i + 2], colour.R) && Near(bgra[i + 1], colour.G) && Near(bgra[i], colour.B))
-                {
-                    pixels.Add((x, y));
-                }
-            }
-        }
+        return bgra;
+    }
 
-        return pixels;
+    /// <summary>Whether the pixel is opaque and near <paramref name="colour"/>.</summary>
+    private static bool Matches(byte[] bgra, int x, int y, Color colour)
+    {
+        var i = (y * Size + x) * 4;
+        return bgra[i + 3] > 200 && Near(bgra[i + 2], colour.R) && Near(bgra[i + 1], colour.G) && Near(bgra[i], colour.B);
     }
 
     private static bool Near(byte value, byte expected) => Math.Abs(value - expected) <= 40;

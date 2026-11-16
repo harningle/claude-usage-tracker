@@ -13,7 +13,7 @@ public enum TrayIconStyle
     Ring,
     Dot,
 
-    /// <summary>Multi-profile "Circles": the week as an outer ring around the session ring.</summary>
+    /// <summary>Multi-profile "Circles": the session as an outer ring around the week ring.</summary>
     Concentric,
 
     /// <summary>Multi-profile "Bars": the session bar above the week bar.</summary>
@@ -206,15 +206,21 @@ public static class TrayIconRenderer
         }
     }
 
+    /// <summary>Upstream's multi-profile circles: the session as the outer, thicker ring (3 to 2), the week inside it.</summary>
     private static void Concentric(
         DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker,
         Color secondaryMarker)
     {
-        var stroke = 2 * s;
-        var outer = size / 2.0 - stroke / 2 - 0.3 * s;
-        var inner = outer - stroke - 0.9 * s;
+        var outerStroke = 2.4 * s;
+        var innerStroke = 1.6 * s;
+        var outer = size / 2.0 - outerStroke / 2 - 0.3 * s;
+        var inner = outer - outerStroke / 2 - 0.9 * s - innerStroke / 2;
         var centre = new Point(size / 2.0, size / 2.0);
-        foreach (var (radius, fraction, colour) in new[] { (outer, spec.SecondaryFraction, secondary), (inner, spec.Fraction, fill) })
+        foreach (var (radius, stroke, fraction, colour) in new[]
+                 {
+                     (outer, outerStroke, spec.Fraction, fill),
+                     (inner, innerStroke, spec.SecondaryFraction, secondary),
+                 })
         {
             context.DrawEllipse(null, Pen(foreground, 0.25, stroke), centre, radius, radius);
             if (fraction is { } value && value > 0)
@@ -223,10 +229,9 @@ public static class TrayIconRenderer
             }
         }
 
-        Tick(spec.MarkerFraction, marker, inner - stroke, inner + stroke / 2);
-
-        // The week's tick reaches into the gap between the rings but not onto the session ring.
-        Tick(spec.SecondaryMarkerFraction, secondaryMarker, outer - stroke / 2 - 0.8 * s, outer + stroke / 2);
+        // The session's tick reaches into the gap between the rings but not onto the week ring.
+        Tick(spec.MarkerFraction, marker, outer - outerStroke / 2 - 0.8 * s, outer + outerStroke / 2);
+        Tick(spec.SecondaryMarkerFraction, secondaryMarker, inner - innerStroke, inner + innerStroke / 2);
 
         void Tick(double? fraction, Color colour, double from, double to)
         {
