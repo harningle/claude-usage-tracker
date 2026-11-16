@@ -167,14 +167,15 @@ public sealed class ConsoleClientTests : IDisposable
         var (client, _) = Create(request =>
         {
             var response = LinkHarness.Json(HttpStatusCode.OK, ConsoleEndpoint.Answer(request.RequestUri!)!.Value.Body);
-            response.Headers.TryAddWithoutValidation("Set-Cookie", "sessionKey=sk-ant-sid01-synthetic-renewed; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2026 12:00:00 GMT");
+            // The client drops an expired cookie by the real clock, not the test's, so the expiry lies far ahead.
+            response.Headers.TryAddWithoutValidation("Set-Cookie", "sessionKey=sk-ant-sid01-synthetic-renewed; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2099 12:00:00 GMT");
             return response;
         });
 
         var result = await client.FetchOrganizationsAsync(Key, CancellationToken.None);
 
         Assert.Equal("sk-ant-sid01-synthetic-renewed", result.RenewedKey?.SessionKey);
-        Assert.Equal(new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero), result.RenewedKey?.Expires);
+        Assert.Equal(new DateTimeOffset(2099, 11, 11, 12, 0, 0, TimeSpan.Zero), result.RenewedKey?.Expires);
     }
 
     [Theory]

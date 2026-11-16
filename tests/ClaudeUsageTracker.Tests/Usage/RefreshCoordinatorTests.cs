@@ -617,8 +617,9 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
                 return Usage(12);
             }
 
+            // The client drops an expired cookie by the real clock, not the test's, so the expiry lies far ahead.
             return Json(console.Status, console.Body, response => response.Headers.TryAddWithoutValidation(
-                "Set-Cookie", "sessionKey=sk-ant-sid01-synthetic-renewed; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2026 12:00:00 GMT"));
+                "Set-Cookie", "sessionKey=sk-ant-sid01-synthetic-renewed; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2099 12:00:00 GMT"));
         });
         var renewals = new ConcurrentQueue<(Guid ProfileId, DateTimeOffset LinkedAt, DateTimeOffset? Expiry)>();
         coordinator.ConsoleKeyRenewed += (profileId, linkedAt, expiry) => renewals.Enqueue((profileId, linkedAt, expiry));
@@ -631,7 +632,7 @@ public sealed class RefreshCoordinatorTests : IAsyncDisposable
         coordinator.Watch(ClaudeAiProfile(browserId, new ConsoleLink { OrganizationId = "org-api", LinkedAt = linkedAt }));
         await UntilAsync(browserId, s => s.Api is not null && !s.ApiFromCache);
 
-        Assert.Equal((browserId, linkedAt, new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero)), Assert.Single(renewals));
+        Assert.Equal((browserId, linkedAt, new DateTimeOffset(2099, 11, 11, 12, 0, 0, TimeSpan.Zero)), Assert.Single(renewals));
     }
 
     [Fact]

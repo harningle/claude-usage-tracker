@@ -668,7 +668,8 @@ public sealed class ConsoleBillingSourceTests : IDisposable
         {
             duringRequest?.Invoke(links);
             var response = LinkHarness.Json(HttpStatusCode.OK, ConsoleEndpoint.Answer(request.RequestUri!)!.Value.Body);
-            response.Headers.TryAddWithoutValidation("Set-Cookie", $"sessionKey={Renewed}; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2026 12:00:00 GMT");
+            // The client drops an expired cookie by the real clock, not the test's, so the expiry lies far ahead.
+            response.Headers.TryAddWithoutValidation("Set-Cookie", $"sessionKey={Renewed}; Path=/; Secure; HttpOnly; Expires=Wed, 11 Nov 2099 12:00:00 GMT");
             return Task.FromResult(response);
         });
         return (new ConsoleBillingSource(links.Secrets, links.Lock, new ConsoleClient(new HttpClient(handler), _time, links.Log)), links);
@@ -700,7 +701,7 @@ public sealed class ConsoleBillingSourceTests : IDisposable
         Assert.Equal(Renewed, links.Secrets.Load(_profileId).Console?.SessionKey);
         // Its expiry is reported for the link's settings, without the key.
         Assert.True(fetch.KeyRenewed);
-        Assert.Equal(new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero), fetch.KeyExpiry);
+        Assert.Equal(new DateTimeOffset(2099, 11, 11, 12, 0, 0, TimeSpan.Zero), fetch.KeyExpiry);
     }
 
     [Fact]
