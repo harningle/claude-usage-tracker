@@ -139,7 +139,14 @@ public static class TrayModel
             if (config.ShowWeek)
             {
                 var week = Spec(style, display, usage?.WeeklyPercentage, usage?.WeeklyResetTime, UsageDisplay.WeeklyWindow, null, false);
-                spec = spec with { HasSecondary = true, SecondaryFraction = week.Fraction, SecondaryLevel = week.Level };
+                spec = spec with
+                {
+                    HasSecondary = true,
+                    SecondaryFraction = week.Fraction,
+                    SecondaryLevel = week.Level,
+                    SecondaryMarkerFraction = week.MarkerFraction,
+                    SecondaryPace = week.Pace,
+                };
             }
 
             var tooltip = Join(

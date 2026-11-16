@@ -109,6 +109,7 @@ Recorded on 2026-09-30.
 17. **Storage.** Upstream silently replaced an undecodable profile list with a new default profile. The port reports damaged or newer-format settings and leaves the file untouched. It keeps unknown members, so an older build does not drop a newer one's settings. An unknown provider value is kept as written while it behaves as Anthropic. The usage cache is a separate, re-fetchable file per profile, so polling never rewrites settings or secrets.
 18. **Tray icons.** macOS status items are wide images; Windows tray icons are square.
     - Each of upstream's five styles (battery, progress bar, percentage, ring, dot) is drawn in a square form without its text labels; only the ring keeps its centre letter, from 20 px. The "time until next session" option is therefore not offered.
+    - The progress bar draws its elapsed-time tick at any usage. Upstream draws it only once the fill is more than a point wide, so a window opened by the session auto-start, or barely used, showed no marker. Upstream's multi-profile bars already draw it at any usage, as the port's now do (2026-11-16).
     - Icons are dimmed when their data is stale or failed.
     - Tooltips, which upstream did not have, give the profile, metric, value, reset time and any banner within 127 characters.
     - Right-click opens a native Refresh / Settings / Quit menu.

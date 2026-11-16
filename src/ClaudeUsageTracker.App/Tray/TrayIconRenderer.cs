@@ -43,6 +43,11 @@ public sealed record TrayIconSpec(
 
     public UsageStatusLevel? SecondaryLevel { get; init; }
 
+    /// <summary>The week's elapsed-time marker 0-1, or null for none.</summary>
+    public double? SecondaryMarkerFraction { get; init; }
+
+    public PaceStatus? SecondaryPace { get; init; }
+
     /// <summary>Upstream's underline under the active profile's icon in multi-profile mode.</summary>
     public bool ActiveIndicator { get; init; }
 }
@@ -61,6 +66,7 @@ public static class TrayIconRenderer
         var fill = spec.Monochrome || spec.Level is null ? foreground : StatusColour(spec.Level.Value, taskbarDark);
         var marker = spec.Pace is { } pace ? PaceColour(pace, taskbarDark) : foreground;
         var secondary = spec.Monochrome || spec.SecondaryLevel is null ? foreground : StatusColour(spec.SecondaryLevel.Value, taskbarDark);
+        var secondaryMarker = spec.SecondaryPace is { } weekPace ? PaceColour(weekPace, taskbarDark) : foreground;
         if (spec.Dimmed)
         {
             context.PushOpacity(0.55);
@@ -82,10 +88,10 @@ public static class TrayIconRenderer
                 Ring(context, size, s, spec, foreground, fill, marker);
                 break;
             case TrayIconStyle.Concentric:
-                Concentric(context, size, s, spec, foreground, fill, secondary, marker);
+                Concentric(context, size, s, spec, foreground, fill, secondary, marker, secondaryMarker);
                 break;
             case TrayIconStyle.DualBar:
-                DualBar(context, size, s, spec, foreground, fill, secondary, marker);
+                DualBar(context, size, s, spec, foreground, fill, secondary, marker, secondaryMarker);
                 break;
             default:
                 Dot(context, size, s, spec, foreground, fill, secondary, marker);
@@ -146,13 +152,13 @@ public static class TrayIconRenderer
         {
             context.DrawRoundedRectangle(Brush(fill, 1), null,
                 new Rect(track.X, track.Y, track.Width * Math.Clamp(fraction, 0, 1), track.Height), radius, radius);
+        }
 
-            // Upstream draws the progress-bar tick only where a fill is drawn.
-            if (spec.MarkerFraction is { } m)
-            {
-                var x = Math.Round(track.X + track.Width * Math.Clamp(m, 0, 1));
-                context.DrawLine(Pen(marker, 1, 1.4 * s), new Point(x, track.Top - 1.5 * s), new Point(x, track.Bottom + 1.5 * s));
-            }
+        // Upstream draws the progress-bar tick only where a fill is drawn; here it shows at any usage (docs/parity.md).
+        if (spec.MarkerFraction is { } m)
+        {
+            var x = Math.Round(track.X + track.Width * Math.Clamp(m, 0, 1));
+            context.DrawLine(Pen(marker, 1, 1.4 * s), new Point(x, track.Top - 1.5 * s), new Point(x, track.Bottom + 1.5 * s));
         }
     }
 
@@ -201,7 +207,8 @@ public static class TrayIconRenderer
     }
 
     private static void Concentric(
-        DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker)
+        DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker,
+        Color secondaryMarker)
     {
         var stroke = 2 * s;
         var outer = size / 2.0 - stroke / 2 - 0.3 * s;
@@ -216,19 +223,33 @@ public static class TrayIconRenderer
             }
         }
 
-        if (spec.MarkerFraction is { } m)
+        Tick(spec.MarkerFraction, marker, inner - stroke, inner + stroke / 2);
+
+        // The week's tick reaches into the gap between the rings but not onto the session ring.
+        Tick(spec.SecondaryMarkerFraction, secondaryMarker, outer - stroke / 2 - 0.8 * s, outer + stroke / 2);
+
+        void Tick(double? fraction, Color colour, double from, double to)
         {
-            var angle = Math.Clamp(m, 0, 1) * 2 * Math.PI;
-            var direction = new Vector(Math.Sin(angle), -Math.Cos(angle));
-            context.DrawLine(Pen(marker, 1, 1.3 * s), centre + direction * (inner - stroke), centre + direction * (inner + stroke / 2));
+            if (fraction is { } m)
+            {
+                var angle = Math.Clamp(m, 0, 1) * 2 * Math.PI;
+                var direction = new Vector(Math.Sin(angle), -Math.Cos(angle));
+                context.DrawLine(Pen(colour, 1, 1.3 * s), centre + direction * from, centre + direction * to);
+            }
         }
     }
 
+    /// <summary>Upstream's multi-profile bars, each with its tick at any usage, as upstream draws them.</summary>
     private static void DualBar(
-        DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker)
+        DrawingContext context, int size, double s, TrayIconSpec spec, Color foreground, Color fill, Color secondary, Color marker,
+        Color secondaryMarker)
     {
         var height = size * 0.22;
-        foreach (var (top, fraction, colour, primary) in new[] { (size * 0.2, spec.Fraction, fill, true), (size * 0.58, spec.SecondaryFraction, secondary, false) })
+        foreach (var (top, fraction, colour, markerFraction, markerColour) in new[]
+                 {
+                     (size * 0.2, spec.Fraction, fill, spec.MarkerFraction, marker),
+                     (size * 0.58, spec.SecondaryFraction, secondary, spec.SecondaryMarkerFraction, secondaryMarker),
+                 })
         {
             var track = new Rect(0.8 * s, top, size - 1.6 * s, height);
             context.DrawRoundedRectangle(Brush(foreground, 0.25), null, track, height / 2, height / 2);
@@ -236,11 +257,12 @@ public static class TrayIconRenderer
             {
                 context.DrawRoundedRectangle(Brush(colour, 1), null,
                     new Rect(track.X, track.Y, track.Width * Math.Clamp(value, 0, 1), track.Height), height / 2, height / 2);
-                if (primary && spec.MarkerFraction is { } m)
-                {
-                    var x = Math.Round(track.X + track.Width * Math.Clamp(m, 0, 1));
-                    context.DrawLine(Pen(marker, 1, 1.4 * s), new Point(x, track.Top - 1 * s), new Point(x, track.Bottom + 1 * s));
-                }
+            }
+
+            if (markerFraction is { } m)
+            {
+                var x = Math.Round(track.X + track.Width * Math.Clamp(m, 0, 1));
+                context.DrawLine(Pen(markerColour, 1, 1.4 * s), new Point(x, track.Top - 1 * s), new Point(x, track.Bottom + 1 * s));
             }
         }
     }

@@ -117,6 +117,31 @@ public class TrayModelTests
         Assert.Equal(showWeek, slot.Spec?.HasSecondary);
     }
 
+    /// <summary>Upstream's multi-profile icons give the week its own time marker and pace, as they do the session.</summary>
+    [Fact]
+    public void MultiProfileWeekHasItsOwnTimeMarkerAndPace()
+    {
+        var profile = new ProfileSettings { Name = "Work", CliLink = new CliLink() };
+        var config = new MultiProfileDisplayConfig { IconStyle = "progressBar", ShowWeek = true, ShowTimeMarker = true, ShowPaceMarker = true };
+        var settings = new AppSettings { Profiles = [profile], IsMultiProfile = true, MultiProfileDisplayConfig = config };
+        // 3 of the session's 5 hours and 4 of the week's 7 days have passed.
+        var states = new Dictionary<Guid, ProfileUsageState> { [profile.Id] = State(profile.Id, session: 1, weekly: 60) };
+
+        var spec = Assert.Single(Build(settings, states)).Spec;
+
+        Assert.Equal(0.6, spec?.MarkerFraction ?? 0, 3);
+        Assert.Equal(PaceStatus.Comfortable, spec?.Pace);
+        Assert.Equal(4.0 / 7, spec?.SecondaryMarkerFraction ?? 0, 3);
+        Assert.Equal(PaceStatus.Critical, spec?.SecondaryPace);
+
+        config.ShowTimeMarker = false;
+        config.ShowPaceMarker = false;
+        spec = Assert.Single(Build(settings, states)).Spec;
+
+        Assert.Null(spec?.SecondaryMarkerFraction);
+        Assert.Null(spec?.SecondaryPace);
+    }
+
     [Fact]
     public void MultiProfileOptionsReplaceTheProfilesOwn()
     {

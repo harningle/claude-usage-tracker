@@ -6,7 +6,13 @@ The port follows upstream [Claude Usage Tracker](https://github.com/hamed-elfayo
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The multi-profile Bars icon hid the session's time marker until the usage filled a pixel of the bar.** A window opened by the session auto-start, or barely used, therefore showed no marker. Upstream draws it at any usage, and so does the port now. The multi-profile Bars and Circles icons also gain upstream's time marker for the week, in its pace colour, which the port had left out.
+
+### Changed
+
+- **The single-profile Progress Bar icon shows the time marker at any usage**, where upstream hides it until the bar has a visible fill ([docs/parity.md](docs/parity.md), difference 18).
 
 ## [1.0.0-beta.2] - 2026-11-06
 
