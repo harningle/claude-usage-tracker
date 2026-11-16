@@ -123,8 +123,8 @@ Recorded on 2026-09-30.
     - Dragging the header detaches the popover, the same gesture as upstream; any tray click then closes it.
     - Opened from the keyboard, focus moves into the popover; upstream cleared focus.
 20. **Settings window.** Standard Windows chrome replaces upstream's borderless window and traffic-light buttons, and only the sections whose features exist are listed (from Milestone 4: Claude.ai, API Console, CLI Account or Codex Account, Appearance, General, History, Settings, Manage Profiles, Shortcuts, Popover, Debug Tools and About).
-    - Not ported: upstream's Language page (difference 54), its Updates page (there is no updater before Milestone 7), and its Mobile App and Support pages (difference 7). Debug Tools is in the App list; the bottom bar holds About and Quit.
-    - About identifies the Windows port and links the original project, this repository and its issues. It omits the GitHub star link, the feedback form, the contributors fetch and the update check.
+    - Not ported: upstream's Language page (difference 54), its Updates page (its update check is on About instead, difference 55), and its Mobile App and Support pages (difference 7). Debug Tools is in the App list; the bottom bar holds About and Quit.
+    - About identifies the Windows port and links the original project, this repository and its issues. It omits the GitHub star link, the feedback form and the contributors fetch. Its Check for Updates asks GitHub's releases list and links to a newer release, and the page holds the switch for a daily check (difference 55).
     - Removing the CLI account asks for confirmation, which upstream did not.
     - Re-sync runs the wizard's test and review instead of copying the login immediately.
 21. **Upstream strings, Windows wording.** Upstream's English strings are used unchanged, by key. Where they describe macOS ("menu bar", "like macOS battery"), the port uses its own `windows.*` strings. Text that upstream hard-coded in English ("Today", "Tomorrow", "Status Unknown", the icon style names) is also in `Windows.strings`.
@@ -250,6 +250,7 @@ Recorded on 2026-09-30.
     - It needs no .NET, Windows App SDK runtime package or push-notification (Singleton) package on the PC.
     - Its data stays in `%LOCALAPPDATA%\ClaudeUsageTracker` whichever folder it runs from.
     - The installer, signing and update mechanism belong to Milestone 7.
+    - **Updates (added 2026-11-16):** no Sparkle and no automatic installation. Check for Updates on the About page sends one anonymous request to GitHub's releases list for this repository, with no token or cookie and the user agent `ClaudeUsageTracker-Windows/<version>`, and shows whether a newer release exists, with a link to its page. A switch on the same page, off by default, makes the same check once a day and posts one Windows notification per newer release; clicking it opens the release's page. An automatic check that does not reach GitHub is tried again an hour later rather than the next day. Nothing is downloaded or installed: that waits for signed releases (plan.md Milestone 7). A pre-release build is offered newer betas and stable releases, a stable build only stable ones. The check is not telemetry: it sends nothing but the request, it runs only when pressed or switched on, and it is in the request log. While the repository is private GitHub answers 404, which the page shows as no public release.
 56. **Currency amounts.** Upstream formatted amounts with the Mac's regional currency format, so its own screenshot shows "US$0.03" outside the United States. The port writes the currency's symbol for USD, EUR, GBP and JPY ("$12.34") and the ISO code otherwise ("CHF 12.34"), with two decimals as upstream, and the number in the UI language's format.
 
 ## Upstream features
@@ -278,7 +279,7 @@ Every feature of the pinned upstream source, by its views and services, and wher
 | Popover settings | `PopoverSettingsView` | M3 | Not separately |
 | Network log | `DebugNetworkLogView`, `NetworkLoggerService` | M3; difference 33 | Yes |
 | About | `AboutView`, `GitHubService` | M2 without the contributors fetch; difference 20 | Not separately |
-| Updates | `UpdatesSettingsView`, `UpdateManager` (Sparkle) | **Not in the personal build;** Milestone 7; difference 55 | Not applicable |
+| Updates | `UpdatesSettingsView`, `UpdateManager` (Sparkle) | A check of GitHub's releases on About, by button or an opt-in daily check, linking to a newer release; never downloads (2026-11-16); difference 55 | No: tests and fixture mode only, as GitHub answers 404 while the repository is private |
 | Support page, sponsor slot, Mobile App page | `SupportView`, `SponsorSlotCard`, `MobileAppView` | **Omitted** (difference 7) | Not applicable |
 | GitHub-star, support-reminder and feedback prompts, daily heartbeat | `GitHubStarPromptView`, `SupportReminderService`, `FeedbackPromptView`, `HeartbeatService` | **Omitted** (difference 7) | Not applicable |
 | Notifications | `NotificationManager` | M4; difference 38 | Yes |

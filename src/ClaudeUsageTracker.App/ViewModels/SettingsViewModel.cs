@@ -13,11 +13,13 @@ using ClaudeUsageTracker.App.Profiles;
 using ClaudeUsageTracker.App.Setup;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Tray;
+using ClaudeUsageTracker.App.Updates;
 using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.Core.Billing;
 using ClaudeUsageTracker.Core.Notifications;
 using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Core.Refresh;
+using ClaudeUsageTracker.Core.Updates;
 using ClaudeUsageTracker.Core.Usage;
 
 namespace ClaudeUsageTracker.App.ViewModels;
@@ -97,6 +99,9 @@ public sealed class SettingsIntegrations
 
     /// <summary>A profile was picked and is now active: Claude Code is switched to its account too, if it can be.</summary>
     public required Action<ProfileSettings> ProfilePicked { get; init; }
+
+    /// <summary>The About page's update check.</summary>
+    public required UpdateService Updates { get; init; }
 }
 
 /// <summary>
@@ -841,6 +846,59 @@ public sealed class SettingsViewModel : ObservableObject
 
     public string Version =>
         Strings.Format("about.version", Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0");
+
+    // Updates: an opt-in check of GitHub's releases on the About page, in place of upstream's Sparkle (difference 55).
+
+    public bool AutomaticUpdateChecks
+    {
+        get => _settings.AutomaticUpdateChecks;
+        set => EditApp(v => _settings.AutomaticUpdateChecks = v, AutomaticUpdateChecks, value);
+    }
+
+    public bool IsCheckingForUpdates => _integrations.Updates.IsChecking;
+
+    /// <summary>What the last update check found, or when GitHub last answered one; null before any check.</summary>
+    public string? UpdateStatus
+    {
+        get
+        {
+            var updates = _integrations.Updates;
+            if (updates.IsChecking)
+            {
+                return Strings.Get("windows.updates.checking");
+            }
+
+            if (updates.Last is not { } check)
+            {
+                return _settings.LastUpdateCheck is { } last ? Strings.Format("windows.updates.last_checked", LocalTime(last)) : null;
+            }
+
+            return check.Outcome switch
+            {
+                UpdateCheckOutcome.UpToDate => Strings.Format("windows.updates.up_to_date", updates.Current.ToString(), LocalTime(check.At)),
+                UpdateCheckOutcome.Available => Strings.Format("windows.updates.available", check.Release!.Version.ToString()),
+                UpdateCheckOutcome.NoReleases => Strings.Get("windows.updates.no_releases"),
+                UpdateCheckOutcome.RateLimited => Strings.Get("windows.updates.rate_limited"),
+                UpdateCheckOutcome.Failed => Strings.Format("windows.updates.failed", check.Status?.ToString(CultureInfo.InvariantCulture) ?? ""),
+                UpdateCheckOutcome.Unreachable => Strings.Get("windows.updates.unreachable"),
+                _ => Strings.Get("windows.updates.invalid"),
+            };
+        }
+    }
+
+    /// <summary>The newer release's page on GitHub, or null when the last check found none.</summary>
+    public string? UpdateReleasePage =>
+        _integrations.Updates.Last is { Outcome: UpdateCheckOutcome.Available, Release: { } release } ? GitHubReleases.Page(release.Tag)?.AbsoluteUri : null;
+
+    public Task CheckForUpdatesAsync() => _integrations.Updates.CheckNowAsync();
+
+    /// <summary>An update check started or ended.</summary>
+    public void UpdatesChanged()
+    {
+        RaisePropertyChanged(nameof(IsCheckingForUpdates));
+        RaisePropertyChanged(nameof(UpdateStatus));
+        RaisePropertyChanged(nameof(UpdateReleasePage));
+    }
 
     /// <summary>Refreshes the credential pages from the coordinator's state and a fresh read of the linked Claude Code folder.</summary>
     /// <param name="cliSwitch">Whether Claude Code uses the active profile's account and any switch to it, or null without a link.</param>

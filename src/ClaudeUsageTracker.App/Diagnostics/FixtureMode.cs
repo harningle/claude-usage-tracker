@@ -9,6 +9,7 @@ using ClaudeUsageTracker.App.Interop;
 using ClaudeUsageTracker.App.Setup;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Usage;
+using ClaudeUsageTracker.Core.Updates;
 
 namespace ClaudeUsageTracker.App.Diagnostics;
 
@@ -61,6 +62,7 @@ public sealed partial class FixtureMode
     public static string? ResponseName(Uri url) => (url.Host, url.AbsolutePath) switch
     {
         ("api.anthropic.com", "/api/oauth/usage") => "usage",
+        ("api.github.com", GitHubReleases.Route) => "releases",
         (_, "/api/v2/status.json") => "status",
         ("platform.claude.com", "/v1/oauth/token") => "token",
         ("auth.openai.com", "/oauth/token") => "codex-token",

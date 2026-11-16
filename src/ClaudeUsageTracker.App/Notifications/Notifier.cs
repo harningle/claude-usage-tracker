@@ -8,7 +8,8 @@ namespace ClaudeUsageTracker.App.Notifications;
 /// <param name="ProfileId">The profile a click opens, or null for none.</param>
 /// <param name="SoundName">A <see cref="Storage.NotificationSettings.SoundName"/> raw value.</param>
 /// <param name="Tag">Identifies the notification for later removal.</param>
-public sealed record AppAlert(string Title, string Body, Guid? ProfileId, string SoundName, string? Tag = null);
+/// <param name="Release">A release tag whose page a click opens, instead of the popover.</param>
+public sealed record AppAlert(string Title, string Body, Guid? ProfileId, string SoundName, string? Tag = null, string? Release = null);
 
 /// <summary>Posts notifications. The app uses Windows notifications; tests record what would be posted.</summary>
 public interface INotifier

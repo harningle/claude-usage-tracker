@@ -68,6 +68,18 @@ public sealed class AppSettings
     /// <summary>Upstream <c>notchHUDAutoHide</c>: hide the HUD a few seconds after every session went idle. On by default, as upstream.</summary>
     public bool HudAutoHide { get; set; } = true;
 
+    /// <summary>
+    /// Check GitHub's releases once a day. Off by default: the check is opt-in (plan.md Milestone 7). Port-only; upstream's
+    /// Sparkle kept <c>SUEnableAutomaticChecks</c>.
+    /// </summary>
+    public bool AutomaticUpdateChecks { get; set; }
+
+    /// <summary>When GitHub last answered an update check, automatic or not. Port-only.</summary>
+    public DateTimeOffset? LastUpdateCheck { get; set; }
+
+    /// <summary>The tag of the newest release the user has been told about, so it is announced once. Port-only.</summary>
+    public string? AnnouncedUpdate { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 

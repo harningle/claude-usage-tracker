@@ -6,6 +6,10 @@ The port follows upstream [Claude Usage Tracker](https://github.com/hamed-elfayo
 
 ## [Unreleased]
 
+### Added
+
+- **Check for Updates on the About page.** It asks GitHub's list of this app's releases and, when a newer one exists, shows its version with a link to its release page. A switch below it, off by default, makes the check once a day and posts one Windows notification per newer release, which opens the release page when clicked. Nothing is downloaded or installed: install a newer release as before. A beta build is offered newer betas and stable releases, a stable build only stable ones. The request carries no login or cookie and appears in Debug Tools' request log ([docs/parity.md](docs/parity.md), difference 55).
+
 ### Fixed
 
 - **The multi-profile Bars icon hid the session's time marker until the usage filled a pixel of the bar.** A window opened by the session auto-start, or barely used, therefore showed no marker. Upstream draws it at any usage, and so does the port now. The multi-profile Bars and Circles icons also gain upstream's time marker for the week, in its pace colour, which the port had left out.

@@ -260,12 +260,14 @@ public class FixtureResponseTests
     [InlineData("https://platform.claude.com/api/organizations/org-1/prepaid/credits", "console-prepaid-credits")]
     [InlineData("https://platform.claude.com/api/organizations/org-1/workspaces/default/usage_cost?x=1", "console-usage-cost")]
     [InlineData("https://platform.claude.com/api/organizations/org-1/api_keys?status=active", "console-api-keys")]
+    [InlineData("https://api.github.com/repos/harningle/claude-usage-tracker/releases", "releases")]
     public void RequestsMapToResponseFiles(string url, string expected) =>
         Assert.Equal(expected, FixtureMode.ResponseName(new Uri(url)));
 
     [Theory]
     [InlineData("https://api.anthropic.com/v1/messages")]
     [InlineData("https://platform.claude.com/api/organizations/org-1/members")]
+    [InlineData("https://api.github.com/repos/someone-else/claude-usage-tracker/releases")]
     public void OtherRequestsAreNotServed(string url) => Assert.Null(FixtureMode.ResponseName(new Uri(url)));
 }
 

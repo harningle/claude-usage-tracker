@@ -460,6 +460,9 @@ public partial class SettingsWindow : Window
 
     private void OnRunWizard(object sender, RoutedEventArgs e) => WizardRequested?.Invoke(this, EventArgs.Empty);
 
+    // The check reports every failure on the page itself.
+    private async void OnCheckForUpdates(object sender, RoutedEventArgs e) => await _viewModel.CheckForUpdatesAsync();
+
     private void OnQuit(object sender, RoutedEventArgs e) => QuitRequested?.Invoke(this, EventArgs.Empty);
 
     private void OnLink(object sender, RoutedEventArgs e)

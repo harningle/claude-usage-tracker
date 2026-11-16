@@ -1482,6 +1482,26 @@
           <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc app.name}" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,0" />
           <TextBlock Style="{StaticResource Text.Secondary}" Text="{l:Loc windows.about.subtitle}" FontSize="12" HorizontalAlignment="Center" />
           <TextBlock Style="{StaticResource Text.Secondary}" Text="{Binding Version}" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0" />
+          <!-- Upstream's Check for Updates, here a check of GitHub's releases that only links to a newer one (difference 55). -->
+          <Button Style="{StaticResource PlainButton}" Padding="6,2" HorizontalAlignment="Center" Margin="0,4,0,0" Click="OnCheckForUpdates"
+                  AutomationProperties.Name="{l:Loc about.check_updates}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE896;" FontSize="10" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
+              <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc about.check_updates}" FontSize="11" Foreground="{DynamicResource Accent}" Margin="4,0,0,0" />
+            </StackPanel>
+          </Button>
+          <TextBlock Style="{StaticResource Text.Caption}" Text="{Binding UpdateStatus}" TextAlignment="Center" MaxWidth="400" Margin="0,4,0,0"
+                     Visibility="{Binding UpdateStatus, Converter={x:Static views:Converters.NotNullToVisible}}" />
+          <Button Style="{StaticResource PlainButton}" Padding="6,2" HorizontalAlignment="Center" Click="OnLink" Tag="{Binding UpdateReleasePage}"
+                  Visibility="{Binding UpdateReleasePage, Converter={x:Static views:Converters.NotNullToVisible}}"
+                  AutomationProperties.Name="{l:Loc windows.updates.view_release}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc windows.updates.view_release}" FontSize="11" Foreground="{DynamicResource Accent}" />
+              <TextBlock Style="{StaticResource Text.Icon}" Text="&#xE8A7;" FontSize="9" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" Margin="4,0,0,0" />
+            </StackPanel>
+          </Button>
+          <views:SettingToggle Width="320" Margin="0,12,0,0" Title="{l:Loc windows.updates.automatic}" Description="{l:Loc windows.updates.automatic.description}"
+                               IsOn="{Binding AutomaticUpdateChecks, Mode=TwoWay}" />
           <TextBlock Style="{StaticResource Text.Caption}" Text="{l:Loc windows.about.port_note}" TextAlignment="Center" MaxWidth="400" Margin="0,16,0,0" />
           <Rectangle Height="1" Margin="0,20" Fill="{DynamicResource Line.Divider}" />
           <TextBlock Style="{StaticResource Text.Base}" Text="{l:Loc about.links}" FontSize="13" FontWeight="Medium" />

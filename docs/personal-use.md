@@ -1,6 +1,6 @@
 # Using the personal build
 
-The personal build of Claude Usage Tracker for Windows is a folder: copy it somewhere permanent and run it. Each [release on GitHub](https://github.com/harningle/claude-usage-tracker/releases) carries a per-user installer and this folder as a portable ZIP ([README](../README.md)). There is no automatic update and no code signature yet; those belong to the public release ([plan.md Milestone 7](../plan.md#milestone-7---public-distribution)). The app is in English only. This guide was checked with the build of Milestone 6 ([milestone-6.md](milestone-6.md)).
+The personal build of Claude Usage Tracker for Windows is a folder: copy it somewhere permanent and run it. Each [release on GitHub](https://github.com/harningle/claude-usage-tracker/releases) carries a per-user installer and this folder as a portable ZIP ([README](../README.md)). There is no automatic update and no code signature yet; those belong to the public release ([plan.md Milestone 7](../plan.md#milestone-7---public-distribution)). Check for Updates on the About page, and the daily check you can switch on there, tell you when a newer release is out and link to it; you still install it yourself, as below. The app is in English only. This guide was checked with the build of Milestone 6 ([milestone-6.md](milestone-6.md)).
 
 ## What the PC needs
 

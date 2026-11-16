@@ -97,6 +97,20 @@
 "windows.about.original" = "Original project";
 "windows.about.port_repo" = "Windows port";
 "windows.about.copyright" = "© 2025 Claude Usage Tracker Contributors";
+"windows.updates.checking" = "Checking GitHub for a newer release…";
+"windows.updates.last_checked" = "Last checked %@.";
+"windows.updates.up_to_date" = "Version %@ is the latest release. Checked %@.";
+"windows.updates.available" = "Version %@ is available.";
+"windows.updates.no_releases" = "GitHub has no public release of this app (HTTP 404).";
+"windows.updates.rate_limited" = "GitHub is limiting requests from this network. Try again later.";
+"windows.updates.failed" = "GitHub answered with HTTP %@. Try again later.";
+"windows.updates.unreachable" = "Couldn't reach GitHub. Check the connection and try again.";
+"windows.updates.invalid" = "GitHub's list of releases couldn't be read.";
+"windows.updates.view_release" = "View the release on GitHub";
+"windows.updates.automatic" = "Check for updates automatically";
+"windows.updates.automatic.description" = "Once a day, asks GitHub for this app's releases and tells you when a newer one is out. Nothing is downloaded or installed.";
+"windows.updates.notification.title" = "Claude Usage Tracker %@ is available";
+"windows.updates.notification.body" = "Click to open the release on GitHub.";
 
 /* MARK: - Development fixture mode */
 "windows.fixture.label" = "Fixture data";

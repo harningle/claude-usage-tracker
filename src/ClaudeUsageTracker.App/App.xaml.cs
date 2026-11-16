@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -19,12 +20,14 @@ using ClaudeUsageTracker.App.Setup;
 using ClaudeUsageTracker.App.Storage;
 using ClaudeUsageTracker.App.Themes;
 using ClaudeUsageTracker.App.Tray;
+using ClaudeUsageTracker.App.Updates;
 using ClaudeUsageTracker.App.Usage;
 using ClaudeUsageTracker.App.ViewModels;
 using ClaudeUsageTracker.App.Views;
 using ClaudeUsageTracker.Core.Notifications;
 using ClaudeUsageTracker.Core.Providers;
 using ClaudeUsageTracker.Core.Status;
+using ClaudeUsageTracker.Core.Updates;
 using ClaudeUsageTracker.Core.Usage;
 using Microsoft.Win32;
 
@@ -73,6 +76,7 @@ public partial class App : Application
     private UsageCacheStore _cache = null!;
     private ToastNotifier? _toasts;
     private AutomationService _automation = null!;
+    private UpdateService _updates = null!;
     private AutoStartService _autoStart = null!;
     private CliSwitcher _switcher = null!;
     private Hotkeys? _hotkeys;
@@ -245,6 +249,8 @@ public partial class App : Application
             UpdateViews();
         };
         _automation = new AutomationService(_settings, _toasts, new AutomationStateStore(_paths.AutomationFile), time, LastKnownUsage, OnAutoSwitch);
+        _updates = new UpdateService(http, time, _log, _settings, Persist, _toasts, UpdateService.ThisBuild());
+        _updates.Changed += () => _settingsModel?.UpdatesChanged();
         _coordinator.UsageFetched += (profileId, usage) =>
         {
             _fetched[profileId] = usage;
@@ -311,6 +317,7 @@ public partial class App : Application
         };
 
         _toasts.Clicked += ShowForNotification;
+        _toasts.ReleaseClicked += OpenRelease;
         _hotkeys = new Hotkeys(_host);
         _hotkeys.Pressed += OnHotkey;
         _refusedShortcuts = _hotkeys.Apply(_settings.Shortcuts);
@@ -367,6 +374,7 @@ public partial class App : Application
 
             UpdateViews();
             _automation.Tick();
+            _ = _updates.Tick();
         }, Dispatcher);
         _clock.Start();
         _autoStartTimer = new DispatcherTimer(SessionAutoStart.CheckInterval, DispatcherPriority.Background, (_, _) => CheckAutoStart(), Dispatcher);
@@ -374,7 +382,11 @@ public partial class App : Application
         // Upstream checks at once; a short delay lets the first usage checks of the profiles finish.
         _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => Dispatcher.BeginInvoke(CheckAutoStart), TaskScheduler.Default);
         SettleSwitch();
-        if (coldActivation is { } clicked)
+        if (coldActivation is { Release: { } release })
+        {
+            OpenRelease(release);
+        }
+        else if (coldActivation is { } clicked)
         {
             ShowForNotification(clicked.ProfileId);
         }
@@ -594,6 +606,15 @@ public partial class App : Application
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>An update notification was clicked: its release's page opens in the browser.</summary>
+    private static void OpenRelease(string tag)
+    {
+        if (GitHubReleases.Page(tag) is { } page)
+        {
+            Process.Start(new ProcessStartInfo(page.AbsoluteUri) { UseShellExecute = true });
         }
     }
 
@@ -850,6 +871,7 @@ public partial class App : Application
                     SuspendShortcuts = () => _hotkeys!.Suspend(),
                     Pages = _pages,
                     ProfilePicked = SwitchCliTo,
+                    Updates = _updates,
                 });
             _settingsWindow = new SettingsWindow(_settingsModel);
             _settingsWindow.SourceInitialized += (_, _) => _theme.StyleTitleBar(_settingsWindow);

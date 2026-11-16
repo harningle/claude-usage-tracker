@@ -11,11 +11,13 @@ namespace ClaudeUsageTracker.App.Notifications;
 /// Windows notifications through the Windows App SDK's <c>AppNotificationManager</c>, unpackaged and self-contained,
 /// as the Milestone 1 spike verified (plan.md section 2). <see cref="Register"/> registers this executable's path as
 /// the notification COM server, so a click reaches the running instance, or starts the app when none runs.
-/// Arguments carry only the profile ID and whether the notification came from fixture mode; never usage data.
+/// Arguments carry only the profile ID, an update's release tag and whether the notification came from fixture mode;
+/// never usage data.
 /// </summary>
 public sealed class ToastNotifier : INotifier, IDisposable
 {
     private const string ProfileArgument = "profile";
+    private const string ReleaseArgument = "release";
     private const string ModeArgument = "mode";
     private const string FixtureMode = "fixture";
 
@@ -32,6 +34,9 @@ public sealed class ToastNotifier : INotifier, IDisposable
 
     /// <summary>Raised on the UI thread when a notification of the running app is clicked, with its profile.</summary>
     public event Action<Guid?>? Clicked;
+
+    /// <summary>Raised on the UI thread when an update notification of the running app is clicked, with its release tag.</summary>
+    public event Action<string>? ReleaseClicked;
 
     /// <summary>
     /// Registers for notification clicks. The click handler is attached first, so clicks reach this process (the
@@ -64,10 +69,10 @@ public sealed class ToastNotifier : INotifier, IDisposable
     }
 
     /// <summary>
-    /// How this process was started by a notification click while the app was not running: the clicked profile, and
-    /// whether the notification came from fixture mode. Null when it was not started by a notification.
+    /// How this process was started by a notification click while the app was not running: the clicked profile or
+    /// update's release, and whether the notification came from fixture mode. Null when it was not started by a notification.
     /// </summary>
-    public (Guid? ProfileId, bool FromFixture)? ColdActivation()
+    public (Guid? ProfileId, bool FromFixture, string? Release)? ColdActivation()
     {
         if (!_registered)
         {
@@ -127,6 +132,11 @@ public sealed class ToastNotifier : INotifier, IDisposable
         if (alert.ProfileId is { } profileId)
         {
             builder.AddArgument(ProfileArgument, profileId.ToString("D"));
+        }
+
+        if (alert.Release is { } release)
+        {
+            builder.AddArgument(ReleaseArgument, release);
         }
 
         if (_fixture)
@@ -196,13 +206,20 @@ public sealed class ToastNotifier : INotifier, IDisposable
 
     private void OnInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
     {
-        var (profileId, fromFixture) = Parse(args.Arguments);
+        var (profileId, fromFixture, release) = Parse(args.Arguments);
         // A fixture notification clicked in a live instance, or the reverse, only opens the popover.
+        if (fromFixture == _fixture && release is not null)
+        {
+            _post(() => ReleaseClicked?.Invoke(release));
+            return;
+        }
+
         var target = fromFixture == _fixture ? profileId : null;
         _post(() => Clicked?.Invoke(target));
     }
 
-    private static (Guid? ProfileId, bool FromFixture) Parse(IDictionary<string, string> arguments) =>
+    private static (Guid? ProfileId, bool FromFixture, string? Release) Parse(IDictionary<string, string> arguments) =>
         (arguments.TryGetValue(ProfileArgument, out var raw) && Guid.TryParse(raw, out var id) ? id : null,
-         arguments.TryGetValue(ModeArgument, out var mode) && mode == FixtureMode);
+         arguments.TryGetValue(ModeArgument, out var mode) && mode == FixtureMode,
+         arguments.TryGetValue(ReleaseArgument, out var release) ? release : null);
 }

@@ -112,6 +112,7 @@ public sealed class MilestoneFourSettingsTests : IDisposable
                 SuspendShortcuts = () => _calls.Add("suspend"),
                 Pages = new Integration.IntegrationHarness(Path.Combine(_temp.Path, "integration"), _settings, _time).Pages,
                 ProfilePicked = p => _calls.Add("picked:" + p.Name),
+                Updates = Updates.UpdateServiceTests.Idle(_settings, _time, Path.Combine(_temp.Path, "update-log")),
             });
     }
 

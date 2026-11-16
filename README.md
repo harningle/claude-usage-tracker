@@ -26,7 +26,7 @@ This port is not affiliated with, endorsed by or signed by Anthropic, OpenAI or 
 - **Claude Code integration.** Read-only usage polling through Claude Code's own login; a status line with upstream's components and colour modes, rendered by a small native helper; a `claude-<profile>` launcher per profile with its own login folder; switching Claude Code's account to the picked profile, with backups; and a floating activity HUD fed by Claude Code's hooks.
 - **Notifications and automation.** Threshold and reset notifications with Windows sounds, launch at login, global shortcuts, opt-in session auto-start (Claude and Codex) and profile auto-switch.
 - **History.** Session, weekly and billing charts over 5 hours to 30 days, with JSON and CSV export.
-- **Nothing phoned home.** No telemetry, no prompts, no cloud service, no automatic update. The Debug Tools page shows a request log without secrets.
+- **Nothing phoned home.** No telemetry, no prompts, no cloud service, no automatic update. Check for Updates on the About page asks GitHub's releases list only when pressed or when its daily check is switched on, and never downloads anything. The Debug Tools page shows a request log without secrets.
 
 Upstream features left out on purpose: the 13 other languages (the port is English only), the notch "Dynamic Island" (a floating window instead), Keychain storage (Windows DPAPI instead), automatic updates, the support, sponsor and mobile-app pages, and the star, feedback and heartbeat prompts. [docs/parity.md](docs/parity.md) lists every upstream feature, its status and each numbered difference.
 
@@ -88,7 +88,7 @@ Started normally, the app reads your real Claude Code login and polls with it.
 
 ## Status and documentation
 
-Milestones 0 to 6 of [plan.md](plan.md) are done: the port has been in daily personal use since early October 2026, with about 1,400 automated tests, including ones that run the real helper and launcher processes under PowerShell, Command Prompt and Git Bash. Milestone 7, public distribution, is under way: CI, the release workflow and the installer exist, and the first releases are betas. The binaries stay unsigned by decision, an update check is planned for a later version, and installs on other PCs await the first testers.
+Milestones 0 to 6 of [plan.md](plan.md) are done: the port has been in daily personal use since early October 2026, with about 1,400 automated tests, including ones that run the real helper and launcher processes under PowerShell, Command Prompt and Git Bash. Milestone 7, public distribution, is under way: CI, the release workflow and the installer exist, and the first releases are betas. The binaries stay unsigned by decision, so the app checks for a newer release but does not install it, and installs on other PCs await the first testers.
 
 - [plan.md](plan.md): the design, the Windows adaptations and their reasons, the milestones and the verification rules.
 - [docs/parity.md](docs/parity.md): every upstream feature's status, the numbered differences, and the verification limits, among them that Max and Enterprise accounts, the Console live, remote desktop, screen readers and a clean PC are unverified.

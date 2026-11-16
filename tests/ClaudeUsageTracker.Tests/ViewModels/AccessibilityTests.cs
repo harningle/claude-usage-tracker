@@ -523,6 +523,7 @@ public sealed class AccessibilityTests : IDisposable
                 SuspendShortcuts = () => { },
                 Pages = new Integration.IntegrationHarness(Path.Combine(_temp.Path, "integration"), settings, _time).Pages,
                 ProfilePicked = _ => { },
+                Updates = Updates.UpdateServiceTests.Idle(settings, _time, Path.Combine(_temp.Path, "update-log")),
             });
     }
 
