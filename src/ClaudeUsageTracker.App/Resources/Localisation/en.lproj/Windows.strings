@@ -235,6 +235,7 @@
 "windows.general.autostart_requirement_codex" = "• The Codex CLI's login for this profile, not pasted credentials, and codex.exe on PATH";
 "windows.general.autostart_needs_codex_cli" = "This profile can't auto-start a session because it doesn't use the Codex CLI's login.";
 "windows.autostart.codex_not_found" = "The Codex CLI (codex.exe) was not found on PATH.";
+"windows.autostart.codex_start_failed" = "The Codex CLI was found at %@, but Windows did not start it. Error %d: %@";
 "windows.autostart.codex_timed_out" = "Codex did not finish within two minutes.";
 "windows.autostart.codex_no_reply" = "Codex finished without a reply.";
 "windows.autostart.codex_failed" = "Codex exited with code %d.";

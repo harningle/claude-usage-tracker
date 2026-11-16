@@ -12,6 +12,7 @@ The port follows upstream [Claude Usage Tracker](https://github.com/hamed-elfayo
 
 ### Fixed
 
+- **A Codex auto-start that Windows refused to run was reported as "codex.exe was not found on PATH".** The tracker had found the Codex CLI, but Windows did not start it, and the notification sent you looking for a PATH problem that was not there. The notification now names the `codex.exe` that was found and gives Windows' error, and the request log keeps the error code (`startFailed:<code>`).
 - **The multi-profile Bars icon hid the session's time marker until the usage filled a pixel of the bar.** A window opened by the session auto-start, or barely used, therefore showed no marker. Upstream draws it at any usage, and so does the port now. The multi-profile Bars and Circles icons also gain upstream's time marker for the week, in its pace colour, which the port had left out.
 - **The multi-profile Circles icon had its rings the wrong way round.** Upstream draws the session as the outer, thicker ring and the week inside it; the port drew the week outside, with both rings equally thick. It now follows upstream.
 

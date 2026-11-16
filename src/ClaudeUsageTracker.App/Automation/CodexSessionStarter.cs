@@ -22,14 +22,25 @@ public enum CodexExecOutcome
     /// <summary>It exited otherwise. The request may still have reached the model.</summary>
     Failed,
 
+    /// <summary>No <c>codex.exe</c> on PATH.</summary>
     NotFound,
+
+    /// <summary>A <c>codex.exe</c> was found, but Windows did not start it.</summary>
+    StartFailed,
 
     /// <summary>It did not finish in time and was stopped.</summary>
     TimedOut,
 }
 
-/// <param name="ExitCode">Null when the CLI was not found or did not finish.</param>
-public sealed record CodexExecResult(CodexExecOutcome Outcome, int? ExitCode);
+/// <summary>Why Windows did not start a <c>codex.exe</c> that was found.</summary>
+/// <param name="Path">The <c>codex.exe</c> that was found.</param>
+/// <param name="Code">The Windows error code.</param>
+/// <param name="Message">Windows' text for the error.</param>
+public sealed record CodexStartError(string Path, int Code, string Message);
+
+/// <param name="ExitCode">Null when the CLI was not found, did not start or did not finish.</param>
+/// <param name="StartError">Why Windows did not start the CLI, for <see cref="CodexExecOutcome.StartFailed"/>.</param>
+public sealed record CodexExecResult(CodexExecOutcome Outcome, int? ExitCode, CodexStartError? StartError = null);
 
 /// <summary>
 /// One run of the Codex CLI that sends a single short message, the Codex counterpart of the claude.ai conversation
@@ -129,10 +140,10 @@ public static class CodexExec
             {
                 process = Process.Start(start);
             }
-            catch (Win32Exception)
+            catch (Win32Exception e)
             {
-                // Removed or not runnable since it was found.
-                return new CodexExecResult(CodexExecOutcome.NotFound, null);
+                // Found, but not started: removed since, blocked, or not a program. Windows' error says which.
+                return new CodexExecResult(CodexExecOutcome.StartFailed, null, new CodexStartError(executable, e.NativeErrorCode, e.Message));
             }
 
             using (process)
@@ -270,6 +281,8 @@ public sealed class CodexSessionStarter(
             {
                 CodexExecOutcome.Completed => null,
                 CodexExecOutcome.NotFound => "notFound",
+                // The error code is metadata, never the path or Windows' text.
+                CodexExecOutcome.StartFailed => $"startFailed:{result.StartError!.Code}",
                 CodexExecOutcome.TimedOut => "timeout",
                 _ => "failed",
             }));
@@ -277,6 +290,8 @@ public sealed class CodexSessionStarter(
         {
             CodexExecOutcome.Completed => new AutoStartResult(true, null, null),
             CodexExecOutcome.NotFound => new AutoStartResult(false, null, Strings.Get("windows.autostart.codex_not_found")),
+            CodexExecOutcome.StartFailed => new AutoStartResult(false, null, Strings.Format(
+                "windows.autostart.codex_start_failed", result.StartError!.Path, result.StartError.Code, result.StartError.Message)),
             CodexExecOutcome.TimedOut => new AutoStartResult(false, null, Strings.Get("windows.autostart.codex_timed_out")),
             _ when result.ExitCode is 0 => new AutoStartResult(false, null, Strings.Get("windows.autostart.codex_no_reply")),
             _ => new AutoStartResult(false, null, Strings.Format("windows.autostart.codex_failed", result.ExitCode ?? -1)),

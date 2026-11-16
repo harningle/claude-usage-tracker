@@ -173,6 +173,22 @@ public sealed class CodexExecTests : IDisposable
         Assert.Equal(new CodexExecResult(CodexExecOutcome.NotFound, null), await CodexExec.RunAsync(null, _home, Patience, CancellationToken.None));
 
     [Fact]
+    public async Task ACodexExeWindowsWillNotStartIsReportedWithWindowsError()
+    {
+        var broken = Path.Combine(_temp.Path, "broken", CodexExec.FileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(broken)!);
+        File.WriteAllText(broken, "not a program");
+
+        var result = await CodexExec.RunAsync(broken, _home, Patience, CancellationToken.None);
+
+        Assert.Equal((CodexExecOutcome.StartFailed, (int?)null), (result.Outcome, result.ExitCode));
+        Assert.Equal(broken, result.StartError?.Path);
+        // Which error is Windows' choice: 216 (ERROR_EXE_MACHINE_TYPE_MISMATCH) on Windows 11 26200.
+        Assert.NotEqual(0, result.StartError?.Code ?? 0);
+        Assert.False(string.IsNullOrWhiteSpace(result.StartError?.Message));
+    }
+
+    [Fact]
     public void TheFirstCodexExeOnThePathIsUsedAndNothingElse()
     {
         var second = Path.Combine(_temp.Path, "second");

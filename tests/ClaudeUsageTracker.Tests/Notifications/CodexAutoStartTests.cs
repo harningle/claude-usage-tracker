@@ -407,6 +407,23 @@ public sealed class CodexAutoStartTests : IDisposable
         Assert.Single(_notifier.Shown);
     }
 
+    [Fact]
+    public async Task ACliWindowsDidNotStartIsNotReportedAsMissing()
+    {
+        // As on 2026-11-16: codex.exe was on PATH, but the run said it was not found.
+        _run = new CodexExecResult(CodexExecOutcome.StartFailed, null, new CodexStartError(@"C:\Codex\bin\codex.exe", 5, "Access is denied."));
+        var service = Service();
+
+        await TwoChecks(service);
+
+        Assert.EndsWith(@"The Codex CLI was found at C:\Codex\bin\codex.exe, but Windows did not start it. Error 5: Access is denied.",
+            Assert.Single(_notifier.Shown).Body, StringComparison.Ordinal);
+        // The log keeps the error code, never the path or Windows' text.
+        Assert.Contains("\"errorCategory\":\"startFailed:5\"", LogText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Codex\\\\bin", LogText, StringComparison.Ordinal);
+        Assert.DoesNotContain("denied", LogText, StringComparison.Ordinal);
+    }
+
     /// <summary>A polling loop's fresh result at the given time, at 0 %: of a window that has not started, unless its reset time is given.</summary>
     private ProfileUsageState PolledAt(DateTimeOffset at, DateTimeOffset? reset = null) => new()
     {
