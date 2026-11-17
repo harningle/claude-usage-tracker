@@ -410,7 +410,7 @@ public sealed class CodexAutoStartTests : IDisposable
     [Fact]
     public async Task ACliWindowsDidNotStartIsNotReportedAsMissing()
     {
-        // As on 2026-11-16: codex.exe was on PATH, but the run said it was not found.
+        // A codex.exe that was found but that Windows did not start is not reported as missing from PATH.
         _run = new CodexExecResult(CodexExecOutcome.StartFailed, null, new CodexStartError(@"C:\Codex\bin\codex.exe", 5, "Access is denied."));
         var service = Service();
 

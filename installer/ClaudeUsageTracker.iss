@@ -45,6 +45,14 @@ VersionInfoProductTextVersion={#AppVersion}
 ; %LOCALAPPDATA%\ClaudeUsageTracker, which this installer never touches. The uninstaller deletes that folder
 ; only when asked to ([Code] below).
 PrivilegesRequired=lowest
+; Inno Setup 6.7.0 and later enable Windows' RedirectionGuard on Setup by default, and a Setup that runs without
+; elevation passes it on to what it starts, the tracker from the final page included (6.7.4 and 7.1.1 fixed this
+; only for elevated installs). A tracker started so cannot follow junctions that a user made, such as those of the
+; Codex CLI's standalone install, so its Codex auto-start found no codex.exe (2026-11-16). Setup runs as the user
+; here, so the mitigation guards no privilege boundary; the check keeps older compilers, which lack the directive.
+#if Ver >= EncodeVer(6, 7, 0)
+RedirectionGuard=no
+#endif
 DefaultDirName={autopf}\ClaudeUsageTracker
 DefaultGroupName=Claude Usage Tracker
 DisableProgramGroupPage=yes
