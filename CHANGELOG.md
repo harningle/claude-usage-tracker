@@ -6,13 +6,17 @@ The port follows upstream [Claude Usage Tracker](https://github.com/hamed-elfayo
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-11-23
+
+The first beta since the repository went public, and the first that can tell you about the next one: press Check for Updates on the About page, or switch on its daily check. Install it over 1.0.0-beta.1 or beta.2; the installer closes the tracker, keeps its data and offers to start it again on its final page.
+
 ### Added
 
 - **Check for Updates on the About page.** It asks GitHub's list of this app's releases and, when a newer one exists, shows its version with a link to its release page. A switch below it, off by default, makes the check once a day and posts one Windows notification per newer release, which opens the release page when clicked. Nothing is downloaded or installed: install a newer release as before. A beta build is offered newer betas and stable releases, a stable build only stable ones. The request carries no login or cookie and appears in Debug Tools' request log ([docs/parity.md](docs/parity.md), difference 55).
 
 ### Fixed
 
-- **A tracker started from the installer's final page could not run the Codex auto-start.** Inno Setup 6.7 passes Windows' RedirectionGuard on to the programs a per-user Setup starts, and a process under it cannot follow junctions that a user created, such as the folders of the Codex CLI's standalone install. The auto-start therefore reported "The Codex CLI (codex.exe) was not found on PATH" until the tracker was next started another way. The installer no longer enables RedirectionGuard: it runs without administrator rights, so the mitigation guarded nothing. If you installed 1.0.0-beta.1 or beta.2 and started the tracker from the final page, start it once from the Start menu or sign in again.
+- **A tracker started from the installer's final page could not run the Codex auto-start.** Inno Setup 6.7 passes Windows' RedirectionGuard on to the programs a per-user Setup starts, and a process under it cannot follow junctions that a user created, such as the folders of the Codex CLI's standalone install. The auto-start therefore reported "The Codex CLI (codex.exe) was not found on PATH" until the tracker was next started another way. The installer no longer enables RedirectionGuard: it runs without administrator rights, so the mitigation guarded nothing. Installing this version is enough, as it replaces the affected tracker.
 - **A `codex.exe` that Windows refused to start was also reported as "not found on PATH".** The Codex auto-start now names the `codex.exe` it found and gives Windows' error, and the request log keeps the error code (`startFailed:<code>`).
 - **The multi-profile Bars icon hid the session's time marker until the usage filled a pixel of the bar.** A window opened by the session auto-start, or barely used, therefore showed no marker. Upstream draws it at any usage, and so does the port now. The multi-profile Bars and Circles icons also gain upstream's time marker for the week, in its pace colour, which the port had left out.
 - **The multi-profile Circles icon had its rings the wrong way round.** Upstream draws the session as the outer, thicker ring and the week inside it; the port drew the week outside, with both rings equally thick. It now follows upstream.
